@@ -3,19 +3,113 @@
 [![Paseo](https://img.shields.io/badge/Paseo-%E2%89%A5%200.7.0-8A63D2?style=for-the-badge)](https://paseo.sh)
 [![License](https://img.shields.io/badge/license-MIT-2563eb?style=for-the-badge)](LICENSE)
 
-A trusted local [Paseo](https://paseo.sh) plugin and a Chrome extension that start a Paseo agent
-on the pull request you are already looking at.
+Start a [Paseo](https://paseo.sh) agent on the pull request you are already looking at.
 
 ![The Send to Paseo composer open on a live github.com pull request — rails/rails #58627, state Open, merging Shopify:actionpack-singleton-class-attrs into rails:main — with the button anchored in GitHub's own PR header action row beside Code, and the popover below it showing the resolved target workspace, the target picker, the typed instruction "Fix the flaky test in this PR", the Provider and Mode selects, and the Cmd-Enter / Esc footer with Send enabled](docs/screenshots/hero-github-pr-popover.png)
 
-Click it, type an instruction — "Fix the flaky test in this PR" — and a **new** agent starts in the
-workspace that belongs to that PR's branch, creating a worktree checked out to the PR if none
-exists. Works on Graphite and on github.com.
+Press **Send to Paseo** on any pull request, type what you want done, and a new agent starts in the
+workspace for that PR — with a worktree checked out to the PR if you don't already have one. Works
+on Graphite and on github.com.
+
+- **No setup per pull request.** It works out which of your workspaces belongs to the PR you are
+  looking at, and offers to create one if none does.
+- **One workspace per stack is enough.** Send from PR #4 while that worktree sits on PR #7's
+  branch and it resolves to the workspace you already have, then tells the agent which branch the
+  change belongs on.
+- **Nothing happens silently.** The composer shows the target it picked and every alternative, and
+  waits for you to press **Send**. Every send starts a *new* agent; nothing existing is touched.
+- **Your model and permission mode, per send.** Defaults follow one of your saved Paseo agent
+  profiles, and both are overridable in the composer before you send.
+
+## Install
+
+Requires Paseo 0.7.0 or newer with plugins enabled, and `git`. No Node, no npm, no build step.
+The GitHub CLI (`gh`) is optional; "Without the GitHub CLI" below says what changes without it.
+
+Install the plugin:
+
+```sh
+paseo plugin add tomgrin10/send-to-paseo --path plugin
+paseo plugin ls        # send-to-paseo must read `running` and `yes`
+```
+
+If plugins are disabled, turn them on in **Settings → Plugins** first. To update later:
+`paseo plugin update send-to-paseo`.
+
+Then the extension. Download `send-to-paseo-extension.zip` from the
+[latest release](https://github.com/tomgrin10/send-to-paseo/releases/latest) and unzip it. Chrome
+will not install an extension from a file outside the Web Store, so it is loaded unpacked — three
+clicks, and it survives browser restarts. Open your browser's extensions page:
+
+- Arc — `arc://extensions`
+- Chrome — `chrome://extensions`
+- Edge — `edge://extensions`
+- Brave — `brave://extensions`
+
+Turn on **Developer mode**, press **Load unpacked**, and select the unzipped folder — the one
+holding `manifest.json`. Keep it somewhere permanent: the extension ID comes from that path, so
+the pairing token survives reloads as long as the folder stays put.
+
+Last, pair the two halves:
+
+1. In Paseo, open **Send to Paseo** in the sidebar and copy the **pairing token**.
+2. Click the extension's toolbar icon, or **Details → Extension options**.
+3. Paste the token and press **Test connection**.
+4. Open a pull request on Graphite or GitHub and press **Send to Paseo**.
+
+That is the whole install. There is no config file to edit on either side.
+
+<details>
+<summary>Building from source instead</summary>
+
+Only needed to work on the extension or run the test suite. Requires Node and npm.
+
+```sh
+git clone https://github.com/tomgrin10/send-to-paseo
+cd send-to-paseo/extension
+npm install
+npm run build          # -> extension/dist, the load-unpacked root
+```
+
+Load `extension/dist` instead of the unzipped release. For the plugin, `paseo plugin add
+/absolute/path/to/send-to-paseo/plugin` installs a checkout directly; `npm install` inside
+`plugin/` is only for `npm run typecheck`, never for runtime. The end-to-end suite is
+`node test/e2e.mjs` from the repository root — it runs headless, and `STP_HEADED=1` shows the
+browser. [`AGENTS.md`](AGENTS.md) has the full verification procedure.
+
+</details>
+
+## Where it shows up
+
+- **A button on the pull-request page**, in the PR header next to the site's own actions. It
+  re-targets as you navigate between PRs, so a stale PR number can never be sent.
+- **The composer popover**, with the resolved target, every alternative, and provider and mode
+  pickers. ⌘↵ sends, Esc closes.
+- **The Send to Paseo surface** in Paseo's sidebar and under ⌘K: bridge status, the pairing token,
+  the port, which agent profile to follow, the default permission mode, a **Requirements** card,
+  and your last 20 sends.
+- **The extension's options page**: bridge URL, token, and **Test connection**.
+
+## How it works
+
+The page URL is the only source of PR identity. Nothing is read from the page except stack sibling
+links, and those are only a hint — everything else is resolved on the daemon side:
+
+1. `owner/repo` → the matching Paseo project
+2. PR number → head branch, title and base branch, via `gh`
+3. The PR's **stack** — a Graphite stack is a real `base` → `head` chain, so one `gh pr list`
+   rebuilds it and a walk from this PR finds every sibling, up and down
+4. Each workspace in that project → its current branch
+5. Candidates are ranked: **exact** branch match, then another branch in the same **stack**
+   (nearest first), then any workspace in the **project**, then a synthetic **create** option
+
+The default target is the exact match, else the nearest stack workspace, else create. When the
+target sits on a sibling branch, the composer says so and the agent's prompt names the branch the
+change belongs on. Paseo does the hard part itself — it can already check a pull request out into
+a managed worktree, so there is no hand-rolled git anywhere in this project.
 
 The extension never talks to the Paseo daemon. It talks only to the plugin's local HTTP bridge on
-`127.0.0.1:7788`, over one frozen contract, [`CONTRACT.md`](CONTRACT.md). The plugin reaches Paseo
-through the supported SDK, and Paseo does the hard part itself: it can already check a pull
-request out into a managed worktree, so there is no hand-rolled git anywhere in this project.
+`127.0.0.1:7788`, over one frozen contract, [`CONTRACT.md`](CONTRACT.md).
 
 <details>
 <summary>Why a plugin, and not the extension talking to the daemon</summary>
@@ -30,117 +124,26 @@ $ curl -H "Origin: https://app.graphite.com" .../ws
 HTTP/1.1 403 Forbidden — Origin not allowed
 ```
 
-So the alternative would mean editing the user's daemon config *and* reimplementing an
-undocumented wire protocol inside a Chrome extension. Plugin backend code is full Node, so it
-runs a small versioned HTTP bridge instead. [`PLAN.md`](PLAN.md) records the whole investigation.
+So the alternative would mean editing your daemon config *and* reimplementing an undocumented wire
+protocol inside a Chrome extension. Plugin backend code is full Node, so it runs a small versioned
+HTTP bridge instead. [`PLAN.md`](PLAN.md) records the whole investigation.
 
 </details>
-
-### Where it shows up
-
-- **A button on the pull-request page.** On Graphite it goes into the PR header action row, just
-  before **Review Changes**; on GitHub it is appended to the header action row, right of **Code**,
-  taking its colours from GitHub's own Primer tokens so it tracks light, dark and any custom
-  theme. Both sites ship CSS-module class names whose hashes rotate on every deploy, so every
-  selector is a contains-match and each adapter has a fallback rung plus a floating button of last
-  resort. Navigating between PRs re-targets the button; a stale PR number can never be sent.
-- **The composer popover.** It opens with the resolved target already worked out, shows every
-  alternative workspace, and requires an explicit **Send** — it never creates anything silently.
-  Provider and permission mode are selectable per send, and unattended modes are listed rather
-  than hidden, marked with a warning. ⌘↵ sends, Esc closes.
-- **The Send to Paseo surface**, in Paseo's sidebar and under ⌘K. Bridge status, the pairing
-  token, the port, the default model, the agent profile to follow, the default permission mode, a
-  **Requirements** card, and the last 20 sends.
-- **The extension's options page.** Bridge URL, token, **Test connection**, and a default provider
-  list fetched from the bridge itself.
-
-## Install
-
-Requires Paseo 0.7.0 or newer with plugins enabled, and `git`. The GitHub CLI (`gh`) is
-**optional**: without it sending still works, because Paseo checks the pull request out using its
-own forge credentials — you lose the PR title, the branch names and stack detection, and the
-target picker says so. Nothing here needs Node, npm, or a build step. Full requirements and
-troubleshooting are in [`plugin/README.md`](plugin/README.md#requirements).
-
-Install the plugin — it is the half that talks to Paseo:
-
-```sh
-paseo plugin add tomgrin10/send-to-paseo --path plugin
-paseo plugin ls        # send-to-paseo must read `running` and `yes`
-```
-
-Paseo clones the repository, compiles the plugin itself, and supplies every runtime module it
-imports. The plugin has no runtime dependencies, so no package manager ever runs on your daemon.
-If plugins are disabled, turn them on in **Settings → Plugins** first — that is a daemon config
-change and needs `paseo reload`, not a restart. To update later: `paseo plugin update send-to-paseo`.
-
-Then the extension. Download `send-to-paseo-extension.zip` from the
-[latest release](https://github.com/tomgrin10/send-to-paseo/releases/latest) and unzip it.
-Chrome will not install an extension from a file outside the Web Store, so it is loaded unpacked —
-which is three clicks and survives browser restarts. Open your browser's extensions page:
-
-- Arc — `arc://extensions`
-- Chrome — `chrome://extensions`
-- Edge — `edge://extensions`
-- Brave — `brave://extensions`
-
-Turn on **Developer mode**, press **Load unpacked**, and select the unzipped folder — the one
-holding `manifest.json`. Keep it somewhere permanent: the extension ID is derived from that path,
-so the pairing token survives reloads for as long as you leave the folder where it is.
-
-Last, pair the two halves:
-
-1. In Paseo, open **Send to Paseo** in the sidebar and copy the **pairing token**.
-2. Click the extension's toolbar icon, or **Details → Extension options**.
-3. Paste the token and press **Test connection**. It distinguishes paired, not paired yet, token
-   rejected, bridge unreachable, daemon unreachable and update required, so a failure tells you
-   which thing is wrong.
-4. Open a pull request on Graphite or GitHub and press **Send to Paseo**.
-
-That is the whole install. There is no config file to edit on either side.
 
 <details>
-<summary>Building from source instead</summary>
+<summary>Without the GitHub CLI</summary>
 
-Only needed to develop the extension or to run the test suite. Requires Node and npm.
+Steps 2 and 3 above are the ones that need `gh`. Without it, sending still works — Paseo checks
+the pull request out with its own forge credentials, which needs only the PR number. What you lose:
+the PR title, the branch names, and stack detection, so every workspace ranks as "same project"
+and the default becomes **create**. The target picker names the reason, the agent's prompt omits
+the title and branch rather than guessing them, and `paseo plugin logs send-to-paseo` prints one
+line per dependency at every start.
 
-```sh
-git clone https://github.com/tomgrin10/send-to-paseo
-cd send-to-paseo/extension
-npm install
-npm run build          # -> extension/dist, the load-unpacked root
-```
-
-Load `extension/dist` instead of the unzipped release. For the plugin, `paseo plugin add
-/absolute/path/to/send-to-paseo/plugin` installs a checkout directly, and `npm install` inside
-`plugin/` is needed only for `npm run typecheck` — never at runtime. The end-to-end suite is
-`node test/e2e.mjs` from the repository root; it runs headless, and `STP_HEADED=1` shows the
-browser. [`AGENTS.md`](AGENTS.md) has the full verification procedure.
+`git` is required. Per-platform install commands and the full requirements are in
+[`plugin/README.md`](plugin/README.md#requirements).
 
 </details>
-
-## How a PR maps to a workspace
-
-The page URL is the only source of PR identity — `/github/pr/{owner}/{repo}/{number}/{slug}` on
-Graphite, `/{owner}/{repo}/pull/{number}` on GitHub. Nothing is read from the DOM except stack
-sibling links, and those are a hint. Everything else is resolved on the daemon side:
-
-1. `owner/repo` → Paseo project `remote:github.com/{owner}/{repo}`, falling back to a project
-   whose `origin` remote parses to the same repository
-2. PR number → head branch, title and base branch, via `gh`
-3. The PR's **stack**, from GitHub itself — a Graphite stack is a real `base` → `head` chain, so
-   one `gh pr list` rebuilds it and a walk from this PR finds every sibling, up and down
-4. Each workspace in that project → its branch, from the daemon's own workspace descriptor or
-   `git rev-parse --abbrev-ref HEAD`
-5. Candidates are ranked: **exact** branch match, then another branch in the same **stack**
-   (nearest first), then any workspace in the **project**, then a synthetic **create** option
-
-The default target is the exact match, else the nearest stack workspace, else create — so keeping
-**one workspace per stack** works: open PR #4 while that worktree sits on PR #7's branch and it
-resolves to the workspace you already have. When the target is on a sibling branch, the popover
-says so and the agent's prompt names the PR branch to check out. Steps 2 and 3 are the ones that
-need `gh`; without it they are skipped, the request still succeeds, and the prompt omits the
-title and branch lines rather than guessing them.
 
 ## Security
 
@@ -162,22 +165,24 @@ The token lives only in the extension's service worker, never in the content scr
 never adjacent to Graphite's or GitHub's JavaScript. Plugins are trusted, unsandboxed code and
 this one listens on a socket: read the source before installing it.
 
-## Verification
+## Troubleshooting
 
-Nothing here is claimed without evidence. Both halves keep an honest log, failures recorded as
-failures:
+- **No button on a PR page.** Check the URL matches `app.graphite.com/github/pr/…` (or `.dev`) or
+  `github.com/{owner}/{repo}/pull/{n}`. Then the browser's extensions page → **Errors**, and the
+  page console for `[send-to-paseo]` warnings.
+- **"Can't reach the Paseo bridge".** `paseo plugin ls` should show `send-to-paseo` as `running`;
+  `paseo plugin logs send-to-paseo` says why if it is not.
+- **"Not paired with Paseo" or "Token rejected".** Re-copy the token from the Paseo surface. The
+  two are deliberately different messages.
+- **"Update required".** The plugin and extension are on different contract versions and sends are
+  blocked on purpose. Update the older side.
+- **No PR title, and everything ranks as "same project".** `gh` is missing or not signed in.
+- **Typing triggers the host page's keyboard shortcuts.** You are on a stale build. Reload the
+  extension, then the tab.
 
-- [`plugin/VERIFICATION.md`](plugin/VERIFICATION.md) — real curl output, every security
-  rejection, the dependency audit against a doctored `PATH`, and real agent creations (including
-  `checkout-pr`), each cleaned up afterwards
-- [`extension/VERIFICATION.md`](extension/VERIFICATION.md) — 44 end-to-end cases with the
-  extension genuinely loaded in Chromium, against seven captured fixtures including
-  **hash-rotated** Graphite and GitHub pages that prove the anchor ladders survive a deploy
-- [`docs/screenshots/`](docs/screenshots/) — 43 indexed screenshots from real Chromium runs, no
-  mockups and nothing hand-edited. 39 are regenerated from the captured fixtures by
-  `node test/e2e.mjs`; four are live captures against the real Graphite and github.com apps,
-  including the two images above. The index names, per image, which bridge answered and what
-  was shimmed
+Longer tables, keyed on exact message text, are in
+[`plugin/README.md`](plugin/README.md#troubleshooting) and
+[`extension/README.md`](extension/README.md#troubleshooting).
 
 ## Docs
 
@@ -193,34 +198,15 @@ failures:
   [`test/fixtures/github-dom-notes.md`](test/fixtures/github-dom-notes.md) — measured page
   structure for both sites, and the class-name hash hazard they share.
 
-## Troubleshooting
-
-- **No button on a PR page.** Check the URL matches `app.graphite.com/github/pr/…` (or
-  `.dev`) or `github.com/{owner}/{repo}/pull/{n}`. Then the browser's extensions page →
-  **Errors**, and the page console for `[send-to-paseo]` warnings.
-- **"Can't reach the Paseo bridge".** `paseo plugin ls` should show `send-to-paseo` as `running`;
-  `paseo plugin logs send-to-paseo` says why if it is not.
-- **"Not paired with Paseo" or "Token rejected".** Re-copy the token from the Paseo surface. The
-  two are deliberately different messages.
-- **"Update required".** The plugin and extension are on different contract versions and sends
-  are blocked on purpose. Update the older side.
-- **No PR title, and everything ranks as "same project".** `gh` is missing or not signed in. The
-  target picker names the reason and `paseo plugin logs send-to-paseo` prints one line per
-  dependency at every start.
-- **Typing triggers the host page's keyboard shortcuts.** You are on a stale build. Rebuild,
-  reload the extension, reload the tab.
-
-Longer tables, keyed on exact message text, are in
-[`plugin/README.md`](plugin/README.md#troubleshooting) and
-[`extension/README.md`](extension/README.md#troubleshooting).
+Nothing here is claimed without evidence: [`plugin/VERIFICATION.md`](plugin/VERIFICATION.md) and
+[`extension/VERIFICATION.md`](extension/VERIFICATION.md) record real output for both halves,
+failures included, behind 44 end-to-end cases with the extension genuinely loaded in Chromium.
+[`docs/screenshots/`](docs/screenshots/) is indexed and names, per image, which bridge answered it.
 
 ## Credits
 
-The extension's icon is the Paseo brand mark, reproduced from Paseo's own `butterfly-white.svg`
-to identify Paseo. Paseo is Apache-2.0, © 2025-present Mohamed Boudra. The mark is stored as SVG
-path data and rasterised at build time, so no icon binaries are checked in — the only binaries
-in this repository are the screenshots under `docs/screenshots/`. The extension's own in-page UI
-keeps its indigo accent; only the icon is Paseo's.
+The extension's icon is the Paseo brand mark, reproduced from Paseo's own `butterfly-white.svg` to
+identify Paseo. Paseo is Apache-2.0, © 2025-present Mohamed Boudra.
 
 ## License
 
