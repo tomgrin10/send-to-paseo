@@ -9,17 +9,17 @@ Start a [Paseo](https://paseo.sh) agent on the pull request you are already look
 
 Press **Send to Paseo** on any pull request, type what you want done, and a new agent starts in the
 workspace for that PR — with a worktree checked out to the PR if you don't already have one. Works
-on Graphite and on github.com.
+on github.com and on Graphite.
 
 - **No setup per pull request.** It works out which of your workspaces belongs to the PR you are
   looking at, and offers to create one if none does.
-- **One workspace per stack is enough.** Send from PR #4 while that worktree sits on PR #7's
-  branch and it resolves to the workspace you already have, then tells the agent which branch the
-  change belongs on.
 - **Nothing happens silently.** The composer shows the target it picked and every alternative, and
   waits for you to press **Send**. Every send starts a *new* agent; nothing existing is touched.
 - **Your model and permission mode, per send.** Defaults follow one of your saved Paseo agent
   profiles, and both are overridable in the composer before you send.
+- **Stacked pull requests, handled.** Send from PR #4 while that worktree sits on PR #7's branch
+  and it resolves to the workspace you already have, then tells the agent which branch the change
+  belongs on — so one workspace per stack is enough.
 
 ## Install
 
@@ -41,10 +41,10 @@ Then the extension. Download `send-to-paseo-extension.zip` from the
 will not install an extension from a file outside the Web Store, so it is loaded unpacked — three
 clicks, and it survives browser restarts. Open your browser's extensions page:
 
-- Arc — `arc://extensions`
 - Chrome — `chrome://extensions`
 - Edge — `edge://extensions`
 - Brave — `brave://extensions`
+- Arc — `arc://extensions`
 
 Turn on **Developer mode**, press **Load unpacked**, and select the unzipped folder — the one
 holding `manifest.json`. Keep it somewhere permanent: the extension ID comes from that path, so
@@ -55,7 +55,7 @@ Last, pair the two halves:
 1. In Paseo, open **Send to Paseo** in the sidebar and copy the **pairing token**.
 2. Click the extension's toolbar icon, or **Details → Extension options**.
 3. Paste the token and press **Test connection**.
-4. Open a pull request on Graphite or GitHub and press **Send to Paseo**.
+4. Open a pull request on GitHub or Graphite and press **Send to Paseo**.
 
 That is the whole install. There is no config file to edit on either side.
 
@@ -97,8 +97,9 @@ links, and those are only a hint — everything else is resolved on the daemon s
 
 1. `owner/repo` → the matching Paseo project
 2. PR number → head branch, title and base branch, via `gh`
-3. The PR's **stack** — a Graphite stack is a real `base` → `head` chain, so one `gh pr list`
-   rebuilds it and a walk from this PR finds every sibling, up and down
+3. The PR's **stack** — stacked pull requests are a real `base` → `head` chain on GitHub
+   (including the ones Graphite creates), so one `gh pr list` rebuilds it and a walk from this PR
+   finds every sibling, up and down
 4. Each workspace in that project → its current branch
 5. Candidates are ranked: **exact** branch match, then another branch in the same **stack**
    (nearest first), then any workspace in the **project**, then a synthetic **create** option
@@ -162,14 +163,14 @@ privilege boundary:
   in any log line
 
 The token lives only in the extension's service worker, never in the content script, so it is
-never adjacent to Graphite's or GitHub's JavaScript. Plugins are trusted, unsandboxed code and
+never adjacent to GitHub's or Graphite's JavaScript. Plugins are trusted, unsandboxed code and
 this one listens on a socket: read the source before installing it.
 
 ## Troubleshooting
 
-- **No button on a PR page.** Check the URL matches `app.graphite.com/github/pr/…` (or `.dev`) or
-  `github.com/{owner}/{repo}/pull/{n}`. Then the browser's extensions page → **Errors**, and the
-  page console for `[send-to-paseo]` warnings.
+- **No button on a PR page.** Check the URL matches `github.com/{owner}/{repo}/pull/{n}` or
+  `app.graphite.com/github/pr/…` (or `.dev`). Then the browser's extensions page → **Errors**, and
+  the page console for `[send-to-paseo]` warnings.
 - **"Can't reach the Paseo bridge".** `paseo plugin ls` should show `send-to-paseo` as `running`;
   `paseo plugin logs send-to-paseo` says why if it is not.
 - **"Not paired with Paseo" or "Token rejected".** Re-copy the token from the Paseo surface. The
@@ -194,8 +195,8 @@ Longer tables, keyed on exact message text, are in
 - [`PLAN.md`](PLAN.md) — the design and the research behind it. Read before changing the
   architecture; several plausible alternatives were tested and rejected.
 - [`AGENTS.md`](AGENTS.md) — conventions and hard-won facts, so they don't get re-derived.
-- [`test/fixtures/graphite-dom-notes.md`](test/fixtures/graphite-dom-notes.md) and
-  [`test/fixtures/github-dom-notes.md`](test/fixtures/github-dom-notes.md) — measured page
+- [`test/fixtures/github-dom-notes.md`](test/fixtures/github-dom-notes.md) and
+  [`test/fixtures/graphite-dom-notes.md`](test/fixtures/graphite-dom-notes.md) — measured page
   structure for both sites, and the class-name hash hazard they share.
 
 Nothing here is claimed without evidence: [`plugin/VERIFICATION.md`](plugin/VERIFICATION.md) and
