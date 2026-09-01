@@ -25,38 +25,22 @@ on github.com and on Graphite.
 
 Requires Paseo 0.7.0 or newer with plugins enabled, and `git`.
 
-Install the plugin:
+**Plugin:**
 
 ```sh
 paseo plugin add tomgrin10/send-to-paseo --path plugin
 paseo plugin ls        # send-to-paseo must read `running` and `yes`
 ```
 
-If plugins are disabled, turn them on in **Settings → Plugins** first. To update later:
-`paseo plugin update send-to-paseo`.
+If plugins are disabled, turn them on in **Settings → Plugins** first.
 
-Then the extension. Download `send-to-paseo-extension.zip` from the
-[latest release](https://github.com/tomgrin10/send-to-paseo/releases/latest) and unzip it. Chrome
-will not install an extension from a file outside the Web Store, so it is loaded unpacked — three
-clicks, and it survives browser restarts. Open your browser's extensions page:
+**Extension:** download `send-to-paseo-extension.zip` from the
+[latest release](https://github.com/tomgrin10/send-to-paseo/releases/latest) and unzip it. Open
+`chrome://extensions` (or `edge://`, `brave://`, `arc://`), turn on **Developer mode**, press
+**Load unpacked**, and pick the unzipped folder.
 
-- Chrome — `chrome://extensions`
-- Edge — `edge://extensions`
-- Brave — `brave://extensions`
-- Arc — `arc://extensions`
-
-Turn on **Developer mode**, press **Load unpacked**, and select the unzipped folder — the one
-holding `manifest.json`. Keep it somewhere permanent: the extension ID comes from that path, so
-the pairing token survives reloads as long as the folder stays put.
-
-Last, pair the two halves:
-
-1. In Paseo, open **Send to Paseo** in the sidebar and copy the **pairing token**.
-2. Click the extension's toolbar icon, or **Details → Extension options**.
-3. Paste the token and press **Test connection**.
-4. Open a pull request on GitHub or Graphite and press **Send to Paseo**.
-
-That is the whole install. There is no config file to edit on either side.
+Keep that folder somewhere permanent — the extension ID comes from its path, and the pairing token
+is tied to the ID.
 
 <details>
 <summary>Building from source instead</summary>
@@ -77,6 +61,16 @@ Load `extension/dist` instead of the unzipped release. For the plugin, `paseo pl
 browser. [`AGENTS.md`](AGENTS.md) has the full verification procedure.
 
 </details>
+
+## Setup
+
+Pair the two halves once:
+
+1. In Paseo, open **Send to Paseo** in the sidebar and copy the **pairing token**.
+2. Click the extension's toolbar icon, or **Details → Extension options**.
+3. Paste the token and press **Test connection**.
+
+Then open a pull request and press **Send to Paseo**. There is no config file on either side.
 
 ## Where it shows up
 
