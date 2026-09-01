@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GIZ-1133 · gizmo-poc · Graphite [no-anchor fixture]</title>
+    <!--
+      FIXTURE: worst case. Graphite has restructured its page and BOTH rungs of
+      the anchor ladder are gone:
+
+        * no [class*="PullRequestPageHeader_prPageHeader"]
+        * no [class*="MetadataSection_prInfoGroup"]
+
+      The app wrapper and the stack links are still here, so the extension must
+      still parse the PR from the URL, still scrape stack siblings, and fall back
+      to a fixed-position floating button rather than disappearing.
+    -->
+    <style>
+      :root {
+        color-scheme: light dark;
+        --g-bg: #ffffff;
+        --g-bg-sub: #f7f8fa;
+        --g-fg: #14161a;
+        --g-muted: #6b7280;
+        --g-border: #e3e6ea;
+        --g-accent: #2563eb;
+        --g-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --g-bg: #0f1115;
+          --g-bg-sub: #161a20;
+          --g-fg: #e8eaed;
+          --g-muted: #9aa1ab;
+          --g-border: #262b33;
+          --g-accent: #60a5fa;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; background: var(--g-bg); color: var(--g-fg);
+        font: 400 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      .TopNav_topNav__pQ8vR {
+        display: flex; align-items: center; gap: 14px; height: 44px; padding: 0 16px;
+        border-bottom: 1px solid var(--g-border); background: var(--g-bg-sub);
+        font-size: 12.5px; color: var(--g-muted);
+      }
+      .TopNav_logo__hd82K { font-weight: 700; color: var(--g-fg); letter-spacing: -0.02em; }
+      .NewShell_banner__Ww81Q {
+        margin: 16px; padding: 12px 14px; border: 1px dashed var(--g-border);
+        border-radius: 8px; color: var(--g-muted); font-size: 12.5px;
+      }
+      .NewShell_body__Kd93P { display: grid; grid-template-columns: 268px 1fr; min-height: 420px; }
+      .StackPanel_stackPanel__aB3dE {
+        border-right: 1px solid var(--g-border); padding: 12px; background: var(--g-bg);
+      }
+      .StackPanel_stackHeading__Vv8Ye {
+        font: 600 10.5px/1 inherit; text-transform: uppercase; letter-spacing: 0.06em;
+        color: var(--g-muted); margin-bottom: 8px;
+      }
+      .StackPanel_stackRow__x9QpL {
+        display: flex; gap: 8px; align-items: baseline; padding: 5px 7px;
+        border-radius: 5px; color: inherit; text-decoration: none;
+      }
+      .StackPanel_stackRow__x9QpL[aria-current="page"] {
+        background: var(--g-bg-sub); box-shadow: inset 2px 0 0 var(--g-accent);
+      }
+      .StackPanel_stackNumber__Uh27B { font: 500 11px/1.4 var(--g-mono); color: var(--g-muted); }
+      .StackPanel_stackTitle__Qz3Lm { font-size: 12px; }
+      .NewShell_main__Tt71B { padding: 16px; color: var(--g-muted); font-size: 12.5px; }
+    </style>
+  </head>
+  <body>
+    <div data-testid="graphite-app-wrapper">
+      <nav class="TopNav_topNav__pQ8vR">
+        <span class="TopNav_logo__hd82K">Graphite</span>
+        <span>acmegizmos/gizmo-poc</span>
+        <span>·</span>
+        <span>Pull requests</span>
+      </nav>
+
+      <div class="NewShell_banner__Ww81Q">
+        This build of Graphite renders the PR header in a different component tree.
+        Neither <code>PullRequestPageHeader_prPageHeader</code> nor
+        <code>MetadataSection_prInfoGroup</code> exists on this page.
+      </div>
+
+      <div class="NewShell_body__Kd93P">
+        <aside class="StackPanel_stackPanel__aB3dE">
+          <div class="StackPanel_stackHeading__Vv8Ye">Stack · 3 of 9 (1 hidden)</div>
+          <a class="StackPanel_stackRow__x9QpL" href="/github/pr/acmegizmos/gizmo-poc/949/GIZ-1136-x">
+            <span class="StackPanel_stackNumber__Uh27B">#949</span>
+            <span class="StackPanel_stackTitle__Qz3Lm">GIZ-1136: Retirement #6</span>
+          </a>
+          <a class="StackPanel_stackRow__x9QpL" href="/github/pr/acmegizmos/gizmo-poc/948/GIZ-1132-x">
+            <span class="StackPanel_stackNumber__Uh27B">#948</span>
+            <span class="StackPanel_stackTitle__Qz3Lm">GIZ-1132: Extract seam</span>
+          </a>
+          <a class="StackPanel_stackRow__x9QpL" aria-current="page" href="/github/pr/acmegizmos/gizmo-poc/942/GIZ-1133-x">
+            <span class="StackPanel_stackNumber__Uh27B">#942</span>
+            <span class="StackPanel_stackTitle__Qz3Lm">GIZ-1133: Retirement #3</span>
+          </a>
+          <a class="StackPanel_stackRow__x9QpL" href="/github/pr/acmegizmos/gizmo-poc/941/GIZ-1132-x">
+            <span class="StackPanel_stackNumber__Uh27B">#941</span>
+            <span class="StackPanel_stackTitle__Qz3Lm">GIZ-1132: Retirement #1</span>
+          </a>
+        </aside>
+        <main class="NewShell_main__Tt71B">
+          Diff content omitted in this fixture.
+        </main>
+      </div>
+    </div>
+  </body>
+</html>

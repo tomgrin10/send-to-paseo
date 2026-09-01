@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GIZ-1133: Legacy tally engine retirement #3 · gizmo-poc · Graphite</title>
+    <!--
+      FIXTURE: faithful reproduction of the live Graphite PR page structure
+      captured in test/fixtures/graphite-dom-notes.md.
+
+      Every class name carries a CSS-module hash suffix exactly as Graphite ships
+      them. test/fixtures/rotate.mjs regenerates graphite-pr-rotated.html from
+      this file with every hash changed, which is what proves the extension's
+      [class*="Prefix_name"] strategy survives a Graphite deploy.
+
+      Do not "tidy" the class names. They are the point.
+    -->
+    <style>
+      :root {
+        color-scheme: light dark;
+        --g-bg: #ffffff;
+        --g-bg-sub: #f7f8fa;
+        --g-fg: #14161a;
+        --g-muted: #6b7280;
+        --g-border: #e3e6ea;
+        --g-border-strong: #cfd4da;
+        --g-accent: #2563eb;
+        --g-emphasis: #16a34a;
+        --g-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --g-bg: #0f1115;
+          --g-bg-sub: #161a20;
+          --g-fg: #e8eaed;
+          --g-muted: #9aa1ab;
+          --g-border: #262b33;
+          --g-border-strong: #3a414b;
+          --g-accent: #60a5fa;
+          --g-emphasis: #4ade80;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--g-bg);
+        color: var(--g-fg);
+        font: 400 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .TopNav_topNav__pQ8vR {
+        display: flex; align-items: center; gap: 14px;
+        height: 44px; padding: 0 16px;
+        border-bottom: 1px solid var(--g-border);
+        background: var(--g-bg-sub);
+        font-size: 12.5px; color: var(--g-muted);
+      }
+      .TopNav_logo__hd82K { font-weight: 700; color: var(--g-fg); letter-spacing: -0.02em; }
+
+      .PullRequestPageHeader_prPageHeader__NRgNb {
+        display: flex; align-items: center; justify-content: space-between; gap: 16px;
+        position: sticky; top: 0; z-index: 20;
+        padding: 10px 16px;
+        background: var(--g-bg);
+        border-bottom: 1px solid var(--g-border);
+      }
+      .PullRequestPageHeader_prTitleGroup__mM4Tz { min-width: 0; display: grid; gap: 2px; }
+      .PullRequestPageHeader_prTitle__k7Fda {
+        font: 600 14px/1.35 inherit;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      .PullRequestPageHeader_prSubtitle__Ls03W { color: var(--g-muted); font-size: 12px; }
+
+      .utilities_flexShrink0__bTHA_ { flex-shrink: 0; }
+      .utilities_flexAlignCenter__YBoRN { display: flex; align-items: center; }
+      .utilities_flexGrow1__SIc3P { flex-grow: 1; }
+      .utilities_flex__w_5SS { display: flex; }
+      .utilities_flex1__pd1WH { flex: 1; }
+      .styles_gap__s__zuWdb { gap: 6px; }
+      .utilities_textCode__NwGum { font-family: var(--g-mono); }
+
+      .Button_gdsButton__SadwL {
+        display: inline-flex; align-items: center; gap: 5px;
+        height: 28px; padding: 0 10px; margin: 0;
+        font: 500 12.5px/1 inherit;
+        color: var(--g-fg); background: var(--g-bg);
+        border: 1px solid var(--g-border-strong); border-radius: 6px;
+        cursor: pointer; white-space: nowrap;
+      }
+      .Button_gdsButton__SadwL:hover { background: var(--g-bg-sub); }
+      .Button_gdsIconButton__wdKAF { width: 28px; padding: 0; justify-content: center; }
+      .Button_gdsButton__SadwL[data-kind="emphasis"][data-priority="primary"] {
+        background: var(--g-emphasis); border-color: transparent; color: #08210f; font-weight: 600;
+      }
+      .Separator_gdsSeparator__1GQ43 {
+        width: 1px; height: 18px; margin: 0 2px; border: 0;
+        background: var(--g-border-strong);
+      }
+      .SplitButton_splitButton__BmDKa { display: flex; }
+      .SplitButton_mainAction__OKuY5 { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+      .SplitButton_menuAction__Nn41C {
+        border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: 0; width: 22px; padding: 0;
+        justify-content: center;
+      }
+
+      .MetadataSection_metadataSection__k2Vhd {
+        padding: 12px 16px; border-bottom: 1px solid var(--g-border); background: var(--g-bg-sub);
+      }
+      .MetadataSection_prInfoGroup__Q7wZ1 {
+        display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      }
+      .MetadataSection_branchMetadata__ffkUY { display: flex; align-items: center; gap: 6px; }
+      .BranchPair_gds-branch-pair__CBYwJ { display: flex; align-items: center; gap: 6px; }
+      .BranchPair_gds-branch-name__ZuvL7 {
+        font: 500 11.5px/1 var(--g-mono);
+        background: var(--g-bg); color: var(--g-fg);
+        border: 1px solid var(--g-border); border-radius: 5px;
+        padding: 4px 7px; cursor: pointer;
+      }
+      .MetadataSection_fileCounts__Yg1pZ { color: var(--g-muted); font-size: 12px; }
+      .MetadataSection_fileCounts__Yg1pZ .add { color: var(--g-emphasis); }
+      .MetadataSection_fileCounts__Yg1pZ .del { color: #dc2626; }
+
+      .PageBody_pageBody__T4rmC { display: grid; grid-template-columns: 268px 1fr; min-height: 460px; }
+      .StackPanel_stackPanel__aB3dE {
+        border-right: 1px solid var(--g-border); padding: 12px; background: var(--g-bg);
+      }
+      .StackPanel_stackHeading__Vv8Ye {
+        font: 600 10.5px/1 inherit; text-transform: uppercase; letter-spacing: 0.06em;
+        color: var(--g-muted); margin-bottom: 8px;
+      }
+      .StackPanel_stackRow__x9QpL {
+        display: flex; gap: 8px; align-items: baseline;
+        padding: 5px 7px; border-radius: 5px;
+        color: inherit; text-decoration: none;
+      }
+      .StackPanel_stackRow__x9QpL:hover { background: var(--g-bg-sub); }
+      .StackPanel_stackRow__x9QpL[aria-current="page"] {
+        background: var(--g-bg-sub); box-shadow: inset 2px 0 0 var(--g-accent);
+      }
+      .StackPanel_stackNumber__Uh27B { font: 500 11px/1.4 var(--g-mono); color: var(--g-muted); }
+      .StackPanel_stackTitle__Qz3Lm {
+        font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      .StackPanel_hiddenNote__Wq0Bd { color: var(--g-muted); font-size: 11px; margin-top: 8px; }
+
+      .DiffWindow_diffWindow__Hj9Kn { padding: 16px; }
+      .DiffWindow_fileHeader__Rr2Ws {
+        font: 500 12px/1 var(--g-mono); color: var(--g-muted);
+        padding: 8px 10px; border: 1px solid var(--g-border);
+        border-radius: 6px 6px 0 0; background: var(--g-bg-sub);
+      }
+      .DiffWindow_hunk__Pd6Xa {
+        border: 1px solid var(--g-border); border-top: 0; border-radius: 0 0 6px 6px;
+        font: 400 11.5px/1.7 var(--g-mono); padding: 8px 10px; color: var(--g-muted);
+        white-space: pre;
+        overflow-x: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <div data-testid="graphite-app-wrapper">
+      <nav class="TopNav_topNav__pQ8vR">
+        <span class="TopNav_logo__hd82K">Graphite</span>
+        <span>acmegizmos/gizmo-poc</span>
+        <span>·</span>
+        <span>Pull requests</span>
+      </nav>
+
+      <!-- ===== PR header: the primary injection target ===================== -->
+      <div class="PullRequestPageHeader_prPageHeader__NRgNb" data-scrolled="false">
+        <div class="PullRequestPageHeader_prTitleGroup__mM4Tz">
+          <div class="PullRequestPageHeader_prTitle__k7Fda">
+            GIZ-1133: Legacy tally engine retirement #3 - Make the inventory-audit rule
+            widget-backed
+          </div>
+          <div class="PullRequestPageHeader_prSubtitle__Ls03W">
+            #942 opened by jdoe · 3 of 9 in stack
+          </div>
+        </div>
+
+        <div
+          class="utilities_flexShrink0__bTHA_ utilities_flexAlignCenter__YBoRN styles_gap__s__zuWdb"
+        >
+          <button class="Button_gdsButton__SadwL Button_gdsIconButton__wdKAF" aria-label="More actions">
+            ⋯
+          </button>
+          <button class="Button_gdsButton__SadwL ReviewChangesAction_reviewChangesAction__jRuEO">
+            <span class="Button_gdsButtonContents__5B2fy"
+              ><span class="Button_gdsButtonText__5kyh_"><span>Review Changes</span></span></span
+            >
+          </button>
+          <button class="Button_gdsButton__SadwL" data-kind="emphasis" data-priority="primary">
+            <span class="Button_gdsButtonContents__5B2fy"
+              ><span class="Button_gdsButtonText__5kyh_"><span>Not Ready to Merge</span></span></span
+            >
+          </button>
+          <hr role="separator" aria-orientation="vertical" class="Separator_gdsSeparator__1GQ43" />
+          <button
+            aria-label="Open comments sidebar (0 unresolved threads)"
+            class="Button_gdsButton__SadwL Button_gdsIconButton__wdKAF"
+          >
+            ☰
+          </button>
+          <div
+            class="SplitButton_splitButton__BmDKa AgentChatSidebarSelector_splitButton___pVbq utilities_flex__w_5SS"
+          >
+            <button class="Button_gdsButton__SadwL utilities_flex1__pd1WH SplitButton_mainAction__OKuY5">
+              Agent
+            </button>
+            <button
+              class="Button_gdsButton__SadwL SplitButton_menuAction__Nn41C"
+              aria-label="Agent options"
+            >
+              ▾
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== metadata: the second rung of the anchor ladder ============== -->
+      <div class="MetadataSection_metadataSection__k2Vhd">
+        <div class="MetadataSection_prInfoGroup__Q7wZ1">
+          <div
+            class="BranchPair_gds-branch-pair__CBYwJ MetadataSection_branchMetadata__ffkUY utilities_flexGrow1__SIc3P"
+          >
+            <button
+              class="BranchPair_gds-branch-name__ZuvL7 utilities_textCode__NwGum BranchMetadata_sourceBranchMenu__kq4Bg"
+            >
+              giz-1133-widget-backed-inventory-audit-rule
+            </button>
+            <span aria-hidden="true">→</span>
+            <button
+              aria-label="Base branch graphite-base/942, open actions"
+              class="BranchPair_gds-branch-name__ZuvL7 utilities_textCode__NwGum BranchSelector_branchSelector__Zk91U"
+            >
+              graphite-base/942
+            </button>
+          </div>
+          <span class="MetadataSection_fileCounts__Yg1pZ">
+            7 files · <span class="add">+184</span> <span class="del">−96</span>
+          </span>
+        </div>
+      </div>
+
+      <div class="PageBody_pageBody__T4rmC">
+        <!-- ===== stack panel: the one safe scrape (structural hrefs) ======= -->
+        <aside class="StackPanel_stackPanel__aB3dE">
+          <div class="StackPanel_stackHeading__Vv8Ye">Stack · 3 of 9 (1 hidden)</div>
+
+          <a class="StackPanel_stackRow__x9QpL" href="/github/pr/acmegizmos/gizmo-poc/949/GIZ-1136-legacy-tally-engine-retirement-6">
+            <span class="StackPanel_stackNumber__Uh27B">#949</span>
+            <span class="StackPanel_stackTitle__Qz3Lm">GIZ-1136: Retirement #6</span>
+          </a>
+          <a class="StackPanel_stackRow__x9QpL" href="/github/pr/acmegizmos/gizmo-poc/948/GIZ-1132-extract-widget-status-seam">
+            <span class="StackPanel_stackNumber__Uh27B">#948</span>
+            <span class="StackPanel_stackTitle__Qz3Lm">GIZ-1132: Extract seam</span>
+          </a>
+          <a class="StackPanel_stackRow__x9QpL" href="/github/pr/acmegizmos/gizmo-poc/947/GIZ-1132-legacy-tally-engine-retirement-5">
+            <span class="StackPanel_stackNumber__Uh27B">#947</span>
+            <span class="StackPanel_stackTitle__Qz3Lm">GIZ-1132: Retirement #5</span>
+          </a>
+          <a class="StackPanel_stackRow__x9QpL" href="/github/pr/acmegizmos/gizmo-poc/946/GIZ-1132-legacy-tally-engine-retirement-4">
+            <span class="StackPanel_stackNumber__Uh27B">#946</span>
+            <span class="StackPanel_stackTitle__Qz3Lm">GIZ-1132: Retirement #4</span>
+          </a>
+          <a class="StackPanel_stackRow__x9QpL" href="/github/pr/acmegizmos/gizmo-poc/945/GIZ-1132-legacy-tally-engine-retirement-2">
+            <span class="StackPanel_stackNumber__Uh27B">#945</span>
+            <span class="StackPanel_stackTitle__Qz3Lm">GIZ-1132: Retirement #2</span>
+          </a>
+          <a class="StackPanel_stackRow__x9QpL" href="/github/pr/acmegizmos/gizmo-poc/943/GIZ-1133-legacy-tally-engine-retirement-3b">
+            <span class="StackPanel_stackNumber__Uh27B">#943</span>
+            <span class="StackPanel_stackTitle__Qz3Lm">GIZ-1133: Retirement #3b</span>
+          </a>
+          <!-- The current PR is present in this list on the live app. The
+               extension MUST filter it out of stackPrNumbers. -->
+          <a class="StackPanel_stackRow__x9QpL" aria-current="page" href="/github/pr/acmegizmos/gizmo-poc/942/GIZ-1133-legacy-tally-engine-retirement-3">
+            <span class="StackPanel_stackNumber__Uh27B">#942</span>
+            <span class="StackPanel_stackTitle__Qz3Lm">GIZ-1133: Retirement #3</span>
+          </a>
+          <a class="StackPanel_stackRow__x9QpL" href="/github/pr/acmegizmos/gizmo-poc/941/GIZ-1132-legacy-tally-engine-retirement-1">
+            <span class="StackPanel_stackNumber__Uh27B">#941</span>
+            <span class="StackPanel_stackTitle__Qz3Lm">GIZ-1132: Retirement #1</span>
+          </a>
+
+          <div class="StackPanel_hiddenNote__Wq0Bd">1 collapsed entry not rendered</div>
+        </aside>
+
+        <main class="DiffWindow_diffWindow__Hj9Kn" data-testid="code-diff-window">
+          <div class="DiffWindow_fileHeader__Rr2Ws">src/rules/inventory-audit.ts</div>
+          <div class="DiffWindow_hunk__Pd6Xa">@@ -12,7 +12,9 @@ export class InventoryAuditRule {
+-  private readonly statuses = LegacyTallyCalculator.all();
++  private readonly widget = WidgetRegistry.get("inventory-audit");
++
+   evaluate(entry: Entry): AuditResult {
+-    return this.statuses.includes(entry.status)
++    return this.widget.matches(entry)
+       ? AuditResult.Flagged
+       : AuditResult.Clear;
+   }</div>
+        </main>
+      </div>
+    </div>
+  </body>
+</html>

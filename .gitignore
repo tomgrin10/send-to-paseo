@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+.playwright-mcp/
+test/.tmp-profile/
+dist-test/
+test/.chrome-profile/
+test/.last-run.json
+
+# Ad-hoc live captures taken against real (private) PR pages. Never commit these.
+/live-*.png

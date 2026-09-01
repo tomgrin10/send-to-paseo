@@ -1,0 +1,124 @@
+<!doctype html>
+<html
+  lang="en"
+  class="js-skip-scroll-target-into-view js-focus-visible"
+  data-color-mode="auto"
+  data-light-theme="light"
+  data-dark-theme="dark"
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GIZ-1133 · Pull Request #942 · acmegizmos/gizmo-poc [no-anchor fixture]</title>
+    <!--
+      FIXTURE: worst case. GitHub has restructured its PR header and EVERY rung
+      of the anchor ladder is gone:
+
+        * no [class*="prc-PageHeader-Actions"]      (rung 1)
+        * no .gh-header-actions                     (rung 2, legacy)
+        * no [class*="prc-PageHeader-TitleArea"]    (rung 3)
+        * no nav[aria-label="Pull request navigation"]  (rung 4)
+        * no #partial-discussion-header             (rung 5, legacy)
+
+      The Rails shell is still here, so the extension must still parse the PR
+      from the URL, still send stackPrNumbers: [], and fall back to a
+      fixed-position floating button rather than disappearing.
+
+      Note the deliberate trap: this page DOES contain links of the shape
+      /acmegizmos/gizmo-poc/pull/{n}. A GitHub adapter that "helpfully" scraped
+      hrefs the way the Graphite one does would report a stack here. It must
+      not — GitHub renders no stack, so findStackPrNumbers() is [] by design and
+      those links are just related-PR chatter in a comment.
+    -->
+    <style>
+      :root {
+        color-scheme: light dark;
+        --fgColor-default: #1f2328;
+        --fgColor-muted: #59636e;
+        --bgColor-default: #ffffff;
+        --bgColor-muted: #f6f8fa;
+        --borderColor-default: #d1d9e0;
+        --button-default-bgColor-rest: #f6f8fa;
+        --button-default-borderColor-rest: #d1d9e0;
+        --fontStack-system: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
+          sans-serif;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --fgColor-default: #f0f6fc;
+          --fgColor-muted: #9198a1;
+          --bgColor-default: #0d1117;
+          --bgColor-muted: #151b23;
+          --borderColor-default: #3d444d;
+          --button-default-bgColor-rest: #212830;
+          --button-default-borderColor-rest: #3d444d;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bgColor-default);
+        color: var(--fgColor-default);
+        font: 400 14px/1.5 var(--fontStack-system);
+      }
+      .gh-topbar {
+        display: flex; align-items: center; gap: 14px; height: 48px; padding: 0 16px;
+        border-bottom: 1px solid var(--borderColor-default);
+        background: var(--bgColor-muted); font-size: 13px; color: var(--fgColor-muted);
+      }
+      .wrap { max-width: 1100px; margin: 0 auto; padding: 28px 16px; }
+      .plain-title { font-size: 26px; font-weight: 400; margin: 0 0 6px; }
+      .plain-sub { color: var(--fgColor-muted); font-size: 14px; }
+      .card {
+        border: 1px solid var(--borderColor-default); border-radius: 6px;
+        margin-top: 20px; overflow: hidden;
+      }
+      .card > .hd {
+        padding: 8px 16px; background: var(--bgColor-muted);
+        border-bottom: 1px solid var(--borderColor-default);
+        font-size: 13px; color: var(--fgColor-muted);
+      }
+      .card > .bd { padding: 16px; }
+      a { color: #0969da; }
+    </style>
+  </head>
+  <body class="logged-in env-production page-responsive">
+    <header class="gh-topbar">
+      <span>GitHub</span>
+      <span>acmegizmos / gizmo-poc</span>
+    </header>
+
+    <main id="js-repo-pjax-container">
+      <turbo-frame id="repo-content-turbo-frame">
+        <div id="repo-content-pjax-container" class="repository-content">
+          <div class="wrap">
+            <h1 class="plain-title">
+              GIZ-1133: Legacy tally engine retirement #3
+              <span class="plain-sub">#942</span>
+            </h1>
+            <div class="plain-sub">
+              jdoe wants to merge 3 commits into main from
+              giz-1133-widget-backed-inventory-audit-rule
+            </div>
+
+            <div class="card">
+              <div class="hd"><strong>jdoe</strong> commented 2 hours ago</div>
+              <div class="bd">
+                <p>
+                  Third of the retirement stack. Follows
+                  <a href="/acmegizmos/gizmo-poc/pull/941">#941</a> and
+                  <a href="/acmegizmos/gizmo-poc/pull/943">#943</a>; see also
+                  <a href="/acmegizmos/gizmo-poc/pull/948">#948</a>.
+                </p>
+                <p class="plain-sub">
+                  These links exist to prove the GitHub adapter does NOT scrape a
+                  stack out of them.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </turbo-frame>
+    </main>
+  </body>
+</html>

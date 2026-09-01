@@ -1,0 +1,157 @@
+# Screenshots
+
+Unless noted otherwise, every image here was produced by a real Chromium run of
+`node test/e2e.mjs` with the unpacked extension loaded (`--load-extension`), rendering the
+captured Graphite and GitHub fixtures from `test/fixtures/`. None of them is a mockup and
+none is hand-edited. Re-running the suite regenerates them.
+
+Filenames beginning `github-` are the GitHub adapter against the `github-pr*.html` fixtures;
+everything else without a prefix is Graphite. The four `real-graphite-*` / `real-github-*`
+files are live captures against the real sites — see the provenance sections at the end.
+
+Bridge used:
+
+- **mock bridge** (`test/mock-bridge.mjs`) — everything except the three sections at the end.
+- **real plugin bridge** on `127.0.0.1:7788` — `live-bridge-popover-real-candidates.png`.
+- **real Graphite app, shimmed transport** — `real-graphite-injected-button.png`.
+- **real github.com, stubbed bridge, shimmed transport** — the three `real-github-*.png`
+  files, captured against a public pull request.
+
+**Why there are only four live captures.** Live captures of this extension necessarily show
+whatever pull request the capturing developer had open. Every other live capture taken during
+development was of a private pull request and showed internal titles, real branch names,
+colleagues' names and real logins, so those files were deleted rather than published, and the
+measurements they illustrated are recorded as text in
+[`extension/VERIFICATION.md`](../../extension/VERIFICATION.md). The GitHub set was re-taken
+against a public PR; Graphite has no unauthenticated view to re-take anything against, which is
+why only one Graphite live capture survives — and it is a bare button strip with no page text
+in it at all. If you add a live capture, check the frame for repository names, branch names,
+ticket ids, logins, avatars and daemon/server ids before committing it.
+
+## Injection
+
+| Image | What it demonstrates |
+| --- | --- |
+| `injected-button-light.png` | The button anchored in Graphite's PR header action row, immediately to the left of **Review Changes**, light theme — the primary rung of the anchor ladder. |
+| `injected-button-dark.png` | The same anchor in dark theme. The button's background is transparent by design, so it inherits Graphite's surface instead of guessing at it. |
+| `injected-button-hash-rotated.png` | The same result on `graphite-pr-rotated.html`, where **every** CSS-module hash suffix has changed (`PullRequestPageHeader_prPageHeader__NRgNb` → `__G1hCN`). Pixel-identical to the light shot, which is the point: `[class*="Prefix_name"]` matching survives a Graphite deploy. |
+| `floating-fallback.png` | `graphite-pr-no-anchor.html` — neither `PullRequestPageHeader_prPageHeader` nor `MetadataSection_prInfoGroup` exists. The button falls back to a fixed-position card in the bottom-right rather than disappearing. |
+
+## Injection — GitHub
+
+Against `test/fixtures/github-pr*.html`, reproduced from the live DOM measured in
+`test/fixtures/github-dom-notes.md`.
+
+| Image | What it demonstrates |
+| --- | --- |
+| `github-injected-button-light.png` | The button appended to GitHub's PR header action row (`prc-PageHeader-Actions`), immediately right of **Code**, light theme — rung 1 of the GitHub anchor ladder. Metrics are Primer's: 32px tall, 6px radius, 500 14px, 8px gap, `#f6f8fa` on `#d1d9e0`, all read from GitHub's own custom properties. |
+| `github-injected-button-dark.png` | The same anchor in dark theme. Nothing re-rendered and no JS ran: `--button-default-bgColor-rest` and friends are inherited properties, so they cross the shadow boundary and flip with the page. |
+| `github-injected-button-hash-rotated.png` | The same result on `github-pr-rotated.html`, where every Primer CSS-module hash has changed (`prc-PageHeader-Actions-wawWm` → `-JLAsw`). Pixel-identical to the light shot, which is the point: `[class*="prc-PageHeader-Actions"]` survives a Primer release. |
+| `github-anchored-fallback.png` | `github-pr-no-actions.html` — the action row is gone, so the ladder drops to rung 3 and anchors beside the PR title (`data-stp-mode="anchored-fallback"`) instead of going straight to the floating button. |
+| `github-floating-fallback.png` | `github-pr-no-anchor.html` — every rung of the ladder is gone. Fixed-position card in the bottom-right. The page deliberately contains `/pull/{n}` links, and `stackPrNumbers` is still `[]`: the GitHub adapter does not scrape a stack. |
+
+## Composer popover
+
+| Image | What it demonstrates |
+| --- | --- |
+| `popover-open-candidates-light.png` | Popover just opened: the one-line resolved target (`→ workspace brawny-dodo`), the always-visible candidate picker labelled with its count, the autofocused instruction box, and the provider dropdown pre-set to the bridge's default. `Send` is disabled until something is typed. |
+| `popover-open-candidates-dark.png` | The same state in dark theme, all colours from `prefers-color-scheme` inside the shadow root. |
+| `popover-candidate-create-selected.png` | Choosing a different candidate (`Create worktree for PR #942`) updates the target summary — proof the picker drives the send target and nothing is auto-selected silently. |
+| `popover-text-typed.png` | An instruction typed in, `Send` now enabled, ⌘↵ / Esc affordances visible in the footer. |
+| `keyboard-containment-typed.png` | Test 19: the popover after typing the same shortcut-heavy prompt with real keystrokes while a faithful stand-in for Graphite's shortcut layer is installed on `window`/`document`/`body` in both phases. The text survives intact. |
+| `popover-success-deep-link.png` | Success state after a real `POST /v1/send` (`dryRun: false`): agent title, workspace, branch, and the **Open in Paseo** deep link with the raw `paseo://h/<serverId>/agent/<agentId>` URL printed underneath. The link is rendered verbatim from the bridge response; the extension never constructs it. |
+| `popover-success-dry-run.png` | The same send when the bridge reports `dryRun: true`: amber headline **Dry run — no agent created**, a `DRY RUN` badge, a note naming `SEND_TO_PASEO_DRY_RUN=1` and warning that the ids are synthetic, and the deep link relabelled *Open in Paseo (synthetic id)*. Deliberately impossible to mistake for the shot above. |
+| `popover-after-spa-nav-948-stack-default.png` | After a client-side `pushState` from PR #942 to #948, the popover has re-targeted: header reads `#948`. #948 has no exact workspace match but is in a stack, so the default is the stack workspace `candid-otter` rather than a new worktree. |
+| `popover-stack-default.png` | The one-workspace-per-stack case (test 20): PR #947 has no workspace on its own branch, so the resolved target is the stack workspace `candid-otter · stack #949`, with the amber note **worktree is on another branch of this stack**. `Create worktree` is still offered in the picker, just not as the default. |
+| `popover-mode-unattended-light.png` | Test 20a, after selecting the unattended mode: the **Mode** select reads `⚠ Bypass` and an inline amber note says *Bypass: the agent will not ask for permission before acting.* Unattended modes are listed and marked, never hidden — the glyph and the `--stp-warn` colour are both asserted. |
+| `popover-mode-unattended-dark.png` | The same state in dark theme. |
+| `popover-degraded-no-branch-claim.png` | Test 20c, the `gh`-missing case: the bridge returns an empty `pr.headBranch`, so nothing can rank **exact** and the popover resolves to the project workspace (`→ workspace gizmo-poc (main checkout)`, 2 candidates). The point is what is *absent* — no "worktree is on another branch of this stack" note, because an unknown branch must read as UNKNOWN rather than as a mismatch. |
+| `compact-window-popover-light.png` | An 860×620 window: the positioner clamps the card so it never leaves the viewport, and the button stays on the primary anchor rung even in a cramped header. |
+| `compact-window-popover-dark.png` | The same compact case in dark theme. |
+| `github-popover-open.png` | The same composer on a GitHub PR page: `acmegizmos/gizmo-poc #942`, three candidates (no rank-2 "stack" entry, because `stackPrNumbers` is `[]` on GitHub by design), provider pre-set. |
+| `github-keyboard-containment-typed.png` | Test 28: the GitHub equivalent of test 19. `Fix flaky test? s / c g p t r j k` — every token a live GitHub single-key shortcut — typed with real keystrokes while a stand-in for `@github/hotkey` is installed on `document` in both phases and `window` in capture. The text survives intact and focus never moves to the decoy input (visible, empty, bottom-left). |
+
+## Error states
+
+Each is a distinct error code rendered with its own headline, the bridge's own message, and
+a concrete next step. There is no generic "failed" path. Shell commands are wrapped as
+`<code>` by the extension's own presentation layer — the bridge sends them bare, per
+CONTRACT.md's Clarifications.
+
+| Image | What it demonstrates |
+| --- | --- |
+| `error-bridge-down.png` | Bridge process not listening → `bridge_unreachable`, "Can't reach the Paseo bridge", plus a link into the extension options. |
+| `error-not-paired.png` | First-run state with no token stored → `not_configured`. No HTTP request is made at all in this case. |
+| `error-unauthorized.png` | Wrong token → `unauthorized` (HTTP 401), "Not paired with Paseo" + options link. Caught by the preflight ping, so `/v1/resolve` is never attempted. |
+| `error-project-not-found.png` | `project_not_found` (HTTP 404); the bridge's message names the repo and the hint says to add it as a Paseo project. |
+| `error-forge-unauthenticated.png` | `forge_unauthenticated` (HTTP 502) with the hint's bare `gh auth login` rendered as an inline code span. |
+| `error-contract-mismatch.png` | The plugin reports `contract: 2` while the extension was built for v1 → **Update required**. Both versions are named, and the extension refuses to resolve or send at all. |
+
+## Options page
+
+| Image | What it demonstrates |
+| --- | --- |
+| `options-page.png` | Fresh, unpaired state. Bridge URL, masked pairing token (`type=password` by default), the provider picker, and an untested connection status. With no token stored the page does not auto-ping. |
+| `options-page-paired.png` | **Test connection** with a valid token: ok tone, "Paired with Paseo", plugin name/version, contract v1, daemon version and `serverId`, and the provider count. The **Default provider** dropdown is populated straight from the authenticated `GET /v1/ping`, with the bridge's own default marked `(plugin default)`. |
+| `options-page-not-paired.png` | **Test connection** with no token: warn tone, "Bridge reachable, not paired yet", `0 providers`. This is the unauthenticated ping — liveness confirmed, pairing not done. |
+| `options-page-token-rejected.png` | **Test connection** with a wrong token: bad tone, "Token rejected", telling the user to re-copy it. Distinct from the bridge being down, which is the whole reason ping takes optional auth. |
+| `options-page-bridge-down.png` | **Test connection** with the bridge stopped: bad tone, naming the exact URL that was tried. |
+| `options-page-contract-mismatch.png` | **Test connection** against a plugin on contract v2: bad tone, "Update required", and an explicit warning that sends are blocked. |
+| `options-page-dark.png` | Dark theme, paired state. |
+
+## Against the real Paseo plugin
+
+| Image | What it demonstrates |
+| --- | --- |
+| `live-bridge-popover-real-candidates.png` | Test 13, against the **real** `send-to-paseo` plugin bridge on `127.0.0.1:7788`. The fixture repository is fictional, so the real bridge answers with a real contract error — `project_not_found · HTTP 404`, the bridge's own message and hint, rendered by the extension's own error path. That is the assertion: a live, unmocked failure comes back as a *specific* contract code with a real title, never a bare "Failed". The filename is historical; the test used to render the live daemon's own workspace list, which meant committing the developer's private workspace and branch names, and was rewritten to stop doing that. `GET /v1/ping` is also exercised against the live bridge in this test (paired, contract v1, real daemon version and `serverId`) but its output is asserted in text, not screenshotted. `/v1/send` is deliberately never exercised against the live bridge — it would start a real agent. |
+
+## Against the real Graphite app
+
+**Provenance note:** this was captured by the coordinator, not generated by `test/e2e.mjs`, so
+it is not part of this suite's reproducible output. It is the shipping `dist/content.js`
+injected into the real, authenticated `app.graphite.com`, cropped to the PR header's action row.
+The transport was shimmed — the bridge correctly rejects `Origin: https://app.graphite.com`, so
+a test shim stood in for the service worker.
+
+The rest of that pass (popover open, resolved, typed, success, keyboard containment) is **not
+published**. Graphite has no unauthenticated view and shows only the signed-in user's own
+private repositories, so every one of those frames contained private PR titles, real branch
+names, colleagues' names and real logins. They were deleted rather than committed. What they
+measured is written out in [`extension/VERIFICATION.md`](../../extension/VERIFICATION.md) →
+"Keyboard containment", including the byte-exact typed value and the **0** bubble-phase hits;
+the screenshots themselves are simply absent. The Graphite popover images elsewhere in this
+directory are fixture-derived and regenerated by every suite run.
+
+| Image | What it demonstrates |
+| --- | --- |
+| `real-graphite-injected-button.png` | A crop of the live `app.graphite.com` PR header action row with the extension loaded: the button sitting immediately left of Graphite's overflow control, taking Graphite's own surface colour rather than guessing at it. Deliberately just the strip — no title, no repository, no branch, no avatar — which is why it is the one frame from that pass that could be published. |
+
+## Against real github.com
+
+**Provenance note:** the shipping `extension/dist/content.js` — the bytes `npm run build`
+produces — running on a real github.com pull request in a real Chromium, captured 2026-09-01
+against a **public** PR: `https://github.com/rails/rails/pull/58627`. `mainworld.js` was
+injected at `document_start` with `page.addInitScript` (CSP-safe); `content.js` was evaluated
+after `load`, which is where the manifest's `run_at: "document_idle"` puts it. The button click,
+the click into the textarea and every keystroke were real input events (`page.keyboard.type`,
+25 ms delay) — `locator.fill()` was not used anywhere.
+
+Two things here are **not** real, and these images are not evidence of them:
+
+- **The bridge.** A shim stood in for the service worker (the real bridge correctly rejects
+  `Origin: https://github.com`), and it answered `/v1/resolve` from a **local stub**, not from
+  the plugin. The real bridge only ever returns the capturing developer's own private workspaces
+  and branches, which must not be published — so the workspace label, id and path shown in the
+  composer (`brawny-dodo`, `wks_…`, `~/.paseo/worktrees/…`) are the same synthetic values the
+  test fixtures use. Everything about the pull request itself — owner, repo, number, title, head
+  and base branch — is that public PR's real data. The shim refuses `send`, so **no agent was
+  created and no send was performed**.
+- **The full page.** Each image is an element-bounds crop of the live page, taken so that the
+  signed-in account's avatar and counters in GitHub's top app bar are out of frame. Nothing was
+  retouched; the crop is the only editing.
+
+| Image | What it demonstrates |
+| --- | --- |
+| `real-github-injected-button.png` | The live PR header with the button appended to GitHub's real action row, right of **Code**. Every measured property of our button — height, padding, radius, font size/weight, gap, background, colour, border, box-shadow — is byte-identical to that page's own **Code** button (`32px`, `0px 12px`, `6px`, `500 / 14px`, `8px`, `rgb(246,248,250)` on `rgb(209,217,224)`). |
+| `real-github-injected-button-dark.png` | The same header, dark — produced by flipping `prefers-color-scheme` alone, since the page carries `data-color-mode="auto"`. No JS ran and nothing re-rendered: GitHub's button tokens are inherited properties, so they cross the shadow boundary. Still byte-identical to the real Code button: `rgb(33,40,48)` on `rgb(61,68,77)`, `rgb(240,246,252)` text, no shadow. |
+| `real-github-keyboard-containment.png` | The composer open on the live page with the prompt `Fix flaky test? s / c g p t r j k` typed with **real keystrokes** after a **real mouse click** into the textarea. Every token is a live GitHub single-key shortcut. Measured during this capture: **0** bubble-phase page listeners reached, **166** capture-phase (the documented, unreachable ceiling), focus retained in the textarea, typed value byte-exact, `Send` enabled. The target and candidate list come from the local stub described above. See `extension/VERIFICATION.md` → "Re-captured for publication". |

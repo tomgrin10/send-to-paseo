@@ -1,0 +1,53 @@
+{
+  "manifest_version": 3,
+  "name": "Send to Paseo",
+  "version": "0.1.0",
+  "description": "Send an instruction from a Graphite or GitHub pull request to a new Paseo agent.",
+  "minimum_chrome_version": "111",
+  "permissions": ["storage"],
+  "host_permissions": ["http://127.0.0.1:7788/*"],
+  "optional_host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "action": {
+    "default_title": "Send to Paseo — settings",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://app.graphite.com/github/pr/*",
+        "https://app.graphite.dev/github/pr/*",
+        "https://github.com/*/*/pull/*"
+      ],
+      "js": ["mainworld.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": false
+    },
+    {
+      "matches": [
+        "https://app.graphite.com/github/pr/*",
+        "https://app.graphite.dev/github/pr/*",
+        "https://github.com/*/*/pull/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ]
+}

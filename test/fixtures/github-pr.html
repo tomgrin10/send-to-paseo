@@ -1,0 +1,459 @@
+<!doctype html>
+<html
+  lang="en"
+  class="js-skip-scroll-target-into-view js-focus-visible"
+  data-color-mode="auto"
+  data-light-theme="light"
+  data-dark-theme="dark"
+  data-a11y-animated-images="system"
+  data-a11y-link-underlines="true"
+  data-turbo-loaded
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GIZ-1133: Legacy tally engine retirement #3 by jdoe · Pull Request #942 · acmegizmos/gizmo-poc</title>
+    <!--
+      FIXTURE: faithful reproduction of the live github.com PR page structure
+      captured in test/fixtures/github-dom-notes.md (measured 2026-09-01 on
+      microsoft/vscode#333746 and cross-checked against six other PRs).
+
+      Every Primer React class name carries a CSS-module hash suffix exactly as
+      GitHub ships them (`prc-PageHeader-Actions-wawWm`). The extension may only
+      match them with [class*="prc-Prefix-Part"] attribute-contains, so
+      test/fixtures/rotate.mjs regenerates github-pr-rotated.html from this file
+      with every hash changed — that is what proves the strategy survives a
+      Primer release. Do not "tidy" the class names. They are the point.
+
+      Also reproduced, because the adapter depends on each of them:
+        * the two-layer Rails-shell/React structure:
+          main#js-repo-pjax-container > turbo-frame#repo-content-turbo-frame >
+          div#repo-content-pjax-container.repository-content > react-app
+        * BOTH prc-PageHeader-TitleArea nodes (real header + sticky clone), so a
+          test that takes the first one is actually making a choice
+        * nav[aria-label="Pull request navigation"] with the real tab routes,
+          including /changes (the new name for "Files changed", not /files)
+        * the html[data-color-mode] attributes and enough Primer :root tokens
+          that the injected button's own theming can be read back
+    -->
+    <style>
+      :root {
+        color-scheme: light dark;
+        /* Primer tokens, light. Values measured from live github.com. */
+        --fgColor-default: #1f2328;
+        --fgColor-muted: #59636e;
+        --fgColor-success: #1a7f37;
+        --fgColor-danger: #d1242f;
+        --bgColor-default: #ffffff;
+        --bgColor-muted: #f6f8fa;
+        --borderColor-default: #d1d9e0;
+        --borderColor-muted: #d1d9e0b3;
+        --borderColor-emphasis: #818b98;
+        --button-default-fgColor-rest: #25292e;
+        --button-default-bgColor-rest: #f6f8fa;
+        --button-default-bgColor-hover: #eff2f5;
+        --button-default-borderColor-rest: #d1d9e0;
+        --button-default-borderColor-hover: #d1d9e0;
+        --focus-outlineColor: #0969da;
+        --borderRadius-medium: 0.375rem;
+        --control-medium-size: 2rem;
+        --fontStack-system: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
+          sans-serif;
+        --open-fg: #ffffff;
+        --open-bg: #1f883d;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --fgColor-default: #f0f6fc;
+          --fgColor-muted: #9198a1;
+          --fgColor-success: #3fb950;
+          --fgColor-danger: #f85149;
+          --bgColor-default: #0d1117;
+          --bgColor-muted: #151b23;
+          --borderColor-default: #3d444d;
+          --borderColor-muted: #3d444db3;
+          --borderColor-emphasis: #656c76;
+          --button-default-fgColor-rest: #f0f6fc;
+          --button-default-bgColor-rest: #212830;
+          --button-default-bgColor-hover: #262c36;
+          --button-default-borderColor-rest: #3d444d;
+          --button-default-borderColor-hover: #3d444d;
+          --focus-outlineColor: #1f6feb;
+          --open-bg: #238636;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bgColor-default);
+        color: var(--fgColor-default);
+        font: 400 14px/1.5 var(--fontStack-system);
+        -webkit-font-smoothing: antialiased;
+      }
+      .fgColor-muted { color: var(--fgColor-muted); }
+      .fgColor-success { color: var(--fgColor-success); }
+      .fgColor-danger { color: var(--fgColor-danger); }
+      .d-flex { display: flex; }
+      .flex-items-center { align-items: center; }
+      .flex-items-start { align-items: flex-start; }
+      .flex-column { flex-direction: column; }
+      .flex-justify-between { justify-content: space-between; }
+      .flex-shrink-0 { flex-shrink: 0; }
+      .flex-auto { flex: auto; }
+      .flex-1 { flex: 1; }
+      .gap-1 { gap: 4px; }
+      .gap-2 { gap: 8px; }
+      .pl-2 { padding-left: 8px; }
+      .f1 { font-size: 26px; }
+      .f5 { font-size: 14px; }
+      .f6 { font-size: 12px; }
+      .text-bold { font-weight: 600; }
+      .text-normal { font-weight: 400; }
+      .lh-condensed { line-height: 1.25; }
+      .sr-only {
+        position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);
+      }
+      .container-xl { max-width: 1280px; margin: 0 auto; }
+      .tmp-px-3 { padding-left: 16px; padding-right: 16px; }
+      .tmp-mt-4 { margin-top: 24px; }
+      .tmp-pt-3 { padding-top: 16px; }
+
+      /* The global top bar. Present so the header is not the first thing in the
+         document, as on the real page. */
+      .gh-topbar {
+        display: flex; align-items: center; gap: 14px;
+        height: 48px; padding: 0 16px;
+        border-bottom: 1px solid var(--borderColor-default);
+        background: var(--bgColor-muted);
+        font-size: 13px; color: var(--fgColor-muted);
+      }
+
+      .prc-PageLayout-Header-0of-R { display: block; }
+      .prc-PageHeader-PageHeader-YLwBQ {
+        display: grid;
+        grid-template-areas: "title actions" "desc desc" "nav nav";
+        grid-template-columns: 1fr auto;
+        row-gap: 8px;
+      }
+      .prc-PageHeader-TitleArea-2n2J0 { grid-area: title; display: flex; align-items: center; }
+      .prc-PageHeader-Actions-wawWm {
+        grid-area: actions;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        position: relative;
+      }
+      .prc-PageHeader-Description-w-ejP { grid-area: desc; }
+      .prc-PageHeader-Navigation--uLav { grid-area: nav; display: flex; gap: 16px; }
+      .PullRequestHeader-module__titleWithAction__ODY5f { display: flex; align-items: baseline; }
+      .prc-PageHeader-Title-p0Mgh { margin: 0; font-size: 26px; font-weight: 400; }
+      .PullRequestHeader-module__titleSuffix__bR9SB { font-size: 26px; }
+
+      /* Primer's default button. The injected button imitates these metrics —
+         see the measurements in test/fixtures/github-dom-notes.md. */
+      .prc-Button-ButtonBase-9n-Xk {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 32px;
+        padding: 0 12px;
+        font: 500 14px/1.5 var(--fontStack-system);
+        color: var(--fgColor-default);
+        background: var(--button-default-bgColor-rest);
+        border: 1px solid var(--button-default-borderColor-rest);
+        border-radius: 6px;
+        box-shadow: 0 1px 0 rgba(31, 35, 40, 0.04);
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .prc-Button-ButtonBase-9n-Xk:hover { background: var(--button-default-bgColor-hover); }
+
+      .prc-StateLabel-StateLabel-Iawzp {
+        display: inline-flex; align-items: center; gap: 4px;
+        height: 24px; padding: 0 8px; border-radius: 24px;
+        font: 500 12px/1 var(--fontStack-system);
+        color: var(--open-fg); background: var(--open-bg);
+      }
+      .PullRequestHeaderTabNav-module__TabNav__tXCxR {
+        border-bottom: 1px solid var(--borderColor-default);
+      }
+      .PullRequestHeaderTabNav-module__TabNavList__d_nKN { display: flex; gap: 8px; }
+      .PullRequestHeaderTabNav-module__TabNavLink__JCc1O {
+        padding: 8px 12px; font-size: 14px; color: var(--fgColor-default);
+        text-decoration: none; border-bottom: 2px solid transparent;
+      }
+      .PullRequestHeaderTabNav-module__selected__g5kH0 {
+        font-weight: 600; border-bottom-color: #fd8c73;
+      }
+
+      /* The sticky clone. Hidden until scroll on the real page; kept
+         display:none here so it does not double the visible header in
+         screenshots, while still being in the DOM (and still the SECOND
+         prc-PageHeader-TitleArea, which is what matters to the adapter). */
+      .use-sticky-header-module__stickyHeader__sf0hv { display: none; }
+
+      .prc-PageLayout-HorizontalDivider-JLVqp {
+        border-bottom: 1px solid var(--borderColor-default); margin-top: 8px;
+      }
+      .timeline-comment-group {
+        border: 1px solid var(--borderColor-default);
+        border-radius: 6px; margin-top: 16px; overflow: hidden;
+      }
+      .timeline-comment-group > .comment-header {
+        padding: 8px 16px; background: var(--bgColor-muted);
+        border-bottom: 1px solid var(--borderColor-default);
+        font-size: 13px; color: var(--fgColor-muted);
+      }
+      .comment-body { padding: 16px; font-size: 14px; }
+      .DiffSquares-module__diffSquare__r6Bwa {
+        width: 8px; height: 8px; border-radius: 2px; background: var(--fgColor-success);
+      }
+      .DiffSquares-module__neutral__lvBhx { background: var(--borderColor-default); }
+    </style>
+  </head>
+  <body class="logged-in env-production page-responsive">
+    <div class="logged-in env-production page-responsive">
+      <div class="position-relative header-wrapper js-header-wrapper">
+        <react-partial class="loaded">
+          <div>
+            <header class="gh-topbar GlobalNav.styles-module__appHeader__YzYWk prc-Stack-Stack-UQ9k6">
+              <h2 class="sr-only">Repository navigation</h2>
+              <span class="text-bold">GitHub</span>
+              <span>acmegizmos / gizmo-poc</span>
+            </header>
+          </div>
+        </react-partial>
+      </div>
+
+      <!-- The Rails shell. main > turbo-frame > .repository-content > react-app.
+           #js-repo-pjax-container and #repo-content-turbo-frame are the two
+           nodes measured to survive a cross-page Turbo navigation by element
+           identity; observeTarget() returns the turbo-frame. -->
+      <main id="js-repo-pjax-container">
+        <turbo-frame id="repo-content-turbo-frame">
+          <div id="repo-content-pjax-container" class="repository-content">
+            <react-app class="loaded">
+              <div>
+                <div
+                  id="diff-comparison-viewer-container"
+                  class="DiffComparisonViewer-module__Container__YGBgR tmp-mt-4 container-xl tmp-px-3"
+                >
+                  <div class="prc-PageLayout-PageLayoutRoot--KH-d">
+                    <div class="prc-PageLayout-PageLayoutWrapper-2BhU2">
+                      <header class="prc-PageLayout-Header-0of-R">
+                        <div class="prc-PageLayout-HeaderContent-gdFfN">
+                          <div class="js-pull-header-details"></div>
+                          <div>
+                            <!-- ===== PR header ============================== -->
+                            <div
+                              class="prc-PageHeader-PageHeader-YLwBQ flex-items-center PullRequestHeader-module__actionsAboveTitleOnNarrow__WHP6N PullRequestHeader-module__actionsAboveTitleOnNarrowContainer__iud5L"
+                            >
+                              <div class="prc-PageHeader-TitleArea-2n2J0">
+                                <div class="PullRequestHeader-module__titleWithAction__ODY5f">
+                                  <h1
+                                    class="prc-PageHeader-Title-p0Mgh lh-condensed PullRequestHeader-module__inlineTitle__czbud prc-Heading-Heading-MtWFE"
+                                  >
+                                    <span class="f1 text-normal markdown-title prc-Text-Text-9mHv3"
+                                      >GIZ-1133: Legacy tally engine retirement #3 - Make the
+                                      inventory-audit rule widget-backed</span
+                                    >
+                                    <span class="sr-only">- #942</span>
+                                  </h1>
+                                  <span class="PullRequestHeader-module__titleSuffix__bR9SB"
+                                    ><span class="pl-2 fgColor-muted f1-light lh-condensed"
+                                      >#942</span
+                                    ></span
+                                  >
+                                </div>
+                              </div>
+
+                              <!-- ===== PRIMARY ANCHOR: the action row =======
+                                   The adapter appends here. Flex, gap 8px, so
+                                   our button needs no margin of its own. -->
+                              <div
+                                class="prc-PageHeader-Actions-wawWm flex-items-center gap-2 position-relative"
+                              >
+                                <div class="d-flex gap-2">
+                                  <div>
+                                    <button
+                                      class="prc-Button-ButtonBase-9n-Xk MergeStatusButton-module__mergeStatusButton__CAjUA"
+                                    >
+                                      <span class="prc-Button-ButtonContent-Iohp5">View status</span>
+                                    </button>
+                                  </div>
+                                  <button
+                                    class="prc-Button-ButtonBase-9n-Xk PullRequestCodeButton-module__hideLeadingVisual__wxPft"
+                                  >
+                                    <span class="prc-Button-ButtonContent-Iohp5"
+                                      ><span class="prc-Button-Label-FWkx3">Code</span></span
+                                    >
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div
+                                class="prc-PageHeader-Description-w-ejP d-flex flex-column flex-items-start"
+                              >
+                                <div
+                                  class="d-flex width-full flex-items-start gap-2 flex-column flex-sm-row flex-justify-between"
+                                >
+                                  <div class="d-flex flex-items-center gap-2 flex-shrink-0">
+                                    <span class="prc-StateLabel-StateLabel-Iawzp flex-self-start"
+                                      >Open</span
+                                    >
+                                  </div>
+                                  <div class="flex-1 overflow-hidden">
+                                    <div
+                                      class="fgColor-muted d-flex flex-items-center overflow-hidden PullRequestHeaderSummary-module__summaryContainer__hE2b7"
+                                    >
+                                      <a class="text-bold prc-Link-Link-9ZwDx" href="/jdoe">jdoe</a>
+                                      <div class="d-flex flex-items-center gap-1">
+                                        &nbsp;wants to merge 3 commits into
+                                        <span class="text-bold">main</span> from
+                                        <span class="text-bold"
+                                          >giz-1133-widget-backed-inventory-audit-rule</span
+                                        >
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div class="prc-PageHeader-Navigation--uLav tmp-pt-3">
+                                <div
+                                  class="PullRequestHeader-module__rightContentWrapper__MrqTF PullRequestHeader-module__hideWhenVeryNarrowContainer__bT1Vv"
+                                >
+                                  <div class="d-flex flex-items-center gap-1">
+                                    <span class="f6 fgColor-success text-bold">+184</span>
+                                    <span class="f6 fgColor-danger text-bold">-96</span>
+                                    <span class="sr-only"
+                                      >Lines changed: 184 additions &amp; 96 deletions</span
+                                    >
+                                    <div class="d-flex gap-1">
+                                      <div
+                                        class="DiffSquares-module__diffSquare__r6Bwa DiffSquares-module__addition__wxDmF"
+                                        data-testid="addition diffstat"
+                                      ></div>
+                                      <div
+                                        class="DiffSquares-module__diffSquare__r6Bwa DiffSquares-module__addition__wxDmF"
+                                        data-testid="addition diffstat"
+                                      ></div>
+                                      <div
+                                        class="DiffSquares-module__diffSquare__r6Bwa DiffSquares-module__neutral__lvBhx"
+                                        data-testid="neutral diffstat"
+                                      ></div>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div class="flex-auto">
+                                  <!-- Semantic, unhashed. Rung 4 of the ladder,
+                                       and the source of the real tab routes:
+                                       note /changes, not /files. -->
+                                  <nav
+                                    aria-label="Pull request navigation"
+                                    class="PullRequestHeaderTabNav-module__TabNav__tXCxR"
+                                  >
+                                    <div
+                                      class="PullRequestHeaderTabNav-module__TabNavList__d_nKN"
+                                    >
+                                      <a
+                                        class="PullRequestHeaderTabNav-module__TabNavLink__JCc1O PullRequestHeaderTabNav-module__selected__g5kH0"
+                                        href="/acmegizmos/gizmo-poc/pull/942"
+                                        >Conversation<span class="fgColor-muted">&nbsp;(4)</span></a
+                                      >
+                                      <a
+                                        id="prs-commits-anchor-tab"
+                                        class="PullRequestHeaderTabNav-module__TabNavLink__JCc1O"
+                                        href="/acmegizmos/gizmo-poc/pull/942/commits"
+                                        >Commits<span class="fgColor-muted">&nbsp;(3)</span></a
+                                      >
+                                      <a
+                                        class="PullRequestHeaderTabNav-module__TabNavLink__JCc1O"
+                                        href="/acmegizmos/gizmo-poc/pull/942/checks"
+                                        >Checks<span class="fgColor-muted">&nbsp;(12)</span></a
+                                      >
+                                      <a
+                                        id="prs-files-anchor-tab"
+                                        class="PullRequestHeaderTabNav-module__TabNavLink__JCc1O"
+                                        href="/acmegizmos/gizmo-poc/pull/942/changes"
+                                        >Files changed<span class="fgColor-muted">&nbsp;(7)</span></a
+                                      >
+                                    </div>
+                                  </nav>
+                                </div>
+                              </div>
+                            </div>
+
+                            <!-- ===== sticky clone. SECOND TitleArea, no Actions. -->
+                            <div
+                              class="prc-PageHeader-PageHeader-YLwBQ use-sticky-header-module__stickyHeader__sf0hv StickyPullRequestHeader-module__prHeader__P9n8q color-shadow-small"
+                            >
+                              <div
+                                class="prc-PageHeader-TitleArea-2n2J0 flex-items-center container-xl tmp-px-3"
+                              >
+                                <div class="prc-PageHeader-LeadingVisual-njece">
+                                  <span class="prc-StateLabel-StateLabel-Iawzp">Open</span>
+                                </div>
+                                <h2 class="prc-PageHeader-Title-p0Mgh lh-condensed prc-Heading-Heading-MtWFE">
+                                  <div>
+                                    <a class="fgColor-default" href="/acmegizmos/gizmo-poc/pull/942"
+                                      ><span class="f5 text-bold markdown-title prc-Text-Text-9mHv3"
+                                        >GIZ-1133: Legacy tally engine retirement #3</span
+                                      ></a
+                                    >
+                                    <span class="f5 text-normal pl-2 fgColor-muted">#942</span>
+                                  </div>
+                                </h2>
+                              </div>
+                            </div>
+                          </div>
+                          <div
+                            class="StickyPullRequestHeader-module__stickyHeaderActivationThreshold__P100g"
+                          ></div>
+                        </div>
+                        <div
+                          class="prc-PageLayout-HorizontalDivider-JLVqp prc-PageLayout-HeaderHorizontalDivider-odAHl"
+                        ></div>
+                      </header>
+
+                      <div class="prc-PageLayout-PageLayoutContent-BneH9">
+                        <div
+                          class="prc-PageLayout-ContentWrapper-gR9eG Conversations-module__content__IAZbQ"
+                        >
+                          <div class="prc-PageLayout-Content-xWL-A">
+                            <h2 class="sr-only">Conversation</h2>
+                            <div
+                              class="pull-discussion-timeline js-pull-discussion-timeline js-quote-selection-container"
+                            >
+                              <div class="js-discussion">
+                                <div
+                                  id="pullrequest-1200034567"
+                                  class="timeline-comment-group js-minimizable-comment-group"
+                                >
+                                  <div class="comment-header">
+                                    <strong>jdoe</strong> commented 2 hours ago
+                                  </div>
+                                  <div class="comment-body markdown-body js-comment-body">
+                                    <p>
+                                      Third of the legacy-tally-engine retirement stack. Makes
+                                      the inventory-audit rule read from the widget registry instead
+                                      of the calculator.
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </react-app>
+          </div>
+        </turbo-frame>
+      </main>
+    </div>
+  </body>
+</html>
