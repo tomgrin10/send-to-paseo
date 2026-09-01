@@ -23,8 +23,7 @@ on github.com and on Graphite.
 
 ## Install
 
-Requires Paseo 0.7.0 or newer with plugins enabled, and `git`. No Node, no npm, no build step.
-The GitHub CLI (`gh`) is optional; "Without the GitHub CLI" below says what changes without it.
+Requires Paseo 0.7.0 or newer with plugins enabled, and `git`.
 
 Install the plugin:
 
