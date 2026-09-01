@@ -6,11 +6,9 @@
 A trusted local [Paseo](https://paseo.sh) plugin and a Chrome extension that start a Paseo agent
 on the pull request you are already looking at.
 
-![The Send to Paseo button in the header of a live Graphite pull request, sitting immediately left of Review Changes](docs/screenshots/real-graphite-injected-button.png)
+![The Send to Paseo composer open on a live github.com pull request — rails/rails #58627, state Open, merging Shopify:actionpack-singleton-class-attrs into rails:main — with the button anchored in GitHub's own PR header action row beside Code, and the popover below it showing the resolved target workspace, the target picker, the typed instruction "Fix the flaky test in this PR", the Provider and Mode selects, and the Cmd-Enter / Esc footer with Send enabled](docs/screenshots/hero-github-pr-popover.png)
 
-![The same button on a live github.com pull request — rails/rails #58627 — appended to the header action row to the right of the Code button and matching GitHub's own button styling](docs/screenshots/real-github-injected-button.png)
-
-Click it, type an instruction — "Fix merge conflicts" — and a **new** agent starts in the
+Click it, type an instruction — "Fix the flaky test in this PR" — and a **new** agent starts in the
 workspace that belongs to that PR's branch, creating a worktree checked out to the PR if none
 exists. Works on Graphite and on github.com.
 
@@ -61,46 +59,34 @@ runs a small versioned HTTP bridge instead. [`PLAN.md`](PLAN.md) records the who
 Requires Paseo 0.7.0 or newer with plugins enabled, and `git`. The GitHub CLI (`gh`) is
 **optional**: without it sending still works, because Paseo checks the pull request out using its
 own forge credentials — you lose the PR title, the branch names and stack detection, and the
-target picker says so. Node and npm are needed only to build the extension and to typecheck the
-plugin; the plugin itself runs inside Paseo's own Node runtime. Full details, per-platform install
-commands and troubleshooting are in [`plugin/README.md`](plugin/README.md).
+target picker says so. Nothing here needs Node, npm, or a build step. Full requirements and
+troubleshooting are in [`plugin/README.md`](plugin/README.md#requirements).
 
-From a checkout of this repository, install the plugin first — it is the half that talks to Paseo:
+Install the plugin — it is the half that talks to Paseo:
 
 ```sh
-cd send-to-paseo/plugin
-npm install            # devDependencies only — the plugin has no runtime dependencies
-npm run typecheck
-paseo plugin install "$PWD"
+paseo plugin add tomgrin10/send-to-paseo --path plugin
 paseo plugin ls        # send-to-paseo must read `running` and `yes`
-paseo plugin logs send-to-paseo
 ```
 
-`npm install` is there for `npm run typecheck` alone. Paseo supplies every runtime module the
-plugin imports, so nothing is bundled and no package manager runs on the daemon. If plugins are
-disabled, enable them in **Settings → Plugins** first — that is a daemon config change and needs
-`paseo reload`, not a restart.
+Paseo clones the repository, compiles the plugin itself, and supplies every runtime module it
+imports. The plugin has no runtime dependencies, so no package manager ever runs on your daemon.
+If plugins are disabled, turn them on in **Settings → Plugins** first — that is a daemon config
+change and needs `paseo reload`, not a restart. To update later: `paseo plugin update send-to-paseo`.
 
-Then the extension:
-
-```sh
-cd ../extension
-npm install
-npm run build          # -> extension/dist
-```
-
-`extension/dist` is the load-unpacked root: it is the directory holding `manifest.json`. Not
-`extension/`, not `extension/public/`. Every Chromium browser loads it the same way, at its own
-address:
+Then the extension. Download `send-to-paseo-extension.zip` from the
+[latest release](https://github.com/tomgrin10/send-to-paseo/releases/latest) and unzip it.
+Chrome will not install an extension from a file outside the Web Store, so it is loaded unpacked —
+which is three clicks and survives browser restarts. Open your browser's extensions page:
 
 - Arc — `arc://extensions`
 - Chrome — `chrome://extensions`
 - Edge — `edge://extensions`
 - Brave — `brave://extensions`
 
-Turn on **Developer mode**, press **Load unpacked**, and select `extension/dist`. The extension ID
-is derived from that directory path, so the pairing token survives reloads for as long as you
-leave the folder where it is.
+Turn on **Developer mode**, press **Load unpacked**, and select the unzipped folder — the one
+holding `manifest.json`. Keep it somewhere permanent: the extension ID is derived from that path,
+so the pairing token survives reloads for as long as you leave the folder where it is.
 
 Last, pair the two halves:
 
@@ -112,6 +98,26 @@ Last, pair the two halves:
 4. Open a pull request on Graphite or GitHub and press **Send to Paseo**.
 
 That is the whole install. There is no config file to edit on either side.
+
+<details>
+<summary>Building from source instead</summary>
+
+Only needed to develop the extension or to run the test suite. Requires Node and npm.
+
+```sh
+git clone https://github.com/tomgrin10/send-to-paseo
+cd send-to-paseo/extension
+npm install
+npm run build          # -> extension/dist, the load-unpacked root
+```
+
+Load `extension/dist` instead of the unzipped release. For the plugin, `paseo plugin add
+/absolute/path/to/send-to-paseo/plugin` installs a checkout directly, and `npm install` inside
+`plugin/` is needed only for `npm run typecheck` — never at runtime. The end-to-end suite is
+`node test/e2e.mjs` from the repository root; it runs headless, and `STP_HEADED=1` shows the
+browser. [`AGENTS.md`](AGENTS.md) has the full verification procedure.
+
+</details>
 
 ## How a PR maps to a workspace
 

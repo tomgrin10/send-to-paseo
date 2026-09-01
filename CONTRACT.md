@@ -372,13 +372,19 @@ upstream are the PR's, only the local label differs. The extension must not asse
 
 ### Deep link format (verified — do not guess this)
 
-`deepLink` MUST be built with `buildAgentDeepLink` from `@getpaseo/protocol/agent-deep-link`:
+`deepLink` MUST produce exactly the format Paseo's own `buildAgentDeepLink` produces:
 
-```ts
-import { buildAgentDeepLink } from "@getpaseo/protocol/agent-deep-link";
-buildAgentDeepLink({ serverId, agentId });
+```text
+paseo://h/<encodeURIComponent(serverId)>/agent/<encodeURIComponent(agentId)>
 // => "paseo://h/srv_Ab3xY9pQ2mNt/agent/agt_example123"
 ```
+
+Both segments are trimmed first; an empty `serverId` or `agentId` is an error, not a
+link. The plugin implements this itself (`buildAgentDeepLink` in `contracts.shared.ts`)
+rather than importing `@getpaseo/protocol/agent-deep-link`, because `@getpaseo/protocol`
+is not a host-provided module and importing it breaks `paseo plugin add` — see
+`plugin/VERIFICATION.md` §18. The two were proved byte-identical across 14 cases,
+including double-encoding and slash-bearing ids.
 
 The shape is `paseo://h/<serverId>/agent/<agentId>`. The `serverId` is required — get it from the
 daemon (`paseo daemon status --json` → `serverId`, also in `GET /api/status`). Verified by

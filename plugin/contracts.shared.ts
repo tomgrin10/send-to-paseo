@@ -419,6 +419,39 @@ export const clearRecentSends = defineRpc({
 // Pure formatting shared by the bridge and the surface
 // ---------------------------------------------------------------------------
 
+/**
+ * The `paseo://` link that opens an agent in the Paseo app.
+ *
+ * A local reimplementation of `buildAgentDeepLink` from
+ * `@getpaseo/protocol/agent-deep-link`, transcribed from
+ * `packages/protocol/src/agent-deep-link.ts` in Paseo 0.7.0 (verified against
+ * the published `@getpaseo/protocol@0.7.0` `dist/agent-deep-link.js`, which is
+ * byte-identical in behaviour).
+ *
+ * It is copied rather than imported because `paseo plugin add` compiles a plugin
+ * with *no installed packages*: the only specifiers the host makes resolvable are
+ * its own SDK (`@getpaseo/plugin`, `@getpaseo/plugin/server`,
+ * `@getpaseo/plugin/react-native`), `zod`, `react`, `react/jsx-runtime`,
+ * `react-native` and `@tanstack/react-query`. `@getpaseo/protocol` is not one of
+ * them, so a value import from it fails the install with
+ * `Could not resolve "@getpaseo/protocol/agent-deep-link"`. See
+ * `plugin/VERIFICATION.md`.
+ *
+ * The upstream format is `paseo:/` + `/h/<serverId>/agent/<agentId>`, i.e.
+ * `paseo://h/<serverId>/agent/<agentId>`, with each segment
+ * `encodeURIComponent`-escaped and trimmed first. Re-check this against the
+ * source above when bumping Paseo; a wrong format produces a link that opens
+ * nothing rather than an error.
+ */
+export function buildAgentDeepLink(target: { serverId: string; agentId: string }): string {
+  const serverId = target.serverId.trim();
+  const agentId = target.agentId.trim();
+  if (!serverId || !agentId) {
+    throw new Error("Agent deep links require a server ID and agent ID.");
+  }
+  return `paseo://h/${encodeURIComponent(serverId)}/agent/${encodeURIComponent(agentId)}`;
+}
+
 /** `github:acmegizmos/gizmo-poc#942`, the value of the `send-to-paseo/pr` label. */
 export function prLabelValue(ref: PrRef): string {
   return `${ref.forge}:${ref.owner}/${ref.repo}#${ref.number}`;

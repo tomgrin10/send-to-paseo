@@ -108,17 +108,40 @@ Plugins are trusted, unsandboxed code: this one runs an HTTP server that can
 start agents which execute arbitrary code on the daemon machine. Read the source
 before installing it.
 
+One command, straight from the public repository. No clone, no `npm install`, no
+build step:
+
 ```sh
-cd /path/to/send-to-paseo/plugin
-npm install
-npm run typecheck
-paseo plugin install /absolute/path/to/send-to-paseo/plugin
+paseo plugin add tomgrin10/send-to-paseo --path plugin
 paseo plugin ls          # expect: send-to-paseo  running  yes
 paseo plugin logs send-to-paseo
 ```
 
-`pluginsEnabled` must already be `true` in the daemon's `config.json`. After
-editing the source:
+`paseo plugin add` clones the repo into `~/.paseo/plugins/`, compiles the plugin
+itself, and starts it. `--path plugin` points it at this directory inside the
+repo; `--ref <branch|tag|commit>` pins a revision. `pluginsEnabled` must already
+be `true` in the daemon's `config.json`.
+
+There is nothing to install because the plugin imports nothing at runtime that
+the Paseo host does not already provide — see
+[No runtime dependencies, ever](#no-runtime-dependencies-ever). To upgrade later,
+re-run `paseo plugin add` (or `paseo plugin reload send-to-paseo` for a checkout).
+
+### From a checkout (contributors)
+
+Installing from a directory is the loop to use while editing, because
+`paseo plugin reload` picks up changes in place:
+
+```sh
+git clone https://github.com/tomgrin10/send-to-paseo.git
+cd send-to-paseo/plugin
+npm install              # devDependencies only — for `npm run typecheck`
+npm run typecheck
+paseo plugin add /absolute/path/to/send-to-paseo/plugin
+paseo plugin ls          # expect: send-to-paseo  running  yes
+```
+
+After editing the source:
 
 ```sh
 npm run typecheck
@@ -126,6 +149,32 @@ paseo plugin reload send-to-paseo
 ```
 
 Never restart the daemon to pick up plugin changes — that kills running agents.
+
+### No runtime dependencies, ever
+
+`paseo plugin add` compiles the plugin **with no packages installed** — there is
+no `npm install` step in that path, and the daemon's bundler can only resolve the
+specifiers the host provides at runtime:
+
+```
+@getpaseo/plugin   @getpaseo/plugin/server   @getpaseo/plugin/react-native
+zod   react   react/jsx-runtime   react-native   @tanstack/react-query
+node:*  (built-ins, in the server bundle)
+```
+
+Everything in `plugin/package.json` is therefore a **devDependency**, present only
+so `npm run typecheck` works for contributors.
+
+> **Nothing may be added to `dependencies`.** A runtime import of anything outside
+> the list above fails `paseo plugin add` for every user with
+> `Build failed: Could not resolve "<pkg>"`, while still working perfectly on any
+> machine that has run `npm install` — so it will not be caught locally. Imports
+> from `@getpaseo/client` and `@getpaseo/protocol` must stay `import type` (erased
+> at build time) or be reimplemented locally; the one runtime use of the Paseo SDK
+> goes through the assembled-specifier `require` in `daemon.server.ts`, precisely
+> so the bundler cannot see it. Before changing an import, read
+> [`VERIFICATION.md`](VERIFICATION.md) §18, which includes the exact
+> no-`node_modules` build command that proves an install still works.
 
 ### Pairing
 
@@ -558,7 +607,7 @@ settings.client.tsx    the Paseo surface
 check-deps.mjs         standalone dependency-degradation checks (not bundled)
 ```
 
-### Two traps this plugin is built around
+### Three traps this plugin is built around
 
 **A listening HTTP server wedges plugin reload.** The socket keeps the subprocess
 event loop alive, Paseo's "Stopping plugin" step never returns, and
@@ -575,6 +624,15 @@ a server identifier there is a `ReferenceError` that aborts all registrations.
 teardown through `lifecycle.shared.ts`; `index.ts` only ever touches that shared
 object.
 
-Both are demonstrated in [`VERIFICATION.md`](VERIFICATION.md) §3 and §10: five
-consecutive reloads under a second each, and a harness process that exits on its
-own once cleanup runs.
+**A runtime import the host does not provide breaks the install, not the build.**
+`npm run typecheck` passes, `paseo plugin reload` from a checkout passes, and
+`paseo plugin add tomgrin10/send-to-paseo` fails for everyone — because only the
+git path compiles with no `node_modules`. See
+[No runtime dependencies, ever](#no-runtime-dependencies-ever); this is why
+`buildAgentDeepLink` lives in `contracts.shared.ts` rather than being imported
+from `@getpaseo/protocol`, and why `daemon.server.ts` reaches the SDK through an
+assembled specifier.
+
+The first two are demonstrated in [`VERIFICATION.md`](VERIFICATION.md) §3 and
+§10: five consecutive reloads under a second each, and a harness process that
+exits on its own once cleanup runs. The third is §18.

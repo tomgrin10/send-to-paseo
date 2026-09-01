@@ -5,12 +5,12 @@ import type {
   PaseoWorkspace,
   PaseoWorkspaceHandle,
 } from "@getpaseo/client";
-import { buildAgentDeepLink } from "@getpaseo/protocol/agent-deep-link";
 import {
   BridgeError,
   LABEL_ORIGIN,
   LABEL_PR,
   MAX_PROMPT_CHARS,
+  buildAgentDeepLink,
   buildAgentTitle,
   composePrompt,
   prLabelValue,

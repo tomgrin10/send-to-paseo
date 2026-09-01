@@ -515,11 +515,12 @@ the mock bridge only (test 27).
 ### Re-captured for publication, on a public pull request
 
 Every pass above ran against a private pull request, so none of its screenshots could be
-published. The three GitHub states were therefore re-captured, with the same technique, against
+published. The GitHub states were therefore re-captured, with the same technique, against
 a **public** one: `https://github.com/rails/rails/pull/58627` ("Make ActionPack settings
-instance variables"). Those three files are what
-`docs/screenshots/real-github-injected-button.png`, `…-dark.png` and
-`…-keyboard-containment.png` now contain.
+instance variables"). Four files came out of that URL:
+`docs/screenshots/real-github-injected-button.png`, `…-dark.png`,
+`…-keyboard-containment.png`, and — added in a second sitting later the same day —
+`docs/screenshots/hero-github-pr-popover.png`, the README hero.
 
 What was live in the re-capture, and what was not:
 
@@ -536,10 +537,57 @@ What was live in the re-capture, and what was not:
   `~/.paseo/worktrees/…`) are therefore the same synthetic values the test fixtures use. The
   branch, base branch, PR number and title are the public PR's real ones. `send` is refused by
   the shim by construction, so **no agent was created**.
-- **Cropped, not edited.** Each image is an element-bounds crop of the live page — the PR
-  header for the two button shots, header plus popover for the containment shot. Cropping keeps
-  the signed-in account's avatar and counters, which sit in GitHub's top app bar, out of frame.
-  No pixels were retouched.
+- **Cropped, not edited.** Each image is a crop of the live page — element bounds for the two
+  button shots (the PR header) and the containment shot (header plus popover), and an explicit
+  `page.screenshot({ clip: { x: 105, y: 112, width: 1236, height: 506 } })` rectangle at a
+  1460×1020 viewport for the hero. Cropping keeps the signed-in account's avatar, notification
+  counters and account menu, which all sit in GitHub's top app bar, out of frame. No pixels were
+  retouched and no DOM was hidden or restyled for any shot.
+
+### The hero frame
+
+`docs/screenshots/hero-github-pr-popover.png` exists to answer one question in one glance: *is
+this really a pull request, and what does the extension actually put on it?* Captured the same
+way as the three above, on the same public PR, Conversation tab, light theme
+(`emulateMedia({ colorScheme: "light" })`), with the composer open and the instruction
+`Fix the flaky test in this PR` typed with real keystrokes at 25 ms. Asserted during the capture,
+before the shutter:
+
+```json
+{ "hostCount": 1, "injectionMode": "anchored", "style": "github", "pr": "58627",
+  "parentClass": "prc-PageHeader-Actions-wawWm flex-items-center gap-2 position-relative",
+  "parentIsActionRow": true, "isLastChild": true, "label": "Send to Paseo",
+  "colorMode": "auto",
+  "phase": "ready", "prref": "rails/rails #58627",
+  "summaryLines": ["→ workspace brawny-dodo", "actionpack-singleton-class-attrs · rails"],
+  "selectedCandidate": "brawny-dodo — actionpack-singleton-class-attrs (exact match, 2 agents)",
+  "providerSelect": "Opus 5 (default)", "modeSelect": "Auto mode (default)",
+  "typedValue": "Fix the flaky test in this PR", "focusInTextarea": true,
+  "sendEnabled": true, "bubbleHits": 0, "captureHits": 146,
+  "retargetedTargets": ["send-to-paseo-popover"] }
+```
+
+(`injectionMode`, `providerSelect`, `modeSelect` and `summaryLines` are renamed and reshaped from
+the raw probe output only to avoid two different `mode` keys in one object and to show the target
+summary as the two lines it really renders as; every value is verbatim.)
+
+`hostCount: 1` is asserted rather than eyeballed, and the capture aborts if it is anything else.
+It matters because injecting `content.js` at `document_start` instead of after `load` races React
+re-rendering the PR header and was observed to produce **two** button hosts during an earlier
+sitting — a capture artifact of this technique, not an extension bug, since the manifest really
+does load `content.js` at `document_idle`. The `bubbleHits: 0 / captureHits: 146` pair is the same
+keyboard-containment measurement as above, taken again on this frame rather than assumed.
+
+In frame: the PR title with `#58627`, the green **Open** pill, `etiennebarrie wants to merge 2
+commits into rails:main from Shopify:actionpack-singleton-class-attrs`, the **Conversation /
+Commits / Checks / Files changed** tab bar, the **Send to Paseo** button in GitHub's action row in
+its expanded state, and the whole composer down to the ⌘↵ / Esc footer and an enabled **Send**.
+Out of frame: GitHub's top app bar. Still in frame, deliberately accepted: the PR author's public
+avatar and login beside their comment, which are public data on a public PR. The PNG carries no
+`tEXt`, `iTXt`, `eXIf` or `tIME` chunk (`IHDR`/`IDAT`/`IEND` only), and a raw-byte grep for
+the author's macOS username, real name, both GitHub logins, the private org and repo
+names, and `/Users/` finds nothing. (Those terms are deliberately not spelled out here: writing
+them down would put back into this repository exactly what the sweep exists to keep out.)
 
 Button placement and metrics, re-measured on the public page:
 
@@ -620,14 +668,15 @@ the page's listeners did fire and did see the retargeted host.
   bridge, creating a real agent that received the composed prompt, replied `ACK`, and was then
   deleted. None of that is asserted by this suite.
 
-  **Almost none of that pass is published.** Graphite requires authentication and shows only the
+  **None of that pass is published.** Graphite requires authentication and shows only the
   signed-in user's own private repositories, so the popover, typed and success captures contained
   private PR titles, colleagues' names and real logins, and were deleted rather than committed.
-  The one Graphite live capture that survives is
-  `docs/screenshots/real-graphite-injected-button.png`, which is a bare strip of the PR header
-  action row: the button and Graphite's overflow control, no title, no repository, no branch, no
-  avatar. The Graphite popover screenshots in `docs/screenshots/` are all fixture-derived and
-  regenerated by `node test/e2e.mjs`.
+  One frame did survive for a while — `docs/screenshots/real-graphite-injected-button.png`, a bare
+  strip of the PR header action row with no title, repository, branch or avatar in it — and it
+  was **deleted on 2026-09-01** when the README's two hero images were replaced by a single
+  GitHub one. So there is now **no live Graphite screenshot in this repository at all**: the pass
+  described above is evidenced by the text in this file and nothing else, and every Graphite
+  screenshot in `docs/screenshots/` is fixture-derived and regenerated by `node test/e2e.mjs`.
 - **GitHub-specific limitations and risks, stated plainly.**
   - **`findAnchor()` rung 1 and rung 3 use `[class*=]`.** There is no id, no `data-testid` and
     no ARIA role on either the action row or the title area — the whole PR header has none —

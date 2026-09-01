@@ -29,6 +29,7 @@ Contents:
 15. [Stack resolution: one workspace per stack](#15-stack-resolution-one-workspace-per-stack-2026-09-01)
 16. [Dependency audit and graceful degradation](#16-dependency-audit-and-graceful-degradation-2026-09-01)
 17. [Permission modes and agent profiles](#17-permission-modes-and-agent-profiles-2026-09-01)
+18. [`paseo plugin add` from Git: the no-`node_modules` build](#18-paseo-plugin-add-from-git-the-no-node_modules-build-2026-09-01)
 
 ---
 
@@ -751,6 +752,17 @@ Deleted branch giz-1133-widget-backed-inventory-audit-rule-1 (was 4c1e9a07b).
 CONTRACT.md requires `deepLink` to be built with `buildAgentDeepLink` from
 `@getpaseo/protocol/agent-deep-link` and to round-trip through
 `parseAgentDeepLink`. Asserted against the real send from §7:
+
+> **Superseded in part by [§18](#18-paseo-plugin-add-from-git-the-no-node_modules-build-2026-09-01).**
+> `@getpaseo/protocol` is not resolvable when the daemon compiles a Git-installed
+> plugin, so `buildAgentDeepLink` is now a local copy in `contracts.shared.ts`,
+> proved byte-identical to the upstream function in §18.5. The wire value below
+> is unchanged, so everything in this section still holds. CONTRACT.md's
+> "Sending" section still spells the requirement as *import from
+> `@getpaseo/protocol/agent-deep-link`*; that wording wants amending to *produce
+> the format that function produces*, which is a change to the root CONTRACT.md,
+> not to this plugin.
+
 
 ```
 === DEEP LINK ROUND TRIP ===
@@ -2277,3 +2289,389 @@ ignored", not "hard break".
 - **OpenCode and the disabled providers** (`copilot`, `pi`, `omp`) were not
   exercised end to end; OpenCode's `defaultModeId: null` path is covered only by
   reading the snapshot, not by a send.
+
+---
+
+## 18. `paseo plugin add` from Git: the no-`node_modules` build (2026-09-01)
+
+### 18.1 The failure, reproduced
+
+Installing the plugin the way a new user installs it — from the public
+repository, with no clone and no `npm install` — did not work at all:
+
+```
+$ paseo plugin add tomgrin10/send-to-paseo --path plugin --id stp-relverify
+Error: Request failed: Build failed with 1 error:
+  ~/.paseo/plugins/stp-relverify/<rev>/checkout/plugin/send.server.ts:8:35:
+    ERROR: Could not resolve "@getpaseo/protocol/agent-deep-link"
+```
+
+Nothing was wrong with the code as *code*. `npm run typecheck` was clean,
+`node check-deps.mjs` was 45/45, and `paseo plugin reload send-to-paseo` from the
+checkout was green — because the checkout has a `plugin/node_modules/` from an
+earlier `npm install`, and that is what the daemon's bundler was resolving
+`@getpaseo/protocol` out of. The Git path has no `node_modules`, so the same
+source failed for every user while passing every local check.
+
+### 18.2 What the host actually provides
+
+From the Paseo source, `packages/server/src/server/plugins/plugin-sdk-specifiers.ts`
+(Paseo `0.7.0`):
+
+```ts
+export const PLUGIN_CLIENT_ONLY_SDK_SPECIFIERS = [
+  "@getpaseo/plugin/react-native",
+  "@paseo/plugin/react-native",
+] as const;
+
+export const PLUGIN_SDK_SPECIFIERS = [
+  "@getpaseo/plugin",
+  "@getpaseo/plugin/server",
+  "@paseo/plugin",
+  "@paseo/plugin/server",
+  ...PLUGIN_CLIENT_ONLY_SDK_SPECIFIERS,
+] as const;
+```
+
+and `packages/server/src/server/plugins/compiler.ts`, which compiles two bundles
+per plugin and marks exactly this much external:
+
+```ts
+external:
+  target === "client"
+    ? [...PLUGIN_SDK_SPECIFIERS, "@tanstack/react-query", "react",
+       "react/jsx-runtime", "react-native", "zod"]
+    : [...PLUGIN_SDK_SPECIFIERS, "zod"],
+```
+
+The server bundle does not list `react`/`react-native`/`@tanstack/react-query`
+because a separate esbuild plugin (`createUnusedPlatformModulePlugin`) replaces
+them with `module.exports = {}` there, and does the same for `node:*` in the
+client bundle. Anything not named above must resolve from disk — and on the Git
+path there is no disk to resolve it from.
+
+Two consequences worth recording, because both contradict a reasonable guess:
+
+- **`@getpaseo/plugin/react-native` *is* host-provided.** It is in
+  `PLUGIN_SDK_SPECIFIERS` (via the client-only list) and external for both
+  targets, so `settings.client.tsx`'s `import { useToast } from
+  "@getpaseo/plugin/react-native"` is legitimate and was left alone. It is absent
+  from the shortlist in the public plugin docs; the source is authoritative.
+- **`@getpaseo/client` and `@getpaseo/protocol` are *not* host-provided to the
+  bundler**, even though the daemon obviously has them. They are reachable only
+  at runtime, from inside the plugin subprocess.
+
+### 18.3 The import audit, and what changed
+
+Every non-host specifier in `plugin/*.ts` / `*.tsx`:
+
+| Specifier | Where | Kind | Action |
+| --- | --- | --- | --- |
+| `@getpaseo/protocol/agent-deep-link` | `send.server.ts:8` | **value** (`buildAgentDeepLink`) | **Reimplemented locally** in `contracts.shared.ts`; the import is gone. |
+| `@getpaseo/client` | `daemon.server.ts:5` | `import type { PaseoApi }` | Already erased — no change. |
+| `@getpaseo/client` | `daemon.server.ts` (`type ClientModule = typeof import(...)`) | type position | Already erased — no change. |
+| `@getpaseo/client` | `send.server.ts:2` | `import type { PaseoAgentConfig, PaseoApi, PaseoWorkspace, PaseoWorkspaceHandle }` | Already erased — no change. |
+| `@getpaseo/client` | `resolve.server.ts:1` | `import type { PaseoApi, PaseoWorkspace }` | Already erased — no change. |
+| `@getpaseo/client` | `daemon.server.ts` `loadClientModule()` | **deliberate runtime borrow** | Unchanged. `["@getpaseo","client"].join("/")` then `require`, so esbuild cannot see a literal specifier. This is load-bearing, not a style choice. |
+| `@getpaseo/client`, `@getpaseo/protocol/agent-types` | `paseo-plugin.d.ts:2,97,98` | `import type` in an ambient `.d.ts` | Not in the bundle graph at all (esbuild never reads `.d.ts`) — no change. |
+| `@getpaseo/plugin/react-native` | `settings.client.tsx:2` | value (`useToast`) | **Host-provided** (§18.2) — no change. |
+| `@getpaseo/plugin`, `@getpaseo/plugin/server`, `zod`, `react`, `react-native`, `@tanstack/react-query` | various | value | Host-provided — no change. |
+
+`@getpaseo/protocol/agent-types` needed no work: its single use is a type-only
+import inside `paseo-plugin.d.ts`, which is a declaration file the bundler never
+opens. No enum, const or schema from it is used as a value anywhere.
+
+So the audit found exactly one real defect. Confirming that the reported error
+was not merely the *first* of several is §18.5: the pre-fix bundle reports
+`1 error`, not `1 of N`.
+
+### 18.4 The deep link, reimplemented
+
+Transcribed from `packages/protocol/src/agent-deep-link.ts` in Paseo `0.7.0`, and
+cross-checked against the published `@getpaseo/protocol@0.7.0`
+`dist/agent-deep-link.js`, which is the same code:
+
+```ts
+export function buildAgentDeepLinkRoute(target) {
+  const { serverId, agentId } = normalizeAgentDeepLinkTarget(target);
+  return `/h/${encodeURIComponent(serverId)}/agent/${encodeURIComponent(agentId)}`;
+}
+export function buildAgentDeepLink(target) {
+  return `paseo:/${buildAgentDeepLinkRoute(target)}`;
+}
+```
+
+The format is therefore
+
+```
+paseo://h/<encodeURIComponent(serverId)>/agent/<encodeURIComponent(agentId)>
+```
+
+with both segments `.trim()`-ed first and an empty result rejected with
+`"Agent deep links require a server ID and agent ID."`. The local copy in
+`contracts.shared.ts` carries that citation in its doc comment so it can be
+re-checked when Paseo moves; getting it wrong produces a link that opens nothing
+rather than an error, which is exactly the kind of bug that ships.
+
+### 18.5 Proof: byte-identical deep links
+
+The reimplementation was diffed against the real package, using the
+`plugin/node_modules` copy for the reference value. Both functions were called
+with the same inputs and the results compared as strings (thrown messages
+compared too), plus a round trip through the upstream `parseAgentDeepLink`:
+
+```
+ok    ["srv_abc123","agt_def456"]
+        ref  OK paseo://h/srv_abc123/agent/agt_def456
+        mine OK paseo://h/srv_abc123/agent/agt_def456
+ok    ["  srv_pad  "," agt_pad "]
+        ref  OK paseo://h/srv_pad/agent/agt_pad
+        mine OK paseo://h/srv_pad/agent/agt_pad
+ok    ["srv/with slash","agt?with=query&x#h"]
+        ref  OK paseo://h/srv%2Fwith%20slash/agent/agt%3Fwith%3Dquery%26x%23h
+        mine OK paseo://h/srv%2Fwith%20slash/agent/agt%3Fwith%3Dquery%26x%23h
+ok    ["srv:колонка","agt 空白/../x"]
+        ref  OK paseo://h/srv%3A%D0%BA%D0%BE%D0%BB%D0%BE%D0%BD%D0%BA%D0%B0/agent/agt%20%E7%A9%BA%E7%99%BD%2F..%2Fx
+        mine OK paseo://h/srv%3A%D0%BA%D0%BE%D0%BB%D0%BE%D0%BD%D0%BA%D0%B0/agent/agt%20%E7%A9%BA%E7%99%BD%2F..%2Fx
+ok    ["a","b"]
+        ref  OK paseo://h/a/agent/b
+        mine OK paseo://h/a/agent/b
+ok    ["srv-%20already","agt+plus"]
+        ref  OK paseo://h/srv-%2520already/agent/agt%2Bplus
+        mine OK paseo://h/srv-%2520already/agent/agt%2Bplus
+ok    ["srv.dot~tilde_underscore-dash","AGT!*'()"]
+        ref  OK paseo://h/srv.dot~tilde_underscore-dash/agent/AGT!*'()
+        mine OK paseo://h/srv.dot~tilde_underscore-dash/agent/AGT!*'()
+ok    ["","x"]
+        ref  THROW Agent deep links require a server ID and agent ID.
+        mine THROW Agent deep links require a server ID and agent ID.
+ok    ["x",""]
+        ref  THROW Agent deep links require a server ID and agent ID.
+        mine THROW Agent deep links require a server ID and agent ID.
+ok    ["   ","y"]
+        ref  THROW Agent deep links require a server ID and agent ID.
+        mine THROW Agent deep links require a server ID and agent ID.
+ok    ["\t\n srv \r"," agt"]
+        ref  OK paseo://h/srv/agent/agt
+        mine OK paseo://h/srv/agent/agt
+ok    ["01998e7f-6a1e-7b2c-9f31-2c4d5e6f7a8b","agent_01K6ZQ8V"]
+        ref  OK paseo://h/01998e7f-6a1e-7b2c-9f31-2c4d5e6f7a8b/agent/agent_01K6ZQ8V
+        mine OK paseo://h/01998e7f-6a1e-7b2c-9f31-2c4d5e6f7a8b/agent/agent_01K6ZQ8V
+ok    parseAgentDeepLink round-trip ["srv_abc123","agt_def456"] -> {"serverId":"srv_abc123","agentId":"agt_def456"}
+ok    parseAgentDeepLink round-trip ["srv:колонка","agt 空白/../x"] -> {"serverId":"srv:колонка","agentId":"agt 空白/../x"}
+
+ALL EQUAL
+```
+
+14/14, including the awkward cases: pre-encoded input is double-encoded the same
+way (`%20` → `%2520`), `encodeURIComponent`'s unreserved set is preserved
+identically (`!*'()~.` pass through), and the trim happens before the emptiness
+check so `"   "` throws. The `%2F` on a slash is what stops a crafted `serverId`
+from inventing extra path segments, and it survives the reimplementation.
+
+This replaces the *mechanism* behind §9, not §9's result: the link the bridge
+returns is unchanged, so §9's round-trip assertion still holds byte-for-byte.
+
+### 18.6 Proof: the bundle builds with no `node_modules`
+
+`npm run typecheck` is not evidence here — it passed throughout the failure. The
+test has to be a bundle with no packages available.
+
+A copy of the plugin sources was made in `/tmp`, with no `node_modules` in it or
+in any parent directory, and bundled with esbuild — the very binary the daemon
+uses (`0.25.12`, from the Paseo app's `app.asar.unpacked`) — marking external
+exactly the specifiers from §18.2, once per target. `/tmp/stp-nonm-old` holds the
+pre-fix sources, `/tmp/stp-nonm` the fixed ones, so the negative control and the
+result come from one command:
+
+```sh
+$ ESB=/Applications/Paseo.app/Contents/Resources/app.asar.unpacked/node_modules/@esbuild/darwin-arm64/bin/esbuild
+$ EXT=(--external:@getpaseo/plugin --external:@getpaseo/plugin/server --external:@getpaseo/plugin/react-native
+       --external:@paseo/plugin --external:@paseo/plugin/server --external:@paseo/plugin/react-native
+       --external:@tanstack/react-query --external:react --external:react/jsx-runtime
+       --external:react-native --external:zod)
+$ for D in /tmp/stp-nonm-old /tmp/stp-nonm; do
+    $ESB "$D/index.ts" --bundle --platform=node    --target=node20 --format=cjs \
+      --loader:.ts=tsx --loader:.tsx=tsx --outfile=/dev/null "${EXT[@]}"
+    $ESB "$D/index.ts" --bundle --platform=neutral --target=es2020 --format=cjs \
+      --loader:.ts=tsx --loader:.tsx=tsx --outfile=/dev/null "${EXT[@]}" '--external:node:*'
+  done
+```
+
+Output:
+
+```
+### /tmp/stp-nonm-old — server target (platform=node, target=node20)
+✘ [ERROR] Could not resolve "@getpaseo/protocol/agent-deep-link"
+
+    /tmp/stp-nonm-old/send.server.ts:8:35:
+      8 │ ...t { buildAgentDeepLink } from "@getpaseo/protocol/agent-deep-link";
+        ╵                                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+1 error
+exit=1
+### /tmp/stp-nonm-old — client target (platform=neutral, target=es2020; node: builtins are host-stubbed)
+✘ [ERROR] Could not resolve "@getpaseo/protocol/agent-deep-link"
+
+    /tmp/stp-nonm-old/send.server.ts:8:35:
+      8 │ ...t { buildAgentDeepLink } from "@getpaseo/protocol/agent-deep-link";
+        ╵                                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+1 error
+exit=1
+### /tmp/stp-nonm — server target (platform=node, target=node20)
+
+  /dev/null  108.8kb
+
+⚡ Done in 4ms
+exit=0
+### /tmp/stp-nonm — client target (platform=neutral, target=es2020; node: builtins are host-stubbed)
+
+  /dev/null  108.8kb
+
+⚡ Done in 3ms
+exit=0
+```
+
+Two things this establishes beyond "it builds". First, the negative control
+reproduces the reported error character for character, so the test really is
+measuring the thing that broke. Second, esbuild says **`1 error`**, not
+`1 of N errors shown` — nothing was hidden behind it. After the fix, both targets
+are `exit=0`.
+
+The build is a superset of what the host does: the host filters the entrypoint
+per target before bundling, so its client bundle never reaches
+`send.server.ts` and its server bundle never reaches `settings.client.tsx`. Here
+both targets bundle the whole graph, which is strictly stricter.
+
+An easy way to fake a pass on this test is to run it somewhere that still has a
+`node_modules` above it. That was checked explicitly:
+
+```sh
+$ d=/tmp/stp-nonm; while [ "$d" != "/" ]; do [ -e "$d/node_modules" ] && echo "FOUND $d/node_modules"; d=$(dirname "$d"); done
+# no output
+```
+
+### 18.7 Proof: the real installer, no push required
+
+The bundle test is a proxy. The definitive test is the daemon's own installer, so
+both of its paths were run with a throwaway id.
+
+**Directory path, against a sources-only copy with no `node_modules`:**
+
+```sh
+$ paseo plugin add /tmp/stp-nonm --id stp-relverify
+PLUGIN                STATUS      ENABLED   DIRECTORY
+stp-relverify         running     yes       /tmp/stp-nonm
+
+$ paseo plugin logs stp-relverify
+TIME                      STREAM    MESSAGE
+2026-09-01T13:19:19.317Z  stdout    [paseo] Loading plugin
+2026-09-01T13:19:19.551Z  stdout    [paseo] Plugin ready
+2026-09-01T13:19:19.558Z  stderr    [send-to-paseo] Port 7788 is already in use, so the Send to Paseo bridge did not start. Pick another port in Paseo -> Send to Paseo.
+```
+
+**Git path**, which is the one that was broken. Because the fix was not yet
+pushed, the commit was placed in a throwaway local repository and installed from
+a `file://` URL — the same code path as `tomgrin10/send-to-paseo`: the daemon
+clones the repo into its own directory, applies `--path plugin`, and compiles
+what it finds there.
+
+```sh
+$ paseo plugin add "file:///tmp/stp-gitproof/src" --path plugin --id stp-relverify
+PLUGIN                STATUS      ENABLED   DIRECTORY
+stp-relverify         running     yes       ~/.paseo/plugins/stp-relverify/b4f7a3f81e92-<uuid>/checkout/plugin
+
+$ find ~/.paseo/plugins/stp-relverify/b4f7a3f81e92-<uuid>/checkout -name node_modules
+# no output — the daemon compiled it with nothing installed
+
+$ paseo plugin logs stp-relverify
+2026-09-01T13:19:58.803Z  stdout    [paseo] Loading plugin
+2026-09-01T13:19:59.029Z  stdout    [paseo] Plugin ready
+2026-09-01T13:19:59.035Z  stderr    [send-to-paseo] Port 7788 is already in use, so the Send to Paseo bridge did not start. Pick another port in Paseo -> Send to Paseo.
+```
+
+`Plugin ready` and `running` are the success criteria. The `EADDRINUSE` line is
+expected and correct: the real `send-to-paseo` install already holds
+`127.0.0.1:7788`, and a second instance refusing the port with a legible message
+instead of crashing is the behaviour §"If the port is taken" documents.
+
+### 18.8 Cleanup
+
+The throwaway was removed immediately, both times, and it never wrote to the real
+plugin's state — the settings file is keyed on the plugin *name*, not the runtime
+id, so it is shared:
+
+```sh
+$ paseo plugin remove stp-relverify
+$ paseo plugin ls
+PLUGIN                STATUS      ENABLED   DIRECTORY
+paseo-defer           running     yes       ~/Projects/other-plugin
+send-to-paseo         running     yes       ~/Projects/send-to-paseo/plugin
+
+$ grep -l stp-relverify ~/.paseo/plugins/sources.json ~/.paseo/config.json
+# no output
+
+$ ls ~/.paseo/plugins/stp-relverify
+ls: ~/.paseo/plugins/stp-relverify: No such file or directory
+
+$ shasum -a 256 ~/.paseo/plugin-data/send-to-paseo/settings.json
+4ff74e08cacf3b18f98cc13db4cf378bdaef3f5dbce18ed569cfdea47af49c2b   # unchanged, before and after
+```
+
+The daemon was never restarted.
+
+### 18.9 Regression sweep
+
+```sh
+$ cd plugin && npm run typecheck
+> tsc --noEmit                                   # clean
+
+$ node check-deps.mjs | tail -1
+45/45 checks passed
+
+$ paseo plugin reload send-to-paseo
+PLUGIN                STATUS      ENABLED   DIRECTORY                             ERROR
+send-to-paseo         running     yes       ~/Projects/send-to-paseo/plugin
+
+$ paseo plugin logs send-to-paseo | tail -5
+[paseo] Stopping plugin
+[send-to-paseo] bridge stopped
+[paseo] Plugin stopped
+[paseo] Loading plugin
+[paseo] Plugin ready
+[send-to-paseo] bridge listening on http://127.0.0.1:7788
+
+$ node test/e2e.mjs | tail -1
+=== 44 passed, 0 failed, 0 skipped (of 44) ===
+```
+
+No behaviour changed: `contract` stays at **1**, the wire shape is untouched, and
+the only functional edit is where `buildAgentDeepLink` is defined.
+
+### 18.10 Standing rule — nothing may enter `dependencies`
+
+**`plugin/package.json` must never gain a `dependencies` block.** Every entry
+stays in `devDependencies`; they exist only so `npm run typecheck` works for
+contributors, and they are absent when a user installs.
+
+This is not tidiness. `paseo plugin add` — the documented, primary install — is
+the *only* path that compiles with no packages installed, and it is the one path
+no local check exercises. A runtime import of anything outside §18.2 therefore:
+
+- passes `npm run typecheck`,
+- passes `node check-deps.mjs`,
+- passes `paseo plugin reload send-to-paseo` from the checkout,
+- passes the whole e2e suite,
+- and fails for **every user**, at install time, with
+  `Build failed: Could not resolve "<pkg>"`.
+
+Adding a package to `dependencies` does not fix that, because nothing runs
+`npm install` on the install path. The only remedies are: use a host-provided
+specifier, make the import `import type` so it is erased, reimplement the value
+locally (as §18.4 does), or borrow it from the host at runtime through an
+assembled specifier the bundler cannot read (as `daemon.server.ts` does).
+
+Before merging any change to an `import` line in `plugin/`, re-run §18.6. It
+takes about ten milliseconds and it is the only check that would have caught
+this.
