@@ -9,7 +9,7 @@ import { z } from "zod";
 
 /** Advertised in `GET /v1/ping`. Keep in step with `package.json`. */
 export const PLUGIN_NAME = "send-to-paseo";
-export const PLUGIN_VERSION = "0.1.0";
+export const PLUGIN_VERSION = "0.2.0";
 /** Bumped only for an incompatible bridge API; the paths stay `/v1`. */
 export const CONTRACT_VERSION = 1;
 
@@ -174,6 +174,16 @@ export interface ProjectPayload {
 
 export type CandidateReason = "exact" | "stack" | "project" | "create";
 
+/**
+ * State of the stack pull request a rank-2 candidate's branch belongs to.
+ *
+ * Three values, not GitHub's uppercase vocabulary, and `merged` is distinct
+ * from `closed` because the two mean different things to a user looking at a
+ * workspace: merged is history the stack has moved past, closed is work that
+ * was abandoned.
+ */
+export type StackPrState = "open" | "merged" | "closed";
+
 export interface ExistingCandidate {
   kind: "existing";
   workspaceId: string;
@@ -184,8 +194,19 @@ export interface ExistingCandidate {
   rank: 1 | 2 | 3;
   reason: "exact" | "stack" | "project";
   agentCount: number;
-  /** Present only on `reason: "stack"`. */
+  /**
+   * Present only on `reason: "stack"`, and only when the branch actually has a
+   * pull request. A branch proved to be in the stack by local git ancestry may
+   * have none at all, and inventing a number there would be a lie.
+   */
   stackPrNumber?: number;
+  /**
+   * State of the stack PR whose head branch this workspace is on. Present only
+   * alongside `stackPrNumber`, and omitted when it is `open`, which is the case
+   * an older extension already assumed. Additive field, so it does not bump
+   * `contract`.
+   */
+  stackPrState?: StackPrState;
 }
 
 export interface CreateCandidate {
@@ -492,6 +513,12 @@ export function composePrompt(input: {
   /** Branch the target workspace is actually on, when known. */
   workspaceBranch?: string | null;
   /**
+   * State of the stack pull request that owns `workspaceBranch`, when the
+   * bridge could establish it. Only `merged` and `closed` change the wording;
+   * see below for why they have to.
+   */
+  workspaceBranchState?: StackPrState | null;
+  /**
    * Set only when `gh` could not describe the PR. The `Title:` and `Branch:`
    * lines are then omitted rather than filled with placeholders — telling an
    * agent it is on a branch nobody verified is how commits land in the wrong
@@ -531,9 +558,30 @@ export function composePrompt(input: {
     workspaceBranch !== "" &&
     workspaceBranch !== pr.headBranch
   ) {
+    // "a different branch of the same stack" reads as a live sibling, which is
+    // wrong — and misleading in a way that matters — once the bridge can offer
+    // a workspace sitting on a branch whose pull request is already merged or
+    // closed. An agent told it is on a live sibling assumes the branch is
+    // current; a merged branch is behind by construction, because the stack has
+    // been restacked past it. The advice ("check out the PR's branch") is the
+    // same in all three cases; only the description of where it is standing
+    // changes.
+    const state = input.workspaceBranchState ?? null;
+    const own =
+      state === "merged"
+        ? "; its own pull request is already merged"
+        : state === "closed"
+          ? "; its own pull request was closed without merging"
+          : "";
+    const where =
+      state === "merged"
+        ? "this worktree is on a branch of this stack whose pull request has already been merged, so it may be behind the rest of the stack"
+        : state === "closed"
+          ? "this worktree is on a branch of this stack whose pull request was closed without merging, so it may be behind the rest of the stack"
+          : "this worktree is on a different branch of the same stack";
     lines.push(
-      `Workspace branch: ${workspaceBranch} (NOT this PR's branch)`,
-      `Note: this worktree is on a different branch of the same stack. If your change belongs to PR #${ref.number}, check out ${pr.headBranch} first.`,
+      `Workspace branch: ${workspaceBranch} (NOT this PR's branch${own})`,
+      `Note: ${where}. If your change belongs to PR #${ref.number}, check out ${pr.headBranch} first.`,
     );
   }
   return `${lines.join("\n")}\n\n${input.prompt}`;

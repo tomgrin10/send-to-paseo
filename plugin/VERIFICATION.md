@@ -30,6 +30,7 @@ Contents:
 16. [Dependency audit and graceful degradation](#16-dependency-audit-and-graceful-degradation-2026-09-01)
 17. [Permission modes and agent profiles](#17-permission-modes-and-agent-profiles-2026-09-01)
 18. [`paseo plugin add` from Git: the no-`node_modules` build](#18-paseo-plugin-add-from-git-the-no-node_modules-build-2026-09-01)
+19. [Merged and closed stack branches](#19-merged-and-closed-stack-branches-2026-09-02)
 
 ---
 
@@ -2675,3 +2676,392 @@ assembled specifier the bundler cannot read (as `daemon.server.ts` does).
 Before merging any change to an `import` line in `plugin/`, re-run §18.6. It
 takes about ten milliseconds and it is the only check that would have caught
 this.
+
+---
+
+## 19. Merged and closed stack branches (2026-09-02)
+
+Reported bug, in the user's words:
+
+> I wanted to send to paseo on a PR in a stack, and it didn't find the correct
+> workspace because the workspace was on a local branch that has been merged
+> already, can we resolve that better?
+
+`resolve.server.ts` only ever built its stack from `gh pr list --state open`, so
+a workspace on a merged stack branch could not rank 2. Rank 3 is deliberately
+never a default, so it fell all the way through to **"create a worktree"** —
+proposing a second checkout of a stack the user already had open.
+
+Unlike the rest of this file, most of §19 was run against **public**
+repositories, and that output is verbatim and unredacted: `oven-sh/bun`,
+`vercel/turborepo`, `denoland/deno`, `cli/cli`. §19.7 is the one part that
+touches the operator's own private project, and it follows this file's usual
+redaction convention.
+
+### 19.1 Two mechanisms, and why one is not enough
+
+Two things hide a merged branch from the open-PR graph, and they need different
+answers:
+
+1. the merged PR is simply not in `--state open`;
+2. when a stack's bottom PR merges **and its head branch is deleted**, GitHub
+   *retargets* the child PR's base to trunk. The `base` -> `head` edge that
+   joined them is then gone from GitHub's data entirely, so widening the query
+   cannot rebuild the chain — the evidence was destroyed, not hidden.
+
+So: **pass 2** adds merged and closed PRs to the graph (answers 1, and answers 2
+whenever the head branch was *not* deleted), and **pass 3** proves membership
+from local commit ancestry with no network at all (answers 2 outright). Both
+produce `reason: "stack"`, `rank: 2`; neither invents a new reason.
+
+How real is case 2? Measured across nine large public repositories
+(200 open + 400 closed PRs each: `supabase/supabase`, `getsentry/sentry`,
+`PostHog/posthog`, `denoland/deno`, `grafana/grafana`, `facebook/react`,
+`microsoft/vscode`, `elastic/kibana`, `pytorch/pytorch`), the number of open PRs
+whose base is the head branch of a **merged** PR was **zero**. The same scan
+found open PRs based on the head branch of a **closed** PR, which GitHub does
+not retarget. That is direct evidence for the retargeting claim, and the reason
+pass 3 exists rather than being dismissed as redundant.
+
+### 19.2 `gh pr list --state closed` already includes merged PRs
+
+One call, not two. Measured on `cli/cli`:
+
+```
+$ gh pr list --repo cli/cli --state merged --limit 5 --json number,headRefName,baseRefName,state
+[{"baseRefName":"trunk","headRefName":"dependabot/github_actions/azure/login-3.0.2","number":14301,"state":"MERGED"}, ...]
+
+$ gh pr list --repo cli/cli --state closed --limit 5 --json number,headRefName,baseRefName,state
+[{"baseRefName":"trunk","headRefName":"docs/14075-claude-import","number":14316,"state":"CLOSED"},
+ {"baseRefName":"trunk","headRefName":"fix-typos-v2","number":14307,"state":"CLOSED"},
+ {"baseRefName":"trunk","headRefName":"codex/fix-14216-gist-utf8","number":14305,"state":"CLOSED"},
+ {"baseRefName":"trunk","headRefName":"dependabot/github_actions/azure/login-3.0.2","number":14301,"state":"MERGED"},
+ {"baseRefName":"trunk","headRefName":"dependabot/github_actions/codeql-actions-64c8a27a46","number":14300,"state":"MERGED"}]
+```
+
+Three CLOSED and two MERGED rows from `--state closed`: a merged PR *is* closed
+in GitHub's model, and each row's own `state` field separates them. So pass 2
+costs one `gh pr list`, not two, and the plugin trusts the row rather than the
+filter it asked for.
+
+### 19.3 Pass 2 against a live public repository
+
+`oven-sh/bun` #41129 is a real open PR whose parent PR is closed, so the
+open-only graph cannot see the chain at all. Run through the plugin's own
+`gh.server.ts`:
+
+```
+A. live public repo: open PR whose parent PR is CLOSED (oven-sh/bun #41129)
+  outage                             null
+  head -> base                       robobun/c67f52e3/typescript-runtime-field -> robobun/c67f52e3/scan-only-cold-helpers
+[send-to-paseo] oven-sh/bun has at least 200 open PRs; the stack lookup may be truncated and stack candidates may be missing
+  open-only members                  1154ms []
+  gh repo view trunk                 main
+[send-to-paseo] oven-sh/bun has at least 200 merged/closed PRs; only the 200 most recent were considered, so an older merged stack branch may not be recognised
+  widened members                    1175ms [{"number":41128,"branch":"robobun/c67f52e3/scan-only-cold-helpers","distance":1,"state":"closed"},{"number":41081,"branch":"ali/parser-scan-only-field","distance":2,"state":"open"}]
+  widened again (cached)             0ms
+```
+
+**The bug, then the fix, on live data.** `[]` before, and after widening a
+1-hop `closed` member plus — through it — a 2-hop `open` member that the
+open-only walk could not reach either. The chain reconnected *past* the
+non-open PR. 1.18s cold, 0ms cached.
+
+Both cap warnings fired, which is the intended behaviour rather than a failure:
+this repository has more than 200 open PRs and more than 200 merged/closed ones,
+and truncation is logged instead of being silent.
+
+### 19.4 The cap is a real limit, with a real number
+
+`denoland/deno` #35957 is the same shape, but its closed parent #35952 is older:
+
+```
+$ for n in 200 400 600; do ... gh pr list --repo denoland/deno --state closed --limit $n ...; done
+limit 200: 1140ms  rows=200  oldest=36229  has35952=false
+limit 400: 2145ms  rows=400  oldest=35845  has35952=true
+limit 600: 3469ms  rows=600  oldest=35443  has35952=true
+```
+
+At the shipped limit of 200 the parent is **not found** and the workspace stays
+rank 3. Raising the limit fixes that case and costs ~1s per extra 200 rows on a
+path that `/v1/resolve` runs while the user is typing, so 200 was kept —
+matching the existing open-PR bound — and the cap is logged. This is a known,
+measured limitation, not a claim that the mechanism always works.
+
+### 19.5 Widening makes trunk a graph node, and that had to be guarded
+
+The open-only graph could rely on "trunk is never a PR head". Merged PRs break
+it, and not hypothetically:
+
+```
+B. live public repo with a MERGED pull request whose head is trunk (vercel/turborepo)
+  non-open PRs with head=main        [{"baseRefName":"main","headRefName":"main","number":13875,"state":"MERGED"}]
+  open PRs based on main             13
+  head -> base                       fix/filter-range-merge-base-arg-order -> main
+  trunk                              main
+  members, name guard                0 []
+  members, fan-out guard only        0 []
+```
+
+`vercel/turborepo` PR #13875 is MERGED with `headRefName: "main"` — a release
+back-merge. Admitting that one row would make `main` a graph node and fuse all
+13 open PRs based on it into one false "stack", every one of them a rank-2
+candidate for every other. Two independent guards reject it, and each was
+measured alone: the trunk *name* (0 members), and the fan-out backstop for when
+trunk cannot be named at all — a non-open head that four or more PRs are based
+on (also 0 members). Only non-open rows are filtered, so open-PR behaviour is
+byte-identical to before.
+
+### 19.6 Pass 2 and pass 3 end to end, with a fixture and a scratch clone
+
+No public repository currently exhibits an open PR based on a *merged* PR's head
+branch (§19.1), so that variant was driven through a fake `gh` — the same
+technique `check-deps.mjs` uses — while pass 3 was driven against a real git
+repository built from scratch under `/tmp`.
+
+The fixture: open #943 `stack-top` -> `stack-middle`, open #942 `stack-middle` ->
+`stack-bottom`, **merged** #941 `stack-bottom` -> `main`, plus closed #800, a
+merged back-merge #700 with `headRefName: "main"`, and three unrelated open PRs
+based on `main`.
+
+```
+C. fake gh: three-PR stack whose bottom is MERGED and still linked
+  open-only members                  [{"number":942,"branch":"stack-middle","distance":1,"state":"open"}]
+  widened members                    [{"number":942,"branch":"stack-middle","distance":1,"state":"open"},{"number":941,"branch":"stack-bottom","distance":2,"state":"merged"}]
+  resolveStackBranches               [{"number":942,"branch":"stack-middle","distance":1,"state":"open"},{"number":941,"branch":"stack-bottom","distance":2,"state":"merged"}]
+  --- merged workspace only ---
+    rank 2 stack    merged-ws    branch=stack-bottom pr=941 state=merged
+    rank 3 project  other-ws     branch=unrelated-a pr=- state=(omitted)
+    rank 4 create   Create worktree for PR #943 branch=stack-top pr=- state=(omitted)
+  defaultCandidateIndex              0 -> merged-ws
+  --- merged + open sibling ---
+    rank 2 stack    open-ws      branch=stack-middle pr=942 state=(omitted)
+    rank 3 project  merged-ws    branch=stack-bottom pr=- state=(omitted)
+    rank 3 project  other-ws     branch=unrelated-a pr=- state=(omitted)
+    rank 4 create   Create worktree for PR #943 branch=stack-top pr=- state=(omitted)
+  defaultCandidateIndex              0 -> open-ws
+```
+
+The reported bug is fixed in the first case: the workspace on the merged branch
+is `rank: 2`, `reason: "stack"`, `stackPrNumber: 941`, `stackPrState: "merged"`,
+and it is the default instead of "create". The three unrelated open PRs based on
+`main`, and the merged back-merge whose head is `main`, produced no members —
+the guards held on the fixture too.
+
+**The second case is the cost of the short-circuit, recorded as a cost.** When a
+workspace already sits on an open sibling, passes 2 and 3 are skipped, so the
+merged workspace reads `rank: 3` rather than `rank: 2`. The default is still
+correct (the open sibling), because a merged member can never outrank an open one
+— but the merged workspace loses its "stack #941" label. That is the deliberate
+trade for §19.7's timings.
+
+The scratch clone for pass 3, built exactly as GitHub's squash button behaves:
+
+```sh
+git init --bare --initial-branch=main origin.git
+git clone origin.git clone && cd clone
+# base commit on main, push, then set refs/remotes/origin/HEAD
+git remote set-head origin -a
+git checkout -b stack-bottom && ... && git commit -m bottom
+git checkout -b stack-middle && ... && git commit -m middle
+git push origin stack-bottom stack-middle
+git checkout main && git merge --squash stack-bottom && git commit -m 'bottom (squashed)'
+```
+
+with a fake `gh` that knows only open #942 `stack-middle` -> `main`, i.e. the
+branch was deleted on the remote and the child retargeted:
+
+```
+D. scratch clone: squash-merged bottom branch, kept locally
+  origin/HEAD trunk                  main
+  contains(stack-bottom)             ["origin/stack-bottom","origin/stack-middle","stack-bottom","stack-middle"]
+  => ancestor of main?               false
+  contains(main)                     ["main","origin/HEAD","origin/main"]
+  unknown ref                        null
+  not a repo                         null
+  option-looking ref                 null
+  open graph alone                   []
+[send-to-paseo] stack-bottom is an ancestor of stack-middle and not of main, so it is in this stack (no pull request of its own)
+  resolveStackBranches               [{"number":null,"branch":"stack-bottom","distance":99999,"state":null}]
+    rank 2 stack    merged-ws    branch=stack-bottom pr=- state=(omitted)
+    rank 3 project  trunk-ws     branch=main pr=- state=(omitted)
+    rank 4 create   Create worktree for PR #942 branch=stack-middle pr=- state=(omitted)
+  defaultCandidateIndex              0 -> merged-ws
+[send-to-paseo] stack-bottom is an ancestor of stack-middle and not of main, so it is in this stack (merged PR #941)
+  with the merged PR visible         [{"number":941,"branch":"stack-bottom","distance":99999,"state":"merged"}]
+    rank 2 stack    merged-ws    branch=stack-bottom pr=941 state=merged
+    rank 3 project  trunk-ws     branch=main pr=- state=(omitted)
+    rank 4 create   Create worktree for PR #942 branch=stack-middle pr=- state=(omitted)
+  defaultCandidateIndex              0 -> merged-ws
+  contains(stack-bottom) after       ["main","origin/stack-bottom","origin/stack-middle","stack-bottom","stack-middle","true-merged"]
+  resolveStackBranches after         []
+```
+
+Reading that from the top:
+
+- **`open graph alone []`** — the bug. GitHub has no edge left to follow.
+- **pass 3 finds it anyway**, from `git branch -a --contains` alone: rank 2, and
+  the default. With no PR of its own it carries neither `stackPrNumber` nor
+  `stackPrState`, which is why `stackPrNumber` had to become genuinely optional.
+- **`with the merged PR visible`** — same run, but the merged PR #941 is in the
+  merged/closed list while still being disconnected from the stack. Ancestry
+  proves membership, the merged list supplies the number and the state:
+  `stackPrNumber: 941`, `stackPrState: "merged"`. **This is the reported bug,
+  end to end.**
+- **the workspace on `main` stayed rank 3.** Without the trunk guard it would be
+  rank 2 for every PR in the repository, since trunk is an ancestor of every
+  branch cut from it.
+- **`resolveStackBranches after []`** — the guard's cost, measured. After a true
+  merge commit pulls `stack-bottom`'s commits into `main`, the branch becomes
+  indistinguishable from any other long-merged branch and pass 3 correctly
+  declines. Pass 2 is what covers the true-merge case; the combination "true
+  merge commit AND head branch deleted AND child retargeted" is covered by
+  neither, and falls back to rank 3 and "create".
+- **three silent-degradation paths** returned `null` rather than throwing: an
+  unknown ref, a directory that is not a repository, and an option-looking ref
+  name (`--all`, rejected before it can reach `git`).
+
+The composed prompt, from the same run — the three variants of the two lines
+that a sibling-branch target adds:
+
+```
+E. composed prompt for a merged sibling branch
+  --- workspaceBranchState = null ---
+    [Sent from Graphite — github/acmegizmos/gizmo-poc PR #943]
+    Title: top of the stack
+    Branch: stack-top -> stack-middle
+    PR: https://github.com/acmegizmos/gizmo-poc/pull/943
+    Workspace branch: stack-bottom (NOT this PR's branch)
+    Note: this worktree is on a different branch of the same stack. If your change belongs to PR #943, check out stack-top first.
+
+    Fix the conflicts
+  --- workspaceBranchState = merged ---
+    [Sent from Graphite — github/acmegizmos/gizmo-poc PR #943]
+    Title: top of the stack
+    Branch: stack-top -> stack-middle
+    PR: https://github.com/acmegizmos/gizmo-poc/pull/943
+    Workspace branch: stack-bottom (NOT this PR's branch; its own pull request is already merged)
+    Note: this worktree is on a branch of this stack whose pull request has already been merged, so it may be behind the rest of the stack. If your change belongs to PR #943, check out stack-top first.
+
+    Fix the conflicts
+  --- workspaceBranchState = closed ---
+    [Sent from Graphite — github/acmegizmos/gizmo-poc PR #943]
+    Title: top of the stack
+    Branch: stack-top -> stack-middle
+    PR: https://github.com/acmegizmos/gizmo-poc/pull/943
+    Workspace branch: stack-bottom (NOT this PR's branch; its own pull request was closed without merging)
+    Note: this worktree is on a branch of this stack whose pull request was closed without merging, so it may be behind the rest of the stack. If your change belongs to PR #943, check out stack-top first.
+
+    Fix the conflicts
+```
+
+The old wording — "a different branch of the same stack" — is kept whenever the
+state is unknown, because it is never *wrong*, only less specific. What made it
+misleading for a merged branch is that it reads as a live sibling, and a merged
+branch is behind by construction: the stack has been restacked past it. The
+advice is identical in all three; only the description of where the agent is
+standing changes.
+
+### 19.7 Live bridge, and what it cost
+
+Against the running plugin and the operator's own project (redacted per this
+file's convention: 38 workspaces, 37 of them on branches unrelated to PR #965
+and all 38 unrelated to PR #968):
+
+```
+$ curl -s -X POST http://127.0.0.1:7788/v1/resolve -H "Authorization: Bearer <token>" ...
+PR #965  http 200  total 0.940601s  ranks {"2:stack":1,"3:project":37,"4:create":1} default 0 stack rank2 [[964,"(omitted)"]]
+PR #968  http 200  total 1.615554s  ranks {"3:project":38,"4:create":1} default 38 create rank2 []
+PR #965  http 200  total 0.009099s  ranks {"2:stack":1,"3:project":37,"4:create":1} default 0 stack rank2 [[964,"(omitted)"]]
+```
+
+- **Backward compatibility holds on the wire.** #965's stack sibling is an open
+  PR, so `stackPrState` is *omitted* — exactly what an extension that predates
+  the field assumes. `defaultCandidateIndex` is a valid index in both responses
+  and still points at the `create` entry (index 38) when nothing better exists.
+- **The short-circuit is why #965 costs 0.94s.** Before it, the same request took
+  **2.07s**: "some workspace is unplaced" is almost always true in a project
+  with 38 workspaces, so it is far too weak a trigger for a 1.4s pair of
+  lookups. The wider passes now run only when the answer could still change —
+  no exact match and no open sibling — because a merged member can never outrank
+  either.
+- **1.62s is the honest worst case**: a PR that matches nothing at all pays for
+  the merged/closed list. Once per five minutes per repository; 0.009s warm.
+- **Ancestry is the cheap half.** On the same clone (4,692 refs),
+  `git branch -a --contains <branch> --format=%(refname)` measured 14ms, 15ms,
+  16ms and 26ms for four different branches, so the eight-branch cap is ~0.15s
+  worst case.
+
+### 19.8 A finding that argues against over-claiming
+
+Scanning that project's own workspaces: **18 of 32 with a readable branch sit on
+a branch whose PR is already MERGED**, one on a CLOSED one. So the situation the
+user hit is not an edge case. But of those, zero currently qualify as rank 2
+under either mechanism, and that is *correct*: their stacks are fully merged, no
+open PR descends from them, and
+
+```
+26ms  <merged branch A>  refs=1  inMain=false
+15ms  <merged branch B>  refs=1  inMain=false
+14ms  <merged branch C>  refs=1  inMain=false
+16ms  <merged branch D>  refs=1  inMain=false
+```
+
+each is contained by *only itself* — nothing in the repository descends from it.
+A workspace on a branch whose stack has entirely merged is genuinely not in the
+stack of whatever PR you are now looking at, and rank 3 is the right answer.
+
+The fix therefore applies to a narrower window than "workspace on a merged
+branch": the window where the stack still has an open PR above the merged one.
+That is exactly the window in which the user was working when they hit it, and
+it is the only window in which any answer other than rank 3 would be honest.
+
+### 19.9 Regression gates
+
+```
+$ npm run typecheck
+(no output)
+
+$ node check-deps.mjs | tail -1
+45/45 checks passed
+
+$ time paseo plugin reload send-to-paseo
+paseo plugin reload send-to-paseo  0.68s user 0.10s system 78% cpu 1.000 total
+$ time paseo plugin reload send-to-paseo
+paseo plugin reload send-to-paseo  0.78s user 0.10s system 83% cpu 1.064 total
+
+$ paseo plugin ls
+PLUGIN                STATUS      ENABLED   DIRECTORY                                  ERROR
+send-to-paseo         running     yes       .../send-to-paseo/plugin
+
+$ paseo plugin logs send-to-paseo | tail -6
+[paseo] Plugin ready
+[send-to-paseo] bridge listening on http://127.0.0.1:7788
+[send-to-paseo] dependency git: ok — git version 2.51.2 at /opt/homebrew/bin/git
+[send-to-paseo] dependency gh: ok — gh version 2.98.0 (2026-08-20) at /opt/homebrew/bin/gh
+[send-to-paseo] plugin subprocess PATH=~/.local/bin:...:/opt/homebrew/bin:...
+```
+
+Two reloads, ~1s each, no hang, no stack traces.
+
+`check-deps.mjs` was deliberately **not** extended: its 45 checks are a pinned
+count referenced from `AGENTS.md`, and none of them touches stack discovery.
+
+### 19.10 Not verified
+
+- **The extension's e2e suite was not run.** `extension/**` and `test/**` were
+  being rewritten concurrently by another change, so a run would have measured
+  that work rather than this one. No wire field the extension reads changed
+  shape: `stackPrState` is additive and omitted for `open`, the reason and rank
+  vocabularies are untouched, and `contract` stays at **1**.
+- **No `POST /v1/send` was executed on the merged-branch path.** The composed
+  prompt was verified as a pure function of its inputs (§19.6, and the three
+  variants are now pinned in CONTRACT.md's "Prompt composition"),
+  and the state lookup that feeds it reuses `resolveStackBranches`, verified
+  above. A real send starts a real agent on the machine.
+- **A merged-parent chain on live public data.** Nine large repositories had
+  zero instances (§19.1), which is itself the finding; the merged variant was
+  verified through a fake `gh` and the closed variant through `oven-sh/bun`.
+- **The true-merge-commit + deleted-branch + retargeted combination is not
+  covered by the implementation**, not merely unverified. §19.6 measures it
+  failing, and it degrades to the pre-existing behaviour.

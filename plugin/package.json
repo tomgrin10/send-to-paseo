@@ -1,7 +1,7 @@
 {
   "name": "send-to-paseo",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local HTTP bridge that starts a Paseo agent in the workspace belonging to a pull request.",
   "scripts": {
     "typecheck": "tsc --noEmit"

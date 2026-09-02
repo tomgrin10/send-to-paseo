@@ -197,6 +197,17 @@ hidden"), so a scrape could omit the very sibling the user's workspace was sitti
 is still honoured for members the graph did not find — in practice a stack PR that is closed or
 merged — and sending an empty list is now fully supported.
 
+**As of 2026-09-02 stack discovery also covers merged and closed pull requests.** A branch whose
+PR has merged is still a branch of the stack as far as a user's workspace is concerned, and the
+open-PR graph could not see it at all: it is absent from `--state open`, and when its head branch
+is deleted on merge GitHub *retargets* the child PR's base to trunk, destroying the `base` ->
+`head` edge that joined them. So the bridge now has three passes, each reached only when the
+previous one left a workspace unexplained — the open-PR graph, then merged and closed PRs, then
+purely local `git` ancestry (a stack branch below this PR is by definition an ancestor of it).
+The last of those can even recognise a stack branch with no PR at all, which is why
+`stackPrNumber` is not guaranteed on a rank-2 candidate. All of it is still best-effort: a bridge
+that cannot answer returns fewer rank-2 entries, never an error.
+
 **200**
 ```json
 {
@@ -226,6 +237,19 @@ merged — and sending an empty list is now fully supported.
       "agentCount": 2
     },
     {
+      "kind": "existing",
+      "workspaceId": "wks_8b2c1e9f4a730d65",
+      "label": "plucky-otter",
+      "branch": "giz-1132-retire-legacy-cache-flag",
+      "cwd": "~/.paseo/worktrees/pj4k2wxb/plucky-otter",
+      "isolation": "worktree",
+      "rank": 2,
+      "reason": "stack",
+      "stackPrNumber": 941,
+      "stackPrState": "merged",
+      "agentCount": 0
+    },
+    {
       "kind": "create",
       "label": "Create worktree for PR #942",
       "branch": "giz-1133-widget-backed-inventory-audit-rule",
@@ -253,22 +277,50 @@ Graphite's own UI displays is display-only and never appears here.
 `candidates` is sorted ascending by `rank`, and always contains at least the `create` entry.
 
 - `rank: 1` / `reason: "exact"` — workspace HEAD == PR head branch
-- `rank: 2` / `reason: "stack"` — workspace HEAD is another branch in this stack. Carries
-  `stackPrNumber`.
+- `rank: 2` / `reason: "stack"` — workspace HEAD is another branch in this stack, whatever the
+  state of that branch's own pull request. Carries `stackPrNumber` **when the branch has a pull
+  request**, and `stackPrState` when that PR is not open.
 - `rank: 3` / `reason: "project"` — any other workspace in the project
 - `rank: 4` / `reason: "create"` — the synthetic create option
+
+The reason and rank sets are **closed**. A merged or closed stack branch is still
+`reason: "stack"`, `rank: 2`; it does not get a reason of its own, because an extension built
+against an earlier version of this contract renders an unrecognised reason as a raw string.
+
+`stackPrState` is `"open" | "merged" | "closed"`, and is **omitted when the state is open** —
+which is exactly what an extension that predates the field already assumes, and what makes it
+additive. It is present only alongside `stackPrNumber`: a rank-2 candidate can have neither,
+which means the bridge established that the branch belongs to the stack (from local commit
+ancestry) but the branch has no pull request of its own. A consumer MUST NOT read a missing
+`stackPrState` as "unknown".
 
 `defaultCandidateIndex` indexes into `candidates`. The bridge picks, in order:
 
 1. the `rank: 1` exact branch match, else
-2. the `rank: 2` stack match nearest this PR — fewest hops along the `base` -> `head` chain,
-   ties broken by lowest `stackPrNumber`, else
+2. the best `rank: 2` stack match, else
 3. the `rank: 4` create entry.
+
+"Best" among rank-2 candidates is, in order:
+
+1. an **open** stack PR's branch before a merged or closed one, and both before a stack branch
+   with no PR at all. A live sibling is somewhere work is still happening; a merged branch is
+   history the stack has already been restacked past. This comparison comes *first*, so an open
+   sibling eight hops away beats a merged one at one hop;
+2. fewest hops along the `base` -> `head` chain. A hop count measured from GitHub's own graph
+   always beats one the bridge could not measure, and both beat membership inferred from local
+   git ancestry alone;
+3. lowest `stackPrNumber`, then label order.
 
 `rank: 3` is deliberately never a default: an unrelated workspace in the same project is a worse
 guess than a fresh worktree. Preferring rank 2 over create matters because one workspace per
 *stack* is a normal way to work — you open PR #4 while the worktree sits on PR #7's branch — and
-defaulting to create silently proposed a second checkout of a stack already open.
+defaulting to create silently proposed a second checkout of a stack already open. Extending that
+to *merged* branches matters for the same reason: after the bottom of a stack merges, the
+workspace parked on it was falling all the way through to "create a worktree", proposing a second
+checkout of a stack the user already had open.
+
+`defaultCandidateIndex` is always a valid index. Whatever the bridge can or cannot determine
+about the stack, `candidates` ends with the `create` entry and that is the fallback.
 
 `modes` is the same flat, provider-tagged list as on `/v1/ping`.
 
@@ -429,12 +481,34 @@ Workspace branch: giz-1132-retire-legacy-cache-flag (NOT this PR's branch)
 Note: this worktree is on a different branch of the same stack. If your change belongs to PR #942, check out giz-1133-widget-backed-inventory-audit-rule first.
 ```
 
+When the bridge also knows that branch's own pull request is **merged** or **closed**, the same
+two lines say so instead, because "a different branch of the same stack" reads as a live sibling
+and a merged branch is behind by construction — the stack has been restacked past it:
+
+```
+Workspace branch: giz-1132-retire-legacy-cache-flag (NOT this PR's branch; its own pull request is already merged)
+Note: this worktree is on a branch of this stack whose pull request has already been merged, so it may be behind the rest of the stack. If your change belongs to PR #942, check out giz-1133-widget-backed-inventory-audit-rule first.
+```
+
+and, for a pull request closed without merging:
+
+```
+Workspace branch: giz-1132-retire-legacy-cache-flag (NOT this PR's branch; its own pull request was closed without merging)
+Note: this worktree is on a branch of this stack whose pull request was closed without merging, so it may be behind the rest of the stack. If your change belongs to PR #942, check out giz-1133-widget-backed-inventory-audit-rule first.
+```
+
+The advice is identical in all three; only the description of where the agent is standing
+changes. When the state cannot be established the first, generic wording is used, which is never
+wrong — only less specific.
+
 Without them the agent would be told it is on the PR's branch while the worktree is checked out
 elsewhere, and could commit to the wrong branch. The lines are omitted when the branches match
 and when the branch cannot be determined; nothing is guessed.
 
 These prompt lines are plugin **behaviour**, not wire shape — the extension never parses the
-composed prompt — so `contract` stays at 1. Both verification suites were re-run.
+composed prompt — so `contract` stays at 1. Both verification suites were re-run when the first
+form landed; the merged/closed wording was verified on the plugin side only (see
+`plugin/VERIFICATION.md` §19), because it changes no wire field the extension reads.
 
 With `pageUrl` absent the header is byte-for-byte the first form above. This is the only way
 `pageUrl` affects anything.
@@ -487,6 +561,16 @@ Resolved after the first round of implementation, when both sides found these un
   narrow an existing field's accepted values — any of those is a breaking change and bumps
   `contract`. `modeId` on `/v1/send` and `modes`/`resolvedModeId` on `/v1/ping` and
   `/v1/resolve` were added under this clause, with `contract` staying at **1**.
+
+  `stackPrState` on a `/v1/resolve` candidate was added the same way, and `contract` stays at
+  **1** for it too. It is purely additive: the reason and rank vocabularies are unchanged, a
+  merged stack branch is still `reason: "stack"` / `rank: 2`, the field is omitted for the `open`
+  state an older extension already assumes, and an extension that has never heard of it simply
+  does not read it. What *did* change is plugin behaviour — which workspaces qualify as rank 2,
+  how rank-2 candidates are ordered among themselves, and two sentences of the composed prompt —
+  and none of that is wire shape. `stackPrNumber` also became genuinely optional on a rank-2
+  candidate rather than merely documented as such; it was already declared optional, so nothing
+  narrowed.
 
 ## Test mode (how the extension is testable without Chrome)
 

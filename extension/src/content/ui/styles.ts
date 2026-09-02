@@ -240,9 +240,17 @@ ${TOKENS}
   font-family: var(--stp-font);
 }
 
+/* Height-capped and column-flexed so the BODY is the scroller. The Target
+   dropdown opens in normal flow and grows the card (ui/combobox.ts explains
+   why it is not an absolute overlay); without this cap a tall dropdown in a
+   short window could push the card past the viewport, which position() can
+   only clamp, not shrink. */
 .card {
   width: 392px;
   max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 24px);
+  display: flex;
+  flex-direction: column;
   background: var(--stp-bg);
   color: var(--stp-fg);
   border: 1px solid var(--stp-border);
@@ -250,6 +258,8 @@ ${TOKENS}
   box-shadow: var(--stp-shadow);
   overflow: hidden;
 }
+
+header, footer { flex: none; }
 
 header {
   display: flex;
@@ -262,12 +272,40 @@ header {
 }
 
 .title { font: 600 12px/1.3 var(--stp-font); letter-spacing: 0.01em; }
+.head-right { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .pr { font: 500 11px/1.3 var(--stp-mono); color: var(--stp-fg-muted); }
 
-.body { padding: 12px; display: grid; gap: 10px; }
+/* The settings cog. Transparent until hovered so it reads as a secondary
+   affordance next to the PR reference rather than competing with Send, and
+   sized 22px so it stays inside the header's 10px padding without growing it. */
+.cog {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--stp-fg-muted);
+  cursor: pointer;
+}
+.cog:hover { background: var(--stp-bg-hover); color: var(--stp-fg); }
+.cog:focus-visible {
+  outline: 2px solid var(--stp-accent);
+  outline-offset: 1px;
+  color: var(--stp-fg);
+}
 
-label.field { display: grid; gap: 4px; }
-label.field > span.lbl {
+.body { padding: 12px; display: grid; gap: 10px; overflow-y: auto; }
+
+/* ".field", not "label.field": the Target field cannot be a <label>, because a
+   label wrapping its own control forwards clicks to it and would re-toggle the
+   combobox trigger. */
+.field { display: grid; gap: 4px; }
+.field > span.lbl {
   font: 600 10px/1 var(--stp-font);
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -298,6 +336,115 @@ select > option.danger { color: var(--stp-warn); }
 }
 textarea::placeholder { color: var(--stp-fg-muted); opacity: 0.62; }
 select:focus, textarea:focus { outline: 2px solid var(--stp-accent); outline-offset: -1px; border-color: var(--stp-accent); }
+
+/* ------------------------------------------------------------------------- *
+ * Target combobox (ui/combobox.ts)
+ *
+ * Every colour is one of the --stp-* tokens, which are defined for light AND
+ * dark in TOKENS above. Nothing here is site-specific: unlike the button, the
+ * popover paints its own surface on both Graphite and GitHub, so a hardcoded
+ * hex would be wrong on one of the four combinations rather than right on any.
+ * ------------------------------------------------------------------------- */
+
+.combo { position: relative; display: grid; gap: 4px; }
+[hidden] { display: none !important; }
+
+.combo-trigger {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 30px;
+  margin: 0;
+  padding: 0 26px 0 8px;
+  font: 400 13px/28px var(--stp-font);
+  text-align: left;
+  color: var(--stp-fg);
+  background: var(--stp-bg);
+  border: 1px solid var(--stp-border);
+  border-radius: var(--stp-radius);
+  cursor: pointer;
+  /* The option label is long and the card is a fixed 392px, so the label is
+     clipped here rather than allowed to stretch the card. */
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* Caret drawn in CSS, deliberately: appending a glyph node would put it in
+   trigger.textContent, which is what both a screen reader and the e2e suite
+   read as the committed value. */
+.combo-trigger::after {
+  content: "";
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin-top: -5px;
+  border-right: 1.5px solid var(--stp-fg-muted);
+  border-bottom: 1.5px solid var(--stp-fg-muted);
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+.combo-trigger:hover { background: var(--stp-bg-hover); border-color: var(--stp-border-strong); }
+.combo-trigger:focus-visible,
+.combo[data-stp-combo-open="true"] .combo-trigger {
+  outline: 2px solid var(--stp-accent);
+  outline-offset: -1px;
+  border-color: var(--stp-accent);
+}
+
+.combo-panel {
+  display: grid;
+  gap: 0;
+  border: 1px solid var(--stp-border-strong);
+  border-radius: var(--stp-radius);
+  background: var(--stp-bg);
+  box-shadow: var(--stp-shadow);
+  overflow: hidden;
+}
+
+.combo-search {
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  font: 400 13px/1.45 var(--stp-font);
+  color: var(--stp-fg);
+  background: var(--stp-bg-subtle);
+  border: 0;
+  border-bottom: 1px solid var(--stp-border);
+  border-radius: 0;
+  outline: none;
+}
+.combo-search::placeholder { color: var(--stp-fg-muted); opacity: 0.62; }
+
+/* Scrollable and capped, so a project with thirty workspaces cannot make the
+   dropdown taller than the window. vh keeps the cap honest in a short one. */
+.combo-list {
+  max-height: min(216px, 34vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  position: relative;
+}
+
+.combo-option {
+  padding: 6px 8px;
+  font: 400 12.5px/1.4 var(--stp-font);
+  color: var(--stp-fg);
+  cursor: pointer;
+}
+.combo-option[data-stp-active="true"] { background: var(--stp-bg-hover); }
+.combo-option[aria-selected="true"] { font-weight: 600; }
+.combo-option[aria-selected="true"]::before {
+  content: "✓ ";
+  color: var(--stp-accent);
+}
+.combo-option[aria-selected="false"]::before { content: ""; }
+
+.combo-empty {
+  padding: 8px;
+  font: 400 12px/1.4 var(--stp-font);
+  color: var(--stp-fg-muted);
+}
 
 .target-summary {
   font: 500 12px/1.45 var(--stp-font);

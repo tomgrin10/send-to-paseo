@@ -65,6 +65,13 @@ the shadow host in **bubble** phase — late enough that our own in-shadow handl
 run (Cmd/Ctrl+Enter still sends), and without `preventDefault`, so characters still land in the
 textarea. Both shadow hosts get it. Any new surface that takes input needs it too.
 
+**This is why the Target dropdown renders inside the popover's own shadow root** rather than
+being portalled into a host of its own next to `<body>`. Its search box is a second text input,
+i.e. exactly "a new surface that takes input"; being a child of the card means it inherits the
+one `containKeyboard()` the popover already installed. Cases **19b** and **28b** type the same
+shortcut-shaped string into that search box on both sites and assert the same three things
+(byte-exact value, focus retained, zero bubble-phase hits).
+
 Read that file's header comment before touching key handling; it also records the ceiling —
 `window`-capture listeners are unreachable from a `document_idle` content script.
 `test/e2e.mjs` case **19** (Graphite) and case **28** (GitHub) are the guards, and both type
@@ -128,7 +135,8 @@ survives reloads as long as you don't move the folder.
 
 1. In Paseo, open the **send-to-paseo** plugin surface and copy the **pairing token**.
    (It also lives at `$PASEO_HOME/plugin-data/send-to-paseo/settings.json`, mode `0600`.)
-2. Click the extension's toolbar icon (or **Details → Extension options**).
+2. Click the extension's toolbar icon (or the cog in the composer's header, or
+   **Details → Extension options**).
 3. Paste the token. Settings save as you type.
 4. Click **Test connection**. It tells you which of these you have:
 
@@ -191,6 +199,8 @@ extension/
   src/content/mainworld.ts      MAIN-world history patch
   src/content/popover.ts        shadow-DOM composer (target / instruction / provider / mode)
   src/content/bridge.ts         chrome.runtime.sendMessage wrapper
+  src/content/ui/combobox.ts    the searchable, non-native Target picker
+  src/content/ui/keyboard.ts    containKeyboard() — see item 3 at the top
   src/content/ui/{button,styles,dom}.ts
   src/content/adapters/
     types.ts                    the SiteAdapter interface
@@ -319,6 +329,54 @@ button in both themes.
 Style isolation is all a shadow root buys you, though — **events still cross it**, which is
 what `containKeyboard()` exists to deal with. See item 3 above.
 
+### The Target combobox
+
+The Target picker is **not** a `<select>`. A native select cannot be filtered, and a real Paseo
+install has dozens of workspaces; the one thing the user reliably knows is the workspace
+*name*. So `src/content/ui/combobox.ts` renders a trigger button plus a panel containing a
+search input and a `role="listbox"`.
+
+- **What the query matches**, case-insensitively, on substrings: the workspace label, the
+  branch name, the reason tag (`exact match`, `stack #941`, `same project`), and the PR number
+  of the create row — typed bare or with a `#`, because the haystack carries both spellings.
+  Whitespace splits the query into tokens that must *each* appear somewhere, in any order, so
+  `auth stack` finds the stack workspace whose slug contains "auth". The haystack is built
+  separately from the visible label (`candidateSearchText()` in `popover.ts`), not scraped from
+  it — "create" and "new worktree" match the create row even though it does not say either.
+- **Keys.** ArrowDown/ArrowUp move the active row and **wrap** at both ends; Home/End jump;
+  Enter commits the active row; **Tab commits the active row and hands focus on to the
+  instruction box**, Shift+Tab closes the dropdown without committing and retreats to the
+  trigger. Typing a printable character on the closed trigger opens the list and seeds the
+  query with it. Committing anything moves focus to the instruction box, which is what lets a
+  keyboard-only user finish with ⌘/Ctrl+Enter and never touch the mouse (case 31).
+- **Esc and click-outside layer.** The popover owns a document-level *capturing* `keydown`
+  listener, so it sees Escape before the event has even descended into the shadow tree — a
+  listener on the search input could never win that race. It therefore asks the combobox first
+  (`handleEscape()`): dropdown open → close the dropdown only and refocus the trigger; dropdown
+  closed → close the popover. `pointerdown` layers the same way: inside the card but outside
+  the dropdown closes the dropdown, outside the card closes everything. Case 32.
+- **It grows the card**, because the panel is in normal flow (an absolutely-positioned one
+  would be clipped by the card's `overflow: hidden`). Every open, close and refilter calls back
+  into `position()` so the card re-anchors, the option list is capped at `min(216px, 34vh)` and
+  scrolls, and `.card` itself is capped at `calc(100vh - 24px)` with the body as the scroller —
+  without that cap the open dropdown overflowed a 620px-tall window by 50px, which `position()`
+  can clamp but not shrink. Case 14 asserts all four edges with the dropdown open.
+- **ARIA.** `role="combobox"` on the input with `aria-expanded`, `aria-controls` and
+  `aria-activedescendant`; `role="listbox"` on the panel; `role="option"` with `aria-selected`
+  on each row; `aria-haspopup="listbox"` + `aria-expanded` on the trigger. An empty result set
+  renders a visible **No workspace matches** row (a sibling of the listbox, not a child of it —
+  a listbox whose children are not options is invalid ARIA) and Enter is then a no-op that
+  leaves the existing selection alone.
+- **Test hooks.** `data-stp-candidates` stays on the trigger, and its `textContent` is exactly
+  the committed option's label (the caret is a CSS `::after`, deliberately, so it does not end
+  up in that string). Plus `data-stp-combobox[data-stp-combo-open]`, `data-stp-combo-search`,
+  `data-stp-combo-list`, `data-stp-combo-option[data-stp-index][data-stp-active]` and
+  `data-stp-combo-empty`. Option rows exist **only while the dropdown is open**, so a test
+  cannot read a stale list — it has to drive the real widget.
+
+Provider and Mode are still native `<select>`s. They are short, closed lists that nobody needs
+to search.
+
 ### Contract handling
 
 The client mirror of CONTRACT.md v1 lives in `src/shared/contract.ts`, and
@@ -380,6 +438,9 @@ Specific behaviours worth knowing:
 | Popover says **Token rejected** on the options page | The bridge is up and refused the token. Re-copy it from the Paseo plugin surface. Distinct from "Can't reach the Paseo bridge". |
 | Success state says **Dry run — no agent created** | The plugin is running with `SEND_TO_PASEO_DRY_RUN=1`. Nothing was created and the ids are synthetic. Unset the env var and reload the plugin. |
 | **Default provider** dropdown is empty | Providers come from an authenticated ping. Paste a valid token and click **Test connection**. |
+| Esc closes the whole composer while the Target dropdown is open | The layering in `Popover.open()`'s capturing `keydown` listener is gone — it must ask `candidateCombo.handleEscape()` before `closePopover()`. `test/e2e.mjs` case 32 is the guard. |
+| The Target dropdown stays open after clicking elsewhere in the card | Same listener, `pointerdown` half: a path inside the host but outside the combobox must close the dropdown. Case 32. |
+| Typing in the Target search box triggers Graphite/GitHub shortcuts | The dropdown was moved into a shadow host of its own and lost `containKeyboard()`. It has to render inside the popover's shadow root. Cases 19b and 28b. |
 | Typing in the instruction box triggers Graphite/GitHub shortcuts, or characters go missing | `containKeyboard()` isn't running — you're on a stale build, or key handling was refactored. Rebuild (`npm run build`), reload the extension, reload the tab. See item 3 at the top of this file; `test/e2e.mjs` cases 19 (Graphite) and 28 (GitHub) are the regression tests. |
 | Button points at the wrong PR after browsing the stack | The MAIN-world history shim isn't running — check `chrome://extensions` → Errors and the page's CSP. See the warning at the top of this file. |
 | Everything breaks after `npm run build` | You may have `dist-test/` loaded instead of `dist/`. Check the extension name in `chrome://extensions` — the test build is labelled "(test build)". |

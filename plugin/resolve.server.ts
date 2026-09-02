@@ -11,17 +11,27 @@ import {
   type ProviderOption,
   type ResolveRequest,
   type ResolveResponse,
+  type StackPrState,
 } from "./contracts.shared";
 import { withPaseo } from "./daemon.server";
 import {
+  ANCESTRY_STACK_DISTANCE,
   UNKNOWN_STACK_DISTANCE,
   lookupPr,
+  repoDefaultBranch,
   viewStackBranches,
   viewStackGraph,
   type GhOutage,
+  type StackGraph,
   type StackMember,
 } from "./gh.server";
-import { parseGithubRemote, readBranch, readOriginOwnerRepo } from "./git.server";
+import {
+  branchesContaining,
+  parseGithubRemote,
+  readBranch,
+  readOriginOwnerRepo,
+  readTrunkBranch,
+} from "./git.server";
 import { settings } from "./settings.server";
 
 /**
@@ -142,6 +152,51 @@ export async function listProjectWorkspaces(
 }
 
 /**
+ * A workspace with the branch it is on, read once.
+ *
+ * Stack discovery needs the branch list *before* it can decide whether the
+ * cheap open-PR graph was enough, and candidate building needs it again, so the
+ * read happens once and is passed around rather than repeated.
+ */
+export interface WorkspaceBranch {
+  workspace: PaseoWorkspace;
+  branch: string | null;
+}
+
+export async function readWorkspaceBranches(
+  workspaces: readonly PaseoWorkspace[],
+): Promise<WorkspaceBranch[]> {
+  const result: WorkspaceBranch[] = [];
+  for (const workspace of workspaces) {
+    result.push({ workspace, branch: await workspaceBranch(workspace) });
+  }
+  return result;
+}
+
+/**
+ * Ordering weight for a rank-2 candidate's PR state.
+ *
+ * An open sibling outranks a merged or closed one *before* hop count is even
+ * considered: a workspace on a live sibling branch of the stack is somewhere
+ * work is still happening, while a merged branch is history the stack has
+ * already moved past. `null` — a stack branch with no PR at all, which only
+ * local ancestry can find — is the weakest claim of the four.
+ */
+function stateWeight(state: StackPrState | null | undefined): number {
+  switch (state) {
+    case undefined:
+    case "open":
+      return 0;
+    case "merged":
+      return 1;
+    case "closed":
+      return 2;
+    default:
+      return 3;
+  }
+}
+
+/**
  * Step 5 of the ladder. `candidates` is sorted ascending by rank and always
  * ends with the synthetic `create` entry, so the extension can offer creating a
  * worktree even when nothing matched.
@@ -150,22 +205,29 @@ export async function buildCandidates(input: {
   paseo: PaseoApi;
   ref: PrRef;
   pr: PrPayload;
-  projectId: string;
+  workspaces: readonly WorkspaceBranch[];
   stackBranches: Map<string, StackMember>;
   /** Non-null when `gh` could not be consulted; carried into the create label. */
   outage?: GhOutage | null;
 }): Promise<{ candidates: Candidate[]; defaultCandidateIndex: number }> {
-  const workspaces = await listProjectWorkspaces(input.paseo, input.projectId);
   const counts = await agentCounts(input.paseo);
 
   const existing: ExistingCandidate[] = [];
   /** Stack distance per candidate, used only for ordering. Not on the wire. */
   const distanceOf = new Map<string, number>();
-  for (const workspace of workspaces) {
-    const branch = await workspaceBranch(workspace);
+  /**
+   * Stack PR state per candidate, for ordering. Read from here rather than from
+   * the candidate's `stackPrState`, because that field is omitted both for
+   * "open" and for a branch with no PR — two very different claims that must
+   * not sort as one.
+   */
+  const stateOf = new Map<string, StackPrState | null>();
+  for (const { workspace, branch } of input.workspaces) {
     const member = branch === null ? undefined : input.stackBranches.get(branch);
-    const stackPrNumber = member?.number;
-    if (member !== undefined) distanceOf.set(workspace.id, member.distance);
+    if (member !== undefined) {
+      distanceOf.set(workspace.id, member.distance);
+      stateOf.set(workspace.id, member.state);
+    }
     const base = {
       kind: "existing" as const,
       workspaceId: workspace.id,
@@ -177,8 +239,18 @@ export async function buildCandidates(input: {
     };
     if (branch !== null && branch === input.pr.headBranch) {
       existing.push({ ...base, rank: 1, reason: "exact" });
-    } else if (stackPrNumber !== undefined) {
-      existing.push({ ...base, rank: 2, reason: "stack", stackPrNumber });
+    } else if (member !== undefined) {
+      existing.push({
+        ...base,
+        rank: 2,
+        reason: "stack",
+        // A member found by ancestry alone may have no PR of its own, so both
+        // wire fields are omitted rather than invented. `stackPrState` is
+        // additionally omitted for "open", which is the value an extension
+        // that predates this field already assumes.
+        ...(member.number === null ? {} : { stackPrNumber: member.number }),
+        ...(member.state === null || member.state === "open" ? {} : { stackPrState: member.state }),
+      });
     } else {
       existing.push({ ...base, rank: 3, reason: "project" });
     }
@@ -187,6 +259,10 @@ export async function buildCandidates(input: {
   existing.sort((a, b) => {
     if (a.rank !== b.rank) return a.rank - b.rank;
     if (a.rank === 2 && b.rank === 2) {
+      // Live siblings before history. See `stateWeight`.
+      const leftState = stateWeight(stateOf.get(a.workspaceId));
+      const rightState = stateWeight(stateOf.get(b.workspaceId));
+      if (leftState !== rightState) return leftState - rightState;
       // Nearest in the stack first: the branch one hop from this PR is a far
       // better guess than one at the other end of a nine-PR stack.
       const leftHops = distanceOf.get(a.workspaceId) ?? UNKNOWN_STACK_DISTANCE;
@@ -559,6 +635,114 @@ export async function listEffectiveProviders(
 }
 
 /**
+ * How many unplaced workspace branches the ancestry mechanism will test.
+ *
+ * `git branch -a --contains X` walks every ref in the repository, so it is the
+ * one read in this endpoint that is not O(1). Measured on a real 4,692-ref
+ * clone it costs 14-26ms per branch, so eight of them is ~0.15s worst case —
+ * cheap, but not free, and projects with dozens of workspaces exist. Unplaced
+ * workspaces beyond the cap stay rank 3, which is exactly the behaviour that
+ * existed before this mechanism, and the cap is logged rather than silent.
+ */
+const ANCESTRY_WORKSPACE_LIMIT = 8;
+
+/**
+ * Trunk's branch name: local refs first, GitHub second, null if neither knows.
+ *
+ * Local is free and offline (`refs/remotes/origin/HEAD`, written by
+ * `git clone`), but measurably not always present — 2 of 3 git projects on the
+ * development machine had it. So `gh repo view` is the fallback, cached for
+ * half an hour, and only ever reached on the slow path that already decided to
+ * spend a `gh` round trip.
+ */
+async function resolveTrunk(
+  ref: Pick<PrRef, "owner" | "repo">,
+  projectRoot: string,
+): Promise<string | null> {
+  const local = projectRoot === "" ? null : await readTrunkBranch(projectRoot);
+  if (local !== null) return local;
+  return repoDefaultBranch(ref);
+}
+
+/**
+ * Stack membership for a branch proved by local git ancestry alone.
+ *
+ * WHY THIS EXISTS. When the bottom PR of a stack merges and its head branch is
+ * deleted, GitHub *retargets* the child PR's base to trunk. The base->head edge
+ * that used to join them is then gone from GitHub's data entirely, so no
+ * widening of `gh pr list` can rebuild the chain — the evidence has been
+ * destroyed, not hidden. The commits, however, have not: a stack branch below
+ * this PR is by definition an ancestor of it, so `git branch --contains` still
+ * answers the question, with no network call and no `gh`.
+ *
+ * WHY THE TRUNK GUARD IS NOT OPTIONAL. "B is an ancestor of a stack branch" is
+ * true of every branch that was merged into trunk at any point in the
+ * repository's history, because trunk is an ancestor of every branch cut from
+ * it. Without a guard, a workspace parked on trunk — or on a stale branch
+ * merged a year ago — would become a rank-2 stack candidate for *every* PR in
+ * the repository, and rank 2 can be the default. So a branch already contained
+ * in trunk is rejected, which leaves exactly the branches that carry commits
+ * trunk does not have yet:
+ *
+ *   - a squash- or rebase-merged stack branch (the tip is not an ancestor of
+ *     trunk, because the merge created new commits) whose child has not been
+ *     restacked yet — the reported bug;
+ *   - a stack branch with no PR at all, which `gh` cannot see.
+ *
+ * The cost of the guard is the true-merge-commit case: a branch merged with a
+ * real merge commit *is* an ancestor of trunk and is therefore rejected here.
+ * Mechanism 1 (the merged/closed `gh pr list`) is what covers that case, and it
+ * covers it whenever the head branch still exists so the base->head edge
+ * survives. Neither mechanism covers "true merge commit AND branch deleted AND
+ * child retargeted"; see plugin/README.md.
+ */
+async function ancestryStackMembers(input: {
+  projectRoot: string;
+  trunk: string;
+  /** The PR's own head branch, plus every branch already known to be in the stack. */
+  stackRefNames: ReadonlySet<string>;
+  branches: readonly string[];
+  /** Head branch -> the PR that owns it, for attributing a number and a state. */
+  byHead: StackGraph["byHead"];
+}): Promise<Map<string, StackMember>> {
+  const found = new Map<string, StackMember>();
+  const { trunk } = input;
+  const trunkRefs = new Set([trunk, `origin/${trunk}`]);
+
+  for (const branch of input.branches.slice(0, ANCESTRY_WORKSPACE_LIMIT)) {
+    if (trunkRefs.has(branch)) continue;
+    const containing = await branchesContaining(input.projectRoot, branch);
+    // Silent by design: git missing, an unknown ref, a directory that is not a
+    // repository and a timed-out walk are all "no answer", and a resolve is
+    // still correct without one.
+    if (containing === null) continue;
+    let inTrunk = false;
+    for (const ref of trunkRefs) if (containing.has(ref)) inTrunk = true;
+    if (inTrunk) continue;
+    let hit: string | null = null;
+    for (const name of input.stackRefNames) {
+      if (containing.has(name)) {
+        hit = name;
+        break;
+      }
+    }
+    if (hit === null) continue;
+    const pr = input.byHead.get(branch);
+    found.set(branch, {
+      number: pr?.number ?? null,
+      branch,
+      distance: ANCESTRY_STACK_DISTANCE,
+      state: pr?.state ?? null,
+    });
+    console.log(
+      `[send-to-paseo] ${branch} is an ancestor of ${hit} and not of ${trunk}, so it is in this stack` +
+        `${pr === undefined ? " (no pull request of its own)" : ` (${pr.state} PR #${pr.number})`}`,
+    );
+  }
+  return found;
+}
+
+/**
  * Branches in this PR's stack, keyed by branch name.
  *
  * GitHub is the source of truth: one `gh pr list` rebuilds the whole stack, so
@@ -570,25 +754,54 @@ export async function listEffectiveProviders(
  * `hints` are the PR numbers the extension scraped from the page. They are
  * still honoured, but only for members the graph did not already find, which in
  * practice means a stack PR that is closed or merged. Usually that is an empty
- * set and costs nothing.
+ * set and costs nothing. On github.com the adapter deliberately sends `[]`, so
+ * there are no hints at all there and the mechanisms below are the only cover.
+ *
+ * THREE PASSES, IN INCREASING COST, EACH ONLY REACHED IF THE LAST LEFT A
+ * WORKSPACE UNEXPLAINED. `/v1/resolve` runs on every popover open while the
+ * user types, so the first pass — one cached `gh pr list --state open` — is
+ * what the common cases pay:
+ *
+ *   1. the open-PR graph, always;
+ *   2. merged and closed PRs (one more `gh pr list`, five-minute cache), only
+ *      if a project workspace sits on a branch pass 1 could not place. This is
+ *      what recognises a workspace parked directly on a merged stack branch,
+ *      and it reconnects a chain whose merged head branch was not deleted;
+ *   3. local git ancestry (no network at all), only if a workspace is still
+ *      unplaced. See `ancestryStackMembers` for what only this can answer.
+ *
+ * `workspaceBranches` is what makes 2 and 3 conditional. Passing an empty list
+ * pins the behaviour to pass 1, which is what a caller wanting the cheap answer
+ * should do.
  */
-async function resolveStackBranches(
-  ref: PrRef,
-  headBranch: string,
-  hints: readonly number[],
-  outage: GhOutage | null,
-): Promise<Map<string, StackMember>> {
+export async function resolveStackBranches(input: {
+  ref: PrRef;
+  headBranch: string;
+  hints: readonly number[];
+  outage: GhOutage | null;
+  /** Absolute path of the project's main clone; "" disables the local reads. */
+  projectRoot: string;
+  /** Branches the project's workspaces are on. Drives passes 2 and 3. */
+  workspaceBranches: readonly string[];
+}): Promise<Map<string, StackMember>> {
+  const { ref, headBranch, outage } = input;
   const stack = new Map<string, StackMember>();
 
-  // Every path below needs `gh`. When the PR lookup already established that
-  // `gh` cannot answer, skip it: retrying would add two more spawn attempts and
+  // Passes 1 and 2 need `gh`. When the PR lookup already established that `gh`
+  // cannot answer, skip them: retrying would add two more spawn attempts and
   // two more log lines per resolve for a guaranteed failure.
+  //
+  // Pass 3 needs no `gh` — but it has nothing to work with either. It proves
+  // "this branch is an ancestor of a branch in the stack", and without `gh`
+  // there is no stack and no `pr.headBranch` to compare against. So a `gh`
+  // outage still means no rank-2 candidates at all; the ancestry mechanism
+  // narrows the gap when `gh` works, it does not close it when `gh` is down.
   if (outage !== null) return stack;
 
+  let graph: StackGraph | null = null;
   try {
-    for (const [branch, member] of await viewStackGraph(ref, headBranch)) {
-      stack.set(branch, member);
-    }
+    graph = await viewStackGraph(ref, headBranch);
+    for (const [branch, member] of graph.members) stack.set(branch, member);
   } catch (error) {
     // Never fail a resolve over stack discovery: the exact match and the create
     // option are both still correct without it.
@@ -596,17 +809,118 @@ async function resolveStackBranches(
   }
 
   const known = new Set([...stack.values()].map((member) => member.number));
-  const missing = [...new Set(hints)].filter(
+  const missing = [...new Set(input.hints)].filter(
     (number) => number !== ref.number && !known.has(number),
   );
   if (missing.length > 0) {
-    for (const [branch, number] of await viewStackBranches(ref, missing)) {
+    for (const [branch, hint] of await viewStackBranches(ref, missing)) {
       if (stack.has(branch)) continue;
-      stack.set(branch, { number, branch, distance: UNKNOWN_STACK_DISTANCE });
+      stack.set(branch, {
+        number: hint.number,
+        branch,
+        distance: UNKNOWN_STACK_DISTANCE,
+        state: hint.state,
+      });
     }
   }
 
-  stack.delete(headBranch); // the PR's own branch is the exact match, not a sibling
+  /** Workspace branches this PR's stack does not (yet) explain. */
+  const unplaced = (): string[] => [
+    ...new Set(
+      input.workspaceBranches.filter(
+        (branch) => branch !== "" && branch !== headBranch && !stack.has(branch),
+      ),
+    ),
+  ];
+
+  let outstanding = unplaced();
+  if (outstanding.length === 0) return withoutSelf(stack, headBranch);
+
+  // MEASURED SHORT-CIRCUIT. "Some workspace is unplaced" is nearly always true
+  // — the development machine's own project has 38 workspaces, 37 of them on
+  // branches unrelated to any given PR — so on its own it is too weak a
+  // trigger for a 1.5s pair of lookups. What actually matters is whether the
+  // *answer* can still change: a merged or closed member can never outrank an
+  // exact branch match or an open sibling (see `stateWeight`), so when one of
+  // those already exists, the default is settled and passes 2 and 3 would only
+  // relabel a candidate nobody is going to pick. Measured against the live
+  // bridge on that project: 2.07s -> 0.94s cold for a PR whose stack already
+  // had an open sibling workspace, 1.62s for one that matched nothing at all
+  // and still pays for the wider lookups, 0.01s once the lists are cached. The
+  // cost, recorded in VERIFICATION.md §19.6: a merged stack workspace reads
+  // rank 3 rather than rank 2 when an open sibling is also open in Paseo.
+  const settled =
+    input.workspaceBranches.includes(headBranch) ||
+    input.workspaceBranches.some((branch) => stack.get(branch)?.state === "open");
+  if (settled) return withoutSelf(stack, headBranch);
+
+  const trunk = await resolveTrunk(ref, input.projectRoot);
+
+  // Pass 2. Merged and closed PRs join the graph, so a chain whose merged head
+  // branch still exists reconnects, and a workspace sitting on a merged stack
+  // branch is recognised directly. An open PR still wins over a merged one for
+  // the same head branch — `viewStackGraph` orders the entries that way.
+  try {
+    const wide = await viewStackGraph(ref, headBranch, { includeNonOpen: true, trunk });
+    graph = wide;
+    for (const [branch, member] of wide.members) {
+      // The open-PR walk's answer is never overwritten: same hops, and its
+      // state is authoritative.
+      if (!stack.has(branch)) stack.set(branch, member);
+    }
+  } catch (error) {
+    console.error("[send-to-paseo] merged/closed stack lookup failed", String(error));
+  }
+
+  outstanding = unplaced();
+  if (outstanding.length === 0) return withoutSelf(stack, headBranch);
+
+  // Pass 3. Local, read-only, no network. Needs trunk to be nameable at all;
+  // without it every long-merged branch in the repository would qualify.
+  if (trunk === null) {
+    console.log(
+      "[send-to-paseo] no trunk branch could be determined, so the local ancestry " +
+        "check for merged stack branches was skipped",
+    );
+    return withoutSelf(stack, headBranch);
+  }
+  if (input.projectRoot === "") return withoutSelf(stack, headBranch);
+  if (outstanding.length > ANCESTRY_WORKSPACE_LIMIT) {
+    console.log(
+      `[send-to-paseo] ${outstanding.length} workspaces are on branches this stack does not ` +
+        `explain; only the first ${ANCESTRY_WORKSPACE_LIMIT} were checked for stack ancestry`,
+    );
+  }
+  // The PR's own head branch is in the target set deliberately, and is in fact
+  // the likeliest hit: a merged branch *below* this PR is an ancestor of this
+  // PR's branch, and `stack` never contains the PR's own branch.
+  const stackRefNames = new Set<string>();
+  for (const branch of [headBranch, ...stack.keys()]) {
+    if (branch === "") continue;
+    stackRefNames.add(branch);
+    // The stack branches were pushed from this clone, so their remote-tracking
+    // refs are normally present even when the local branch is not.
+    stackRefNames.add(`origin/${branch}`);
+  }
+  const byAncestry = await ancestryStackMembers({
+    projectRoot: input.projectRoot,
+    trunk,
+    stackRefNames,
+    branches: outstanding,
+    byHead: graph?.byHead ?? new Map(),
+  });
+  for (const [branch, member] of byAncestry) {
+    if (!stack.has(branch)) stack.set(branch, member);
+  }
+  return withoutSelf(stack, headBranch);
+}
+
+/** The PR's own branch is the exact match, not a sibling. */
+function withoutSelf(
+  stack: Map<string, StackMember>,
+  headBranch: string,
+): Map<string, StackMember> {
+  stack.delete(headBranch);
   return stack;
 }
 
@@ -626,17 +940,28 @@ export async function handleResolve(request: ResolveRequest): Promise<ResolveRes
     // offline: the create path uses Paseo's own forge checkout, so the only
     // casualties are the title, the branch names and stack detection.
     const { pr, outage } = await lookupPr(ref);
-    const stackBranches = await resolveStackBranches(
-      ref,
-      pr.headBranch,
-      request.stackPrNumbers ?? [],
-      outage,
+    // The workspace branches are read before stack discovery, not after,
+    // because they are what decides whether the cheap open-PR graph was enough:
+    // a branch it could not place is the signal that this may be a merged stack
+    // branch and worth paying for the wider lookups. Read once, used twice.
+    const workspaces = await readWorkspaceBranches(
+      await listProjectWorkspaces(paseo, project.projectId),
     );
+    const stackBranches = await resolveStackBranches({
+      ref,
+      headBranch: pr.headBranch,
+      hints: request.stackPrNumbers ?? [],
+      outage,
+      projectRoot: project.path,
+      workspaceBranches: workspaces
+        .map((entry) => entry.branch)
+        .filter((branch): branch is string => branch !== null),
+    });
     const { candidates, defaultCandidateIndex } = await buildCandidates({
       paseo,
       ref,
       pr,
-      projectId: project.projectId,
+      workspaces,
       stackBranches,
       outage,
     });

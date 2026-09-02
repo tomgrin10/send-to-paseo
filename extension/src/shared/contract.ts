@@ -174,6 +174,12 @@ export interface Candidate {
   reason: CandidateReason | (string & {});
   agentCount?: number;
   stackPrNumber?: number;
+  /**
+   * State of the stack PR this workspace's branch belongs to. Additive, and
+   * absent from a plugin that predates merged-stack detection, so treat a
+   * missing value as "open" rather than as "unknown state".
+   */
+  stackPrState?: "open" | "merged" | "closed" | (string & {});
 }
 
 export interface ResolveResponse {

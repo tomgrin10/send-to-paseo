@@ -7,9 +7,11 @@ code. The raw machine-readable output of the last run is at `test/.last-run.json
 > ids, PR titles and Paseo workspace/agent/server ids have been consistently replaced with
 > fictional equivalents (`acmegizmos/gizmo-poc`, `GIZ-…`). Every measurement is untouched.
 
-- **Date of run:** 2026-09-01 (fourth round: **GitHub adapter**, PLAN.md phase 6. Third round
-  was the revised CONTRACT.md incl. the 60/10 s rate limit; those results are unchanged and
-  were re-run green.)
+- **Date of run:** 2026-09-02 (fifth round: the **searchable Target combobox**, which replaced
+  the native `<select>`, plus **case 33** for the merged-branch stack target the bridge learned to
+  find in the same round. Fourth round was the **GitHub adapter**, PLAN.md phase 6; third was the
+  revised CONTRACT.md incl. the 60/10 s rate limit. Both re-run green, unchanged, except where
+  a number below is explicitly restated for the new widget.)
 - **Machine:** macOS (Darwin 25.6.0, arm64), Node v24.16.0
 - **Browser:** cached Playwright Chromium 1223 —
   `~/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64/Google Chrome for Testing.app`
@@ -35,10 +37,14 @@ code. The raw machine-readable output of the last run is at `test/.last-run.json
 
 ## End-to-end suite
 
-`node test/e2e.mjs` — **44 passed, 0 failed, 0 skipped.** Exit code 0.
-(31 before the GitHub adapter, then 41 with it; the 3 new cases for permission modes are
-**20a, 20b, 20c**. They are lettered rather than numbered 22-24 because the GitHub block
-already owns those numbers.)
+`node test/e2e.mjs` — **52 passed, 0 failed, 0 skipped.** Exit code 0.
+(31 before the GitHub adapter, then 41 with it, then 44 with permission modes — **20a, 20b,
+20c**, lettered rather than numbered 22-24 because the GitHub block already owns those numbers.
+Round five adds eight: **19b** and **28b** (containment of the Target search box, siblings of 19
+and 28), **29-32** (the combobox itself), **33** (the merged-branch stack target) and **34** (the
+header settings cog). Cases **4**, **8**, **13**, **14**, **20**, **20c** and **27** were rewritten
+to drive the real widget instead of assigning `select.value`, and **20c**'s control assertion
+changed text — see case 33.)
 
 The suite loads the actual unpacked extension into Chromium and serves the captured fixtures
 over HTTP at genuine, site-accurate PR-shaped paths — one shape per site, so each adapter's
@@ -60,7 +66,7 @@ localhost **origin** exists in a shipping build (asserted — test 18).
 | 1 | Button injects into the header action row | **PASS** | `sits before Button_gdsButton__SadwL ReviewChangesAction_reviewChangesAction__jRuEO`; `4 sibling buttons in the row`. Asserted: marker attribute present, `data-stp-mode=anchored`, `data-stp-style=graphite` (from the adapter's `styleHint()`), `data-stp-pr=942`, host inside `[class*="PullRequestPageHeader_prPageHeader"]`, `nextElementSibling` text contains "Review Changes", shadow root exists with label "Send to Paseo", exactly 1 host. |
 | 2 | Button still injects on the **hash-rotated** fixture | **PASS** | `matched header with rotated hash __G1hCN` (was `__NRgNb`). The test first asserts the two fixtures genuinely differ, then asserts the *matched* header carries the **new** hash — so it cannot pass by accident. All 41 hashed class tokens are rotated by `test/fixtures/rotate.mjs`. |
 | 3 | Floating fallback on the no-anchor fixture | **PASS** | `position:fixed right:18px bottom:18px`. Asserted first that the fixture has **0** `PullRequestPageHeader_prPageHeader` and **0** `MetadataSection_prInfoGroup` elements, then mode `floating`, parent `<body>`, computed `position: fixed`, PR number still `942` (from the URL). |
-| 4 | Popover opens, calls `/v1/resolve`, shows target + candidates | **PASS** | Bridge saw `POST /v1/resolve {"forge":"github","owner":"acmegizmos","repo":"gizmo-poc","number":942,"stackPrNumbers":[949,948,947,946,945,943,941]}`, `Authorization` present, `Origin: chrome-extension://<id>`. Summary `→ workspace brawny-dodo / giz-1133-widget-backed-inventory-audit-rule · acmegizmos/gizmo-poc`. Candidates: `brawny-dodo — … (exact match, 2 agents)` \| `candid-otter — … (stack #949, 0 agents)` \| `gizmo-poc (main checkout) — main (same project, 1 agent)` \| `Create worktree for PR #942 — …`. Also: `defaultCandidateIndex` honoured, 3 providers with the default marked and pre-selected, textarea autofocused, `Send` disabled while empty, and changing the dropdown to the create candidate updates the summary. Footer keycaps asserted: `⌘(sym)=13px ↵(sym)=13px Esc=10.5px` — symbol-only caps must compute larger than lettered ones (see the cosmetic fix below). |
+| 4 | Popover opens, calls `/v1/resolve`, shows target + candidates | **PASS** | Bridge saw `POST /v1/resolve {"forge":"github","owner":"acmegizmos","repo":"gizmo-poc","number":942,"stackPrNumbers":[949,948,947,946,945,943,941]}`, `Authorization` present, `Origin: chrome-extension://<id>`. Summary `→ workspace brawny-dodo / giz-1133-widget-backed-inventory-audit-rule · acmegizmos/gizmo-poc`. Candidates: `brawny-dodo — … (exact match, 2 agents)` \| `candid-otter — … (stack #949, 0 agents)` \| `gizmo-poc (main checkout) — main (same project, 1 agent)` \| `Create worktree for PR #942 — …`. Also: `defaultCandidateIndex` honoured, 3 providers with the default marked and pre-selected, textarea autofocused, `Send` disabled while empty, and picking the create row **through the real dropdown** (open, click) updates the summary. Since round five this case also asserts the picker is genuinely non-native — trigger `tagName` is `button`, `aria-haspopup="listbox"`, the only remaining `<select>`s on the card are `["provider","mode"]`, the panel is `hidden` and **0** option rows exist while it is closed — plus the ARIA wiring once open (`role=combobox` on the input, `role=listbox` on the panel, every row `role=option`, `aria-controls` == the list id, `aria-activedescendant` == the active row's id) and that it opens active on the *committed* option rather than the top row. Footer keycaps asserted: `⌘(sym)=13px ↵(sym)=13px Esc=10.5px` — symbol-only caps must compute larger than lettered ones (see the cosmetic fix below). |
 | 5 | Stack PR numbers correct, **current PR excluded** | **PASS** | `page hrefs (8): includes /942/ = true`; `sent stackPrNumbers: [949,948,947,946,945,943,941]`. The test asserts the fixture *does* contain a self-link first, so the exclusion is meaningful. Belt and braces: test 12 separately asserts the bridge tolerates and filters a self-inclusive list. |
 | 6 | Send hits `/v1/send` with a correct body; success renders the deep link | **PASS** | Bridge saw `POST /v1/send {"forge":"github","owner":"acmegizmos","repo":"gizmo-poc","number":942,"prompt":"Fix merge conflicts with graphite-base/942","target":{"kind":"existing","workspaceId":"wks_4d1a8b7c2e0f9351"},"provider":"claude/claude-opus-5","pageUrl":"http://localhost:4173/github/pr/acmegizmos/gizmo-poc/942/GIZ-1133-legacy-tally-engine-retirement-3"}`. Exact key set asserted. Rendered `Agent started`, `data-stp-dryrun="false"`, **no** DRY RUN badge, href `paseo://h/srv_Ab3xY9pQ2mNt/agent/agt_mock0001` — asserted against `/^paseo:\/\/h\/[^/]+\/agent\/[^/]+$/`, never an exact string, because `deepLink` is opaque. |
 | 7 | ⌘↵ sends; Esc closes | **PASS** | `Esc detached the popover` (host removed, `aria-expanded` reset to `false`); `Meta+Enter produced POST /v1/send with the typed prompt`. Esc uses a capturing document listener so it works regardless of which world holds focus. |
@@ -122,7 +128,7 @@ transcribed from what the real daemon advertises, measured through `providers.sn
 | --- | --- | --- | --- |
 | 2a | Injection idempotent under DOM churn | **PASS** | `30 mutation bursts -> still exactly 1 button host`. |
 | 12 | Bridge security rules | **PASS** | `forbidden_origin on real request and on preflight`; `chrome-extension origin echoed, no Access-Control-Allow-Credentials, Vary: Origin`; `forbidden_host via raw socket with a spoofed Host header` (`HTTP/1.1 403 Forbidden`); `payload_too_large at >64 KiB`; `self-inclusive stackPrNumbers tolerated and filtered (200, stack candidate #949)`; **rate limit at the raised 60/10 s, with the keying rule proved** — see below. Tests the **mock** bridge, i.e. it validates the conformance reference, not the plugin. |
-| 14 | Compact window (860×620), light and dark | **PASS** | `card 392x401 inside 860x620`; button still on the primary anchor rung; popover asserted fully inside the viewport on all four edges. Satisfies AGENTS.md's "wide window and a compact one, in both light and dark themes". |
+| 14 | Compact window (860×620), light and dark | **PASS** | `card 392x455 inside 860x620`; button still on the primary anchor rung; popover asserted fully inside the viewport on all four edges. Since round five it re-asserts all four edges **with the Target dropdown open**, which is the case that grows the card: `with the Target dropdown open: card 16..612 of 620px, option list 171px (capped at 34vh)`. Satisfies AGENTS.md's "wide window and a compact one, in both light and dark themes". |
 | 13 | **Live integration against the real plugin bridge** | **PASS** | Extension pointed at the actual `send-to-paseo` plugin on `127.0.0.1:7788` with the real token from `~/.paseo/plugin-data/send-to-paseo/settings.json`. Authenticated `GET /v1/ping`: `contract 1, daemon 0.7.0, 44 providers, 10 modes`, `paired: true`. Then `/v1/resolve` through the popover for the fixture's repo — which is fictional, so it is a Paseo project on nobody's machine — returned the contract error `project_not_found` → "This repo isn't a Paseo project", with a specific title rather than a bare "Failed". That still exercises the whole path: extension → real HTTP → real plugin subprocess → real `gh`/daemon → contract error → render. The populated-candidate-list path is behind `STP_LIVE_PR="owner/repo#number"` and deliberately takes **no screenshot**, because candidate labels are the operator's own workspace and branch names; run that way during development against a repo registered in Paseo it returned `38 candidates, 44 providers` with a rank-2 stack sibling pre-selected. **`/v1/send` deliberately not called** — it would start a real agent. Skips cleanly if the plugin isn't running. |
 
 ### GitHub adapter (PLAN.md phase 6, added round four)
@@ -146,6 +152,171 @@ github.com on 2026-09-01. **The `github.ts.todo` skeleton's selectors were all w
 
 Every one of these runs against the real unpacked extension in real Chromium; the only fake is
 the bridge.
+
+### The searchable Target combobox (round five, added 2026-09-02)
+
+The Target picker was a native `<select>`. It is now a custom trigger + search input +
+`role="listbox"` (`src/content/ui/combobox.ts`). These are the cases that could not have passed
+on the old widget at all.
+
+Fixture candidates for PR 942 (`test/mock-bridge.mjs`), which is what every query below is
+matched against:
+
+```
+0  brawny-dodo               giz-1133-widget-backed-inventory-audit-rule  exact match, 2 agents
+1  candid-otter              giz-1132-stack-sibling-949                   stack #949, 0 agents
+2  gizmo-poc (main checkout)  main                                        same project, 1 agent
+3  Create worktree for PR #942 — giz-1133-widget-backed-inventory-audit-rule
+```
+
+| # | Test | Result | Real output |
+| --- | --- | --- | --- |
+| 29 | **Search by workspace NAME, commit, and it reaches `/v1/send`** | **PASS** | `typed "otter" -> 1 row (candid-otter — giz-1132-stack-sibling-949 (stack #949, 0 agents))`. "otter" is in no branch, no reason tag and no PR number — only in the workspace label, which is the thing the feature was asked for. Enter committed it; `summary after commit: → workspace candid-otter · stack #949 giz-1132-stack-sibling-949 · acmegizmos/gizmo-poc worktree is on another branch of this stack`; then `POST /v1/send target: {"kind":"existing","workspaceId":"wks_7b3e5c9a1d8f6042"}` — i.e. the *searched-for* workspace, not the default rank-1 one. Also asserted: the filtered row keeps its own candidate index (`indices === [1]`), nothing is `aria-selected` while the committed candidate is filtered out, the single match becomes active so Enter is unambiguous, and the commit hands focus to the instruction box. |
+| 30 | **Branch fragment, bare PR number, multi-word, no match** | **PASS** | Thirteen queries, each asserted to narrow to an exact set of candidate indices: `"sibling" -> [1]` (branch only) · `"1133" -> [0,3]` (branch shared by two) · `"949" -> [1]` and `"#949" -> [1]` (bare PR number, and with a hash) · `"942" -> [3]` and `"#942" -> [3]` · `"exact" -> [0]` (reason tag) · `"same project" -> [2]` (two-word tag) · `"main" -> [2]` · `"create" -> [3]` (matches the create row by intent, which its label does not spell) · `"DODO" -> [0]` (case-insensitive) · `"otter stack" -> [1]` **and** `"stack otter" -> [1]`, so token order does not matter. No match: `"zzzznope" -> empty row "No workspace matches", selection still brawny-dodo — giz-1133-widget-backed-inventory-audit-rule (exact match, 2 agents)`, with `activeIndex === -1`, `aria-activedescendant` dropped rather than left stale, and **Enter proved to be a no-op** — it neither closed the dropdown nor blanked the target. |
+| 31 | **Keyboard-only: reach, filter, arrow, Enter, ⌘↵** | **PASS** | `no mouse after the button click: Shift+Tab -> ArrowDown/ArrowUp/End/Home -> type -> ArrowDown -> Enter`, then `Meta+Enter produced POST /v1/send {"prompt":"Fix the merge conflict","target":{"kind":"create"}}`. Shift+Tab from the autofocused instruction box asserted to land on the Target trigger; ArrowDown opens active on the committed option; `wrapping asserted at both ends` (ArrowUp from row 0 → row 3, ArrowDown from row 3 → row 0), End/Home jump, `aria-activedescendant` tracks every move. Then `"1133"` narrows to two rows and ArrowDown is asserted to move **within the filtered set** (0 → 3, not 0 → 1). After the commit: focus is on the instruction box and the draft survived the re-render, which is what makes the closing ⌘↵ work with no click anywhere. |
+| 32 | **Esc and click-outside dismiss the dropdown BEFORE the popover** | **PASS** | `Esc #1 closed the dropdown and refocused the trigger; Esc #2 detached the popover`. `pointerdown on the textarea closed the dropdown only; pointerdown in the dropdown closed nothing` — and the popover host asserted still present (count 1) in both cases, because the click was inside the shadow host. `pointerdown outside the card detached the popover with the dropdown open`. |
+| 19b | **The Target search box is contained on Graphite** | **PASS** | `typed "Fix merge conflicts? c/j k n p a g r" into the Target search box with real keystrokes; value byte-exact`; `bubble-phase hits: 0 · capture-phase hits: 108`. Same hostile stand-in as case 19 (now a shared `installHostileGraphiteShortcuts()`), same anti-vacuity guard that the listeners really saw the retargeted host, plus: the dropdown itself survived the barrage and the empty row showed (that string matches no workspace). |
+| 28b | **The Target search box is contained on GitHub** | **PASS** | `typed "Fix flaky test? s / c g p t r j k" into the Target search box with real keystrokes; value byte-exact`; `bubble-phase hits: 0 · capture-phase hits: 66`. `/` and `s` are the two that hurt most here — both focus GitHub's own search. This case also captures the open dropdown on the GitHub fixture in light and dark, since `POPOVER_CSS` has no per-site branch and is built entirely from the `--stp-*` tokens. |
+
+### The header settings cog (round five, added 2026-09-02)
+
+The options page held the pairing token and the bridge URL and was reachable only from the
+browser's own extensions menu, or from the error state's link — i.e. only once the user had
+already hit a wall. There is now a cog in the composer's header.
+
+| # | Test | Result | Real output |
+| --- | --- | --- | --- |
+| 34 | **The cog opens the options page, in every phase, without closing the popover** | **PASS** | `cog: <button type=button> 22x22, aria-label "Extension settings", SVG node aria-hidden` · `present in phases: ready + error` · `click -> new tab chrome-extension://<id>/options.html; popover still ready, draft intact` · `Enter on the focused cog -> chrome-extension://<id>/options.html`. The tab is asserted on Playwright's real `page` event and its URL compared to `optionsUrl()`, so this measures the options page actually opening rather than the `openOptions` intent merely being dispatched. Also asserted: the glyph is a real SVG node in the SVG namespace, `aria-hidden`, and **not** assigned as markup; the button sits inside the header's box without growing it; and the draft `Draft that must survive` is still in the textarea afterwards. |
+
+**Two things deliberately not done.**
+
+`innerHTML` was the first implementation and was replaced before it ever ran in the suite.
+`src/content/ui/dom.ts` opens with "No innerHTML with dynamic data, anywhere", and there is a
+sharper reason than the rule: a content script shares its document with the host page, and
+github.com enforces Trusted Types. A fixture enforces nothing, so the suite could have stayed
+green while the cog threw on the one site it matters on. The glyph is built with
+`createElementNS`, like the existing `sendIcon()`.
+
+`e.stopPropagation()` was also in the first implementation, justified by a guess that the card
+might sit inside the anchor's click region. It was removed after measuring: with the guard gone
+the suite is still **52 passed, 0 failed**. The popover's outside-click handler already ignores
+any event whose composed path contains the host, the card is not a child of the anchor, and the
+error state's options link has never needed the guard either. An unverified justification in a
+comment is worse than no comment.
+
+**Proof case 34 can fail.** One deliberate breakage, applied, run and reverted:
+
+```
+# the cog omitted from renderHeader()
+=== 51 passed, 1 failed, 0 skipped (of 52) ===
+FAIL  34. Header cog opens the options page, in every phase, without closing the popover
+```
+
+**One cosmetic iteration, recorded because the first attempt shipped to a screenshot.** The gear
+was first drawn by hand as a circle plus eight straight spokes. At 14px that renders as a
+sunburst, not a cog — visible in the captured frame, which is why the frame was worth looking at.
+Replaced with Lucide's `settings` outline in its native 24-unit viewBox, scaled to 15px, which is
+also the icon family Paseo's own UI draws from.
+
+### The merged-branch stack target (round five, added 2026-09-02)
+
+The user's second report: *"I wanted to send to paseo on a PR in a stack, and it didn't find the
+correct workspace because the workspace was on a local branch that has been merged already."* The
+cause was bridge-side and the fix is in `plugin/` (merged and closed PRs admitted to the stack
+graph, plus a local `git branch --contains` ancestry pass); `plugin/VERIFICATION.md` §19 measures
+that half. Case 33 measures the half this document owns: what the popover does with a rank-2
+candidate that carries the new additive `stackPrState: "merged"`.
+
+The mock bridge grew a `mergedStack` mode which drops the exact match and marks the stack sibling
+as merged — i.e. the reported shape: the stack's only workspace is parked on landed work.
+
+| # | Test | Result | Real output |
+| --- | --- | --- | --- |
+| 33 | **A merged stack branch is the default, and is described as landed** | **PASS** | `default target: candid-otter — giz-1132-stack-sibling-949 (stack #949, merged, 0 agents)` — the default, with `Create worktree` present in the list but *not* selected. `summary: → workspace candid-otter · stack #949, merged giz-1132-stack-sibling-949 · acmegizmos/gizmo-poc worktree is on a branch of this stack whose PR is merged`. `search "merged" -> 1 candidate`, which is the point of routing the state through the reason tag rather than appending it separately: one change reaches the option label, the trigger and the search haystack at once. |
+
+**The note wording was wrong before this, for a different candidate.** It read `worktree is on
+another branch of this stack` for **every** existing candidate whose branch differed from the
+PR's — including a rank-3 `same project` workspace sitting on `main`, which is not in the stack at
+all. Case 20c's control assertion had that string baked in, so the suite was pinning the false
+claim. `branchMismatchNote()` is now reason-scoped (`a different branch` for rank 3, `another
+branch of this stack` for an open sibling, `a branch of this stack whose PR is merged` for landed
+work) and 20c asserts the corrected text.
+
+**Proof case 33 can fail.** Two deliberate breakages, applied, run and reverted:
+
+```
+# stackStateSuffix() returns "" (the merged state never reaches the UI)
+=== 50 passed, 1 failed, 0 skipped (of 51) ===
+FAIL  33. A stack workspace on a MERGED branch is the default, and says it has landed
+
+# branchMismatchNote()'s merged branch removed (falls through to the sibling wording)
+=== 50 passed, 1 failed, 0 skipped (of 51) ===
+PASS  20. One workspace per stack: a stack sibling is the default, not 'create'
+PASS  20c. Degraded resolve: an empty pr.headBranch is UNKNOWN, not 'a different branch'
+FAIL  33. A stack workspace on a MERGED branch is the default, and says it has landed
+```
+
+The second breakage is the informative one: 20 and 20c stayed green while 33 failed, which is
+what proves the new wording is scoped to the merged case rather than having been applied to every
+candidate — the exact mistake the old string made.
+
+**Why the search box needed its own regression test.** It is a *second* text input, and
+`containKeyboard()` is installed per shadow host. It is covered only because the dropdown
+renders inside the popover's existing shadow root instead of being portalled into a host of its
+own — a design constraint, not a property of the code, so it is asserted rather than assumed.
+
+**Proof each of these can fail.** Four deliberate breakages, each applied, run, and reverted:
+
+```
+# comboMatches() always matches (filtering disabled)
+=== 46 passed, 4 failed, 0 skipped (of 50) ===
+FAIL  19b. Graphite: the Target SEARCH BOX is contained too (real keystrokes)
+FAIL  29. Target combobox: searching by WORKSPACE NAME narrows, commits, and reaches /v1/send
+FAIL  30. Target combobox: branch fragment, bare PR number, multi-word, and no match
+FAIL  31. Target combobox: keyboard-only path — reach, filter, arrow, Enter, then Cmd/Ctrl+Enter
+
+# Combobox.handleEscape() always returns false (Esc no longer layers)
+=== 49 passed, 1 failed, 0 skipped (of 50) ===
+FAIL  32. Target combobox: Esc and click-outside dismiss the dropdown BEFORE the popover
+      ...and must leave the popover open
+
+# the pointerdown branch that closes the dropdown removed from Popover.open()
+=== 49 passed, 1 failed, 0 skipped (of 50) ===
+FAIL  32. Target combobox: Esc and click-outside dismiss the dropdown BEFORE the popover
+      a pointerdown elsewhere in the card closes the dropdown
+
+# containKeyboard() stubbed to a no-op
+=== 46 passed, 4 failed, 0 skipped (of 50) ===
+FAIL  19. Host-page keyboard shortcuts cannot reach the popover (regression)
+      keystrokes must reach the textarea byte-for-byte
+FAIL  19b. Graphite: the Target SEARCH BOX is contained too (real keystrokes)
+      keystrokes must reach the search box byte-for-byte
+FAIL  28. GitHub: host-page keyboard shortcuts cannot reach the popover (regression)
+      keystrokes must reach the textarea byte-for-byte
+FAIL  28b. GitHub: the Target SEARCH BOX is contained too (real keystrokes)
+      keystrokes must reach the search box byte-for-byte
+
+# ArrowUp/ArrowDown clamped instead of wrapping
+=== 49 passed, 1 failed, 0 skipped (of 50) ===
+FAIL  31. Target combobox: keyboard-only path — reach, filter, arrow, Enter, then Cmd/Ctrl+Enter
+      ArrowUp from the first row wraps to the last
+
+# the .card height cap + column flex removed from styles.ts
+=== 49 passed, 1 failed, 0 skipped (of 50) ===
+FAIL  14. Compact window: popover stays on-screen, button still anchored
+      card overflows bottom with the dropdown open: 669.734375 > 620
+```
+
+That last one is worth keeping: the dropdown opens **in normal flow**, so it grows the card, and
+`position()` can only clamp a card that is taller than the viewport, not shrink it. The fix is
+`max-height: calc(100vh - 24px)` on `.card` with `.body` as the scroller — measured overflow
+without it was 49.7px in an 860×620 window.
+
+**How the tests drive it.** No test assigns `.value` or dispatches a synthetic `change` at the
+Target picker any more; the helpers (`openCandidates`, `searchCandidates`, `readCandidates`,
+`pickCandidate`, `candidateTrigger`) click the real trigger and type real keystrokes. Option
+rows only exist while the dropdown is open, so a test physically cannot read a stale list.
+`setSelect()` survives for Provider and Mode, which are still native `<select>`s.
 
 ### Rate limiting (CONTRACT.md item 6, raised to 60 / 10 s)
 
@@ -772,7 +943,7 @@ never constructed, never parsed, and asserted only by shape.
 cd extension && npm install
 npm run typecheck
 npm run build
-node ../test/e2e.mjs          # 44 cases, ~60 s, headless by default
+node ../test/e2e.mjs          # 52 cases, ~60 s, headless by default
                               # STP_HEADED=1 node ../test/e2e.mjs  to watch it
 ```
 

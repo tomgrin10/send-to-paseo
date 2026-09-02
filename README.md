@@ -19,7 +19,8 @@ on github.com and on Graphite.
   profiles, and both are overridable in the composer before you send.
 - **Stacked pull requests, handled.** Send from PR #4 while that worktree sits on PR #7's branch
   and it resolves to the workspace you already have, then tells the agent which branch the change
-  belongs on — so one workspace per stack is enough.
+  belongs on — so one workspace per stack is enough. It still finds that workspace when the branch
+  it is parked on has already merged.
 
 ## Install
 
@@ -67,7 +68,7 @@ browser. [`AGENTS.md`](AGENTS.md) has the full verification procedure.
 Pair the two halves once:
 
 1. In Paseo, open **Send to Paseo** in the sidebar and copy the **pairing token**.
-2. Click the extension's toolbar icon, or **Details → Extension options**.
+2. Click the extension's toolbar icon, or the **cog** in the composer's header.
 3. Paste the token and press **Test connection**.
 
 Then open a pull request and press **Send to Paseo**. There is no config file on either side.
@@ -76,12 +77,14 @@ Then open a pull request and press **Send to Paseo**. There is no config file on
 
 - **A button on the pull-request page**, in the PR header next to the site's own actions. It
   re-targets as you navigate between PRs, so a stale PR number can never be sent.
-- **The composer popover**, with the resolved target, every alternative, and provider and mode
-  pickers. ⌘↵ sends, Esc closes.
+- **The composer popover**, with the resolved target, a searchable picker holding every
+  alternative — type a workspace name, a branch or a PR number — and provider and mode pickers.
+  ⌘↵ sends, Esc closes.
 - **The Send to Paseo surface** in Paseo's sidebar and under ⌘K: bridge status, the pairing token,
   the port, which agent profile to follow, the default permission mode, a **Requirements** card,
   and your last 20 sends.
-- **The extension's options page**: bridge URL, token, and **Test connection**.
+- **The extension's options page**: bridge URL, token, and **Test connection**. The cog in the
+  composer's header opens it, so it is reachable from the pull request itself.
 
 ## How it works
 
@@ -92,15 +95,19 @@ links, and those are only a hint — everything else is resolved on the daemon s
 2. PR number → head branch, title and base branch, via `gh`
 3. The PR's **stack** — stacked pull requests are a real `base` → `head` chain on GitHub
    (including the ones Graphite creates), so one `gh pr list` rebuilds it and a walk from this PR
-   finds every sibling, up and down
+   finds every sibling, up and down. Merged and closed siblings count too: a worktree parked on a
+   branch that has already landed is still that stack's worktree
 4. Each workspace in that project → its current branch
 5. Candidates are ranked: **exact** branch match, then another branch in the same **stack**
    (nearest first), then any workspace in the **project**, then a synthetic **create** option
 
-The default target is the exact match, else the nearest stack workspace, else create. When the
-target sits on a sibling branch, the composer says so and the agent's prompt names the branch the
-change belongs on. Paseo does the hard part itself — it can already check a pull request out into
-a managed worktree, so there is no hand-rolled git anywhere in this project.
+The default target is the exact match, else the nearest stack workspace — open siblings ahead of
+merged ones — else create. When the target sits on a sibling branch, the composer says so, says
+whether that branch has landed, and the agent's prompt names the branch the change belongs on.
+Paseo does the hard part itself: it can already check a pull request out into a managed worktree,
+so nothing here creates one by hand. The only git this project runs is read-only — the branch a
+workspace is on, a remote's `owner/repo`, and one ancestry query that recognises a stack whose
+chain GitHub has already retargeted past a merged branch.
 
 The extension never talks to the Paseo daemon. It talks only to the plugin's local HTTP bridge on
 `127.0.0.1:7788`, over one frozen contract, [`CONTRACT.md`](CONTRACT.md).
@@ -194,13 +201,14 @@ Longer tables, keyed on exact message text, are in
 
 Nothing here is claimed without evidence: [`plugin/VERIFICATION.md`](plugin/VERIFICATION.md) and
 [`extension/VERIFICATION.md`](extension/VERIFICATION.md) record real output for both halves,
-failures included, behind 44 end-to-end cases with the extension genuinely loaded in Chromium.
+failures included, behind 52 end-to-end cases with the extension genuinely loaded in Chromium.
 [`docs/screenshots/`](docs/screenshots/) is indexed and names, per image, which bridge answered it.
 
 ## Credits
 
 The extension's icon is the Paseo brand mark, reproduced from Paseo's own `butterfly-white.svg` to
-identify Paseo. Paseo is Apache-2.0, © 2025-present Mohamed Boudra.
+identify Paseo. Paseo is Apache-2.0, © 2025-present Mohamed Boudra. The composer's settings cog is
+Lucide's `settings` outline (ISC), the icon set Paseo's own UI uses.
 
 ## License
 

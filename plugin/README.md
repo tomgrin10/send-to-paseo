@@ -28,7 +28,7 @@ through its own forge credentials. `gh` only supplies metadata.
 | --- | --- | --- | --- | --- |
 | **Paseo** | yes | `0.7.0` | Everything. The plugin borrows the host's `@getpaseo/client` at runtime. | The plugin does not load. |
 | **`git`** | yes | `2.51.2` | Reading the branch a workspace is on, and the repository's `origin`. Paseo itself needs it to create a worktree. | Creating a worktree fails with a message naming `git`. Workspace branches read as unknown, so nothing is ranked as an exact or stack match — everything falls back to "create". |
-| **`gh`** | **no** | `2.98.0` | PR title, head and base branch names, and stack discovery (one `gh pr list` rebuilds the whole Graphite stack). | Sending still works. You lose the PR title, the branch names, exact/stack candidate ranking, and the `Title:`/`Branch:` lines in the agent's prompt. The bridge says so in the target picker, in the agent's prompt and in the log. |
+| **`gh`** | **no** | `2.98.0` | PR title, head and base branch names, and stack discovery (`gh pr list` rebuilds the whole Graphite stack, including its merged and closed members). | Sending still works. You lose the PR title, the branch names, exact/stack candidate ranking, and the `Title:`/`Branch:` lines in the agent's prompt. Stack detection is lost **entirely**, local git ancestry included: that check proves "this branch is an ancestor of a branch in the stack", and without `gh` there is no stack and no PR head branch to compare against. The bridge says so in the target picker, in the agent's prompt and in the log. |
 
 Node is not a separate requirement: the plugin runs inside the Paseo daemon's
 own Node runtime.
@@ -296,11 +296,12 @@ Keyed on the text you will actually see — in the extension's popover, on the
 | Target picker reads `… (gh cannot see this repo)` | `gh`'s account has no access to the repository — private repo, or SAML not authorised. Paseo may still have access, so the send is not blocked. | `gh auth status`, then authorise the org or switch account |
 | Target picker reads `… (github.com unreachable)` | No route to github.com from the daemon machine. | Check the network or the proxy, then reopen the popover |
 | No PR title anywhere, everything ranks as "same project" | Any of the above. | Check the **Requirements** card in the Paseo surface |
+| A workspace on a **merged** stack branch still ranks as "same project" | Either the merged PR fell outside the 200 most recent merged/closed PRs (the log says so), or the branch is already contained in trunk — a true merge commit — and the trunk guard declined it. See "Merged and closed branches" below. | Nothing to fix; pick the workspace manually. The create option is still correct |
 | `git was not found on this machine, and Paseo needs it to check a pull request out into a worktree.` | Genuinely fatal for the create path. | `xcode-select --install`, or `sudo apt install git` |
 | `Pull request acmegizmos/gizmo-poc#942 does not exist on GitHub.` | `gh` read the repository fine and there is no such PR. This is the one `gh` answer that is an error rather than a degradation. | Check the number |
 | `acmegizmos/gizmo-poc is not a project in Paseo.` | Paseo has no project for this repository. | `paseo project add /path/to/repo` |
 | `The Paseo daemon is not reachable from the plugin.` | The plugin is up but the daemon socket is not answering. | Start Paseo, or `paseo daemon start` |
-| `The GitHub CLI (gh) did not answer in time…` | A `gh` call hit its timeout (15 s for a PR read, 12 s for a stack list). | Retry; if it persists, check `gh auth status` and the network |
+| `The GitHub CLI (gh) did not answer in time…` | A `gh` call hit its timeout (15 s for a PR read, 12 s for either stack list, 8 s for `gh repo view`). | Retry; if it persists, check `gh auth status` and the network |
 | `dependency gh: missing (optional)` in the log, but `gh` works in your terminal | The daemon's `PATH` and your shell's `PATH` differ, and `gh` is installed somewhere the well-known list does not cover. | Compare against the `plugin subprocess PATH=` line in the same log, then set `SEND_TO_PASEO_GH_PATH` |
 | `Port 7788 is already in use…` | Something else has the port. | Change the port on the surface |
 
@@ -403,14 +404,72 @@ $ curl -s -X POST http://127.0.0.1:7788/v1/resolve \
    page. Graphite's stack panel collapses long stacks ("3 of 9, 2 hidden"), so a
    scrape could silently omit the very sibling the user's workspace was on.
    Those numbers are still honoured for members the graph did not find — a
-   closed or merged stack PR — which is normally none and costs nothing.
+   closed or merged stack PR — which is normally none and costs nothing. On
+   github.com the extension deliberately sends `[]`, so there are no hints at
+   all there.
 
    Strictly best-effort throughout: a failed lookup is logged and drops the
    rank-2 entries; it never fails the request.
 
-   Trunk cannot create a false edge, because an edge requires one PR's base to be
-   another PR's *head*, and `main` is never a head. Verified: PRs #924, #932 and
-   #956 all sit on `main` and none of them resolves into another's stack.
+   **Merged and closed branches (added 2026-09-02).** A workspace parked on a
+   branch whose PR has merged is still a workspace in that stack, and the
+   open-PR graph cannot see it at all. Two more passes cover it, each reached
+   only when the previous one left a project workspace unexplained *and* nothing
+   already matched — an exact branch match or an open sibling settles the
+   default, and a merged branch can never outrank either, so paying for the
+   wider lookups then would change nothing. Measured against the live bridge on
+   a 38-workspace project: 0.94s for a PR whose stack already had an open
+   sibling workspace, 1.6s for a PR that matched nothing at all, 0.01s once the
+   lists are cached.
+
+   - **Pass 2 — merged and closed PRs.** One more `gh pr list --state closed`
+     (200 rows, 5-minute cache). One call, not two: GitHub treats a merged PR as
+     closed, so `--state closed` returns MERGED rows as well, and each row's own
+     `state` field separates them. This recognises a workspace sitting directly
+     on a merged stack branch and reconnects a chain whose merged head branch
+     still exists. An open PR always wins over a merged one for the same head
+     branch. The 200-row cap is logged when hit, because on a busy repository
+     the symptom of truncation — an older merged stack branch going unrecognised
+     — is otherwise indistinguishable from the feature not working.
+   - **Pass 3 — local git ancestry, read-only, no network.** When the bottom PR
+     of a stack merges *and* its head branch is deleted, GitHub retargets the
+     child's base to trunk and the `base` → `head` edge that joined them is gone
+     from GitHub's data entirely — no widening of `gh pr list` can rebuild it.
+     The commits can: a stack branch below this PR is by definition an ancestor
+     of it, so `git branch -a --contains <branch>` in the project root,
+     intersected with the stack's branches (and their `origin/` forms), answers
+     the question offline. It can even recognise a stack branch that has no PR
+     at all, in which case the candidate carries no `stackPrNumber`.
+
+     **A trunk guard is mandatory here, not optional.** Every branch ever merged
+     into trunk is an ancestor of every branch cut from trunk since, so without
+     a guard a workspace parked on trunk — or on a branch merged a year ago —
+     would become a rank-2 stack candidate for *every* PR in the repository. A
+     branch already contained in trunk is therefore rejected, which leaves
+     exactly the branches carrying commits trunk does not have: a squash- or
+     rebase-merged stack branch whose child has not been restacked yet, and a
+     stack branch with no PR. Trunk itself comes from
+     `refs/remotes/origin/HEAD` (free, offline; present in 2 of 3 git projects
+     measured on the development machine) and falls back to `gh repo view`. With
+     no trunk name at all, pass 3 is skipped and says so in the log.
+
+     The cost of the guard is the true-merge-commit case: such a branch *is* an
+     ancestor of trunk and is indistinguishable from any other long-merged
+     branch, so pass 2 has to carry it — and does, whenever the head branch
+     still exists so the `base` → `head` edge survives. The combination "true
+     merge commit AND head branch deleted AND child retargeted" is covered by
+     neither, and falls back to the old behaviour: rank 3, default "create".
+
+   Widening also breaks an assumption the open-only graph could rely on. Trunk
+   cannot be a false edge among open PRs, because an edge requires one PR's base
+   to be another PR's *head* and nobody opens a PR whose head is `main`.
+   Merged PRs are different: measured in the public `vercel/turborepo`
+   repository, PR #13875 is MERGED with `headRefName: "main"` — a release
+   back-merge — and 13 open PRs are based on `main`, so admitting that one row
+   would fuse them all into a single false "stack". Two guards reject it: the
+   trunk name, and a fan-out backstop (a non-open head that four or more PRs are
+   based on). Both were measured to leave that PR with zero stack members.
+   Only non-open rows are filtered, so the open-PR behaviour is unchanged.
 
    **Not `gt`.** The Graphite CLI answers "what is *my current* stack" from
    local, per-worktree metadata relative to whatever branch is checked out where
@@ -428,19 +487,27 @@ $ curl -s -X POST http://127.0.0.1:7788/v1/resolve \
    | rank | reason | meaning |
    | --- | --- | --- |
    | 1 | `exact` | workspace HEAD == the PR head branch |
-   | 2 | `stack` | workspace HEAD is another branch in this stack; carries `stackPrNumber` |
+   | 2 | `stack` | workspace HEAD is another branch in this stack, whatever its own PR's state; carries `stackPrNumber` and, when that PR is not open, `stackPrState` |
    | 3 | `project` | any other workspace in the project |
    | 4 | `create` | the synthetic "create a worktree for this PR" option |
 
    Candidates come back sorted ascending by rank and always include the `create`
-   entry. Rank-2 entries are ordered by hop distance, so the nearest branch in the
-   stack comes first.
+   entry. Rank-2 entries are ordered by PR state first — open before merged
+   before closed before "no PR at all" — then by hop distance, then by
+   `stackPrNumber`. State outranks distance because a live sibling is somewhere
+   work is still happening while a merged branch is history the stack has been
+   restacked past. Distances measured from GitHub's graph beat ones it could not
+   measure, and both beat membership inferred from local ancestry; each has its
+   own named constant so the three can never sort as one.
 
-   `defaultCandidateIndex` points at the rank-1 exact match, else the nearest
-   rank-2 stack match, else `create`. Rank 3 is never a default — an unrelated
-   workspace is a worse guess than a fresh worktree. Preferring rank 2 supports
-   one workspace per *stack*: opening PR #4 while the worktree sits on PR #7's
-   branch resolves to that workspace instead of proposing a second checkout.
+   `defaultCandidateIndex` points at the rank-1 exact match, else the best
+   rank-2 stack match, else `create` — and is always a valid index, because
+   `candidates` always ends with the `create` entry. Rank 3 is never a default —
+   an unrelated workspace is a worse guess than a fresh worktree. Preferring
+   rank 2 supports one workspace per *stack*: opening PR #4 while the worktree
+   sits on PR #7's branch resolves to that workspace instead of proposing a
+   second checkout. That now holds when PR #7 has already merged, which is the
+   case that used to fall through to "create".
 
    The extension always shows the picker and requires an explicit send; nothing
    is ever created silently, whatever the default is.
@@ -450,6 +517,11 @@ $ curl -s -X POST http://127.0.0.1:7788/v1/resolve \
 When the chosen workspace is on a branch other than the PR's head branch, the
 composed prompt says so explicitly and names the PR branch to check out. Silence
 would leave the agent believing it is on the PR branch — and committing there.
+When that branch's own pull request is merged or closed, the wording says that
+too: "a different branch of the same stack" reads as a live sibling, and a merged
+branch is behind by construction. Establishing the state reuses the resolve
+path's caches, so it is normally a cache read rather than a `gh` call, and a null
+answer just keeps the generic wording.
 
 `target: {kind:"existing"}` starts the agent through that workspace's own handle,
 so it joins that workspace record rather than being given a fresh one for the
@@ -501,6 +573,27 @@ When a request carries `pageUrl`, exactly one `Page: <pageUrl>` line is appended
 after the `PR:` line. With `pageUrl` absent the header is byte-for-byte the
 contract's example. This is now pinned in CONTRACT.md's "Prompt composition"
 block, so it is spec rather than interpretation.
+
+#### On a sibling branch of the stack
+
+```
+Workspace branch: giz-1132-retire-legacy-cache-flag (NOT this PR's branch)
+Note: this worktree is on a different branch of the same stack. If your change belongs to PR #942, check out giz-1133-widget-backed-inventory-audit-rule first.
+```
+
+When the bridge also established that the sibling branch's own pull request is
+merged or closed, those two lines say so — "a different branch of the same
+stack" reads as a live sibling, and a merged branch is behind by construction
+because the stack has been restacked past it:
+
+```
+Workspace branch: giz-1132-retire-legacy-cache-flag (NOT this PR's branch; its own pull request is already merged)
+Note: this worktree is on a branch of this stack whose pull request has already been merged, so it may be behind the rest of the stack. If your change belongs to PR #942, check out giz-1133-widget-backed-inventory-audit-rule first.
+```
+
+The advice is the same in every variant; only the description of where the agent
+is standing changes. When the state cannot be established, the generic wording
+is used — never wrong, only less specific.
 
 #### With no `gh`
 
@@ -598,7 +691,7 @@ resolve.server.ts      PR -> project -> workspace resolution and ranking
 send.server.ts         workspace ensure + agent create + prompt composition
 deps.server.ts         binary lookup, spawn wrapper, dependency self-check
 gh.server.ts           the gh calls and their graceful degradation, cached
-git.server.ts          branch and remote reads, cached on HEAD mtime
+git.server.ts          read-only branch, remote, trunk and ancestry reads
 daemon.server.ts       short-lived Paseo SDK connections, daemon identity
 settings.server.ts     token, port, default model, recent sends
 contracts.shared.ts    Zod schemas, error taxonomy, pure formatting, RPC contracts

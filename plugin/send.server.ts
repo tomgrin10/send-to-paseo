@@ -19,6 +19,7 @@ import {
   type PrRef,
   type SendRequest,
   type SendResponse,
+  type StackPrState,
 } from "./contracts.shared";
 import { requireServerId, withPaseo } from "./daemon.server";
 import { lookupPr, type GhOutage } from "./gh.server";
@@ -30,6 +31,7 @@ import {
   resolveDefaultProvider,
   resolveProject,
   resolveSelectedProfile,
+  resolveStackBranches,
 } from "./resolve.server";
 import { settings } from "./settings.server";
 
@@ -84,6 +86,45 @@ function promptNote(outage: GhOutage): string {
     `Note: the pull request title and branch names are missing from this header because ` +
     `${outage.short}. Read them from the PR URL above if you need them.`
   );
+}
+
+/**
+ * The state of the stack pull request that owns `branch`, or null.
+ *
+ * Only asked when the target workspace is on some *other* branch than the PR's
+ * own, which is the only case where the prompt says anything about it at all.
+ * The lookup reuses the resolve path's caches, and `/v1/resolve` ran seconds
+ * earlier when the popover opened, so in practice this is a cache read rather
+ * than a `gh` round trip. Best-effort throughout: a null answer just means the
+ * prompt keeps its generic "a different branch of the same stack" wording,
+ * which is never wrong, only less specific.
+ */
+async function stackStateOfBranch(input: {
+  ref: PrRef;
+  pr: PrPayload;
+  projectRoot: string;
+  branch: string;
+  outage: GhOutage | null;
+}): Promise<StackPrState | null> {
+  if (input.outage !== null) return null;
+  if (input.pr.headBranch === "" || input.branch === input.pr.headBranch) return null;
+  try {
+    const stack = await resolveStackBranches({
+      ref: input.ref,
+      headBranch: input.pr.headBranch,
+      hints: [],
+      outage: null,
+      projectRoot: input.projectRoot,
+      workspaceBranches: [input.branch],
+    });
+    return stack.get(input.branch)?.state ?? null;
+  } catch (error) {
+    console.error(
+      "[send-to-paseo] could not determine the stack state of the target branch",
+      String(error),
+    );
+    return null;
+  }
 }
 
 function labelOf(workspace: PaseoWorkspace): string {
@@ -261,6 +302,16 @@ export async function handleSend(request: SendRequest): Promise<SendResponse> {
             pr,
             prompt,
             workspaceBranch: branch,
+            workspaceBranchState:
+              branch === null || branch === ""
+                ? null
+                : await stackStateOfBranch({
+                    ref,
+                    pr,
+                    projectRoot: project.path,
+                    branch,
+                    outage,
+                  }),
             ...(outage === null ? {} : { prMetadataNote: promptNote(outage) }),
             ...(request.pageUrl === undefined ? {} : { pageUrl: request.pageUrl }),
           }),

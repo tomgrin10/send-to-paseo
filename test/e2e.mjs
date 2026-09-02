@@ -216,6 +216,139 @@ async function waitForPhase(page, phase, timeout = 15000) {
   );
 }
 
+/* ---- the Target combobox (non-native, searchable) ----------------------- */
+/*
+ * The Target picker is a custom combobox, not a <select> (see
+ * extension/src/content/ui/combobox.ts), so every helper below drives the real
+ * widget: click the trigger, type into the search box with real keystrokes,
+ * click or arrow-and-Enter a row. Nothing here assigns `.value` or dispatches a
+ * synthetic `change`, which is the point — a shim would let the widget be
+ * broken and the suite still be green. `setSelect()` further down does exactly
+ * that, but only for Provider and Mode, which remain native selects.
+ *
+ * Stable hooks: `data-stp-candidates` (trigger; its textContent is the
+ * committed option's label), `data-stp-combobox[data-stp-combo-open]`,
+ * `data-stp-combo-search`, `data-stp-combo-list`, `data-stp-combo-option`
+ * (with `data-stp-index` = the candidate index and `data-stp-active`),
+ * `data-stp-combo-empty`.
+ */
+
+const CANDIDATES = "[data-stp-candidates]";
+
+async function candidatesOpen(page) {
+  return page.evaluate(() => {
+    const root = document
+      .querySelector("send-to-paseo-popover")
+      ?.shadowRoot?.querySelector("[data-stp-combobox]");
+    return root?.getAttribute("data-stp-combo-open") === "true";
+  });
+}
+
+/** Open the dropdown if it is closed. Returns the search input locator. */
+async function openCandidates(page) {
+  if (!(await candidatesOpen(page))) await page.locator(CANDIDATES).click();
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector("send-to-paseo-popover")
+        ?.shadowRoot?.querySelector("[data-stp-combobox]")
+        ?.getAttribute("data-stp-combo-open") === "true",
+    undefined,
+    { timeout: 4000 },
+  );
+  return page.locator("[data-stp-combo-search]");
+}
+
+async function closeCandidates(page) {
+  if (await candidatesOpen(page)) await page.locator(CANDIDATES).click();
+}
+
+/**
+ * Type a query with REAL keystrokes. Re-opens first so the query always starts
+ * empty — opening resets it, which is also the behaviour under test.
+ */
+async function searchCandidates(page, query) {
+  await closeCandidates(page);
+  const input = await openCandidates(page);
+  await page.keyboard.type(query, { delay: 5 });
+  await page.waitForFunction(
+    (q) =>
+      document
+        .querySelector("send-to-paseo-popover")
+        ?.shadowRoot?.querySelector("[data-stp-combo-search]")?.value === q,
+    query,
+    { timeout: 4000 },
+  );
+  return input;
+}
+
+/** The dropdown's current state: rows, selection, active option, empty row. */
+async function readCandidates(page, { close = true } = {}) {
+  await openCandidates(page);
+  const out = await page.evaluate(() => {
+    const root = document.querySelector("send-to-paseo-popover").shadowRoot;
+    const rows = [...root.querySelectorAll("[data-stp-combo-option]")];
+    const idx = rows.map((r) => Number(r.dataset.stpIndex));
+    const input = root.querySelector("[data-stp-combo-search]");
+    const selectedRow = rows.findIndex((r) => r.getAttribute("aria-selected") === "true");
+    const activeRow = rows.findIndex((r) => r.hasAttribute("data-stp-active"));
+    const list = root.querySelector("[data-stp-combo-list]");
+    return {
+      options: rows.map((r) => r.textContent),
+      indices: idx,
+      /** Candidate index carrying aria-selected, or -1 when it is filtered out. */
+      selectedIndex: selectedRow === -1 ? -1 : idx[selectedRow],
+      activeIndex: activeRow === -1 ? -1 : idx[activeRow],
+      activeDescendant: input.getAttribute("aria-activedescendant"),
+      activeRowId: activeRow === -1 ? null : rows[activeRow].id,
+      emptyShown: !root.querySelector("[data-stp-combo-empty]").hasAttribute("hidden"),
+      emptyText: root.querySelector("[data-stp-combo-empty]").textContent,
+      trigger: root.querySelector("[data-stp-candidates]").textContent.trim(),
+      triggerExpanded: root.querySelector("[data-stp-candidates]").getAttribute("aria-expanded"),
+      inputRole: input.getAttribute("role"),
+      inputControls: input.getAttribute("aria-controls"),
+      listRole: list.getAttribute("role"),
+      listId: list.id,
+      optionRoles: [...new Set(rows.map((r) => r.getAttribute("role")))],
+    };
+  });
+  if (close) await closeCandidates(page);
+  return out;
+}
+
+/** The label showing on the closed trigger — i.e. the committed candidate. */
+async function candidateTrigger(page) {
+  return page.evaluate(() =>
+    document
+      .querySelector("send-to-paseo-popover")
+      .shadowRoot.querySelector("[data-stp-candidates]")
+      .textContent.trim(),
+  );
+}
+
+/**
+ * Commit candidate `index` by driving the widget: open, click the row, then
+ * wait until the trigger really shows that row's label. Waiting on the label
+ * rather than on "the dropdown closed" is what stops this passing vacuously.
+ */
+async function pickCandidate(page, index) {
+  await openCandidates(page);
+  const row = page.locator(`[data-stp-combo-option][data-stp-index="${index}"]`);
+  await row.waitFor({ state: "visible", timeout: 4000 });
+  const label = (await row.textContent()).trim();
+  await row.click();
+  await page.waitForFunction(
+    (want) =>
+      document
+        .querySelector("send-to-paseo-popover")
+        .shadowRoot.querySelector("[data-stp-candidates]")
+        .textContent.trim() === want,
+    label,
+    { timeout: 4000 },
+  );
+  return label;
+}
+
 /** Region that contains the Graphite header plus the anchored popover. */
 const POPOVER_CLIP = { x: 0, y: 0, width: 1280, height: 520 };
 
@@ -472,12 +605,25 @@ await test("4. Popover opens, calls /v1/resolve, renders target + candidates", a
 
   const ui = await page.evaluate(() => {
     const root = document.querySelector("send-to-paseo-popover").shadowRoot;
-    const sel = root.querySelector("[data-stp-candidates]");
+    const trigger = root.querySelector("[data-stp-candidates]");
     return {
       summary: root.querySelector("[data-stp-target-summary]").textContent.replace(/\s+/g, " ").trim(),
       prref: root.querySelector("[data-stp-prref]").textContent.trim(),
-      options: [...sel.options].map((o) => o.textContent),
-      selectedIndex: sel.selectedIndex,
+      // The Target picker is a custom combobox: closed it is a trigger button
+      // showing the committed label, and it owns no <option> nodes at all.
+      trigger: trigger.textContent.trim(),
+      triggerTag: trigger.tagName.toLowerCase(),
+      triggerPopup: trigger.getAttribute("aria-haspopup"),
+      triggerExpanded: trigger.getAttribute("aria-expanded"),
+      nativeSelects: [...root.querySelectorAll("select")].map((el) =>
+        el.getAttribute("data-stp-provider") !== null
+          ? "provider"
+          : el.getAttribute("data-stp-mode") !== null
+            ? "mode"
+            : el.outerHTML.slice(0, 40),
+      ),
+      panelHidden: root.querySelector("[data-stp-combo-panel]").hasAttribute("hidden"),
+      optionsWhileClosed: root.querySelectorAll("[data-stp-combo-option]").length,
       providers: [...root.querySelector("[data-stp-provider]").options].map((o) => o.textContent),
       providerValue: root.querySelector("[data-stp-provider]").value,
       promptFocused: root.activeElement?.getAttribute("data-stp-prompt") !== null,
@@ -499,11 +645,39 @@ await test("4. Popover opens, calls /v1/resolve, renders target + candidates", a
   assert(ui.summary.includes("brawny-dodo"), `summary should name the rank-1 workspace, got: ${ui.summary}`);
   assert(ui.summary.includes("giz-1133-widget-backed-inventory-audit-rule"), "summary should show the branch");
   assertEq(ui.prref, "acmegizmos/gizmo-poc #942", "header PR reference");
-  assertEq(ui.options.length, 4, "expected 4 candidates (exact, stack, project, create)");
-  assert(ui.options[0].includes("brawny-dodo") && ui.options[0].includes("exact match"), `option 0: ${ui.options[0]}`);
-  assert(ui.options[1].includes("stack #949"), `option 1 should be the rank-2 stack entry, got: ${ui.options[1]}`);
-  assert(ui.options[3].includes("Create worktree for PR #942"), `option 3: ${ui.options[3]}`);
-  assertEq(ui.selectedIndex, 0, "defaultCandidateIndex must be honoured");
+
+  /* The Target picker is non-native. Closed, it is a button — no <select>, no
+     <option>, nothing for the OS to draw — and Provider/Mode are still the two
+     native selects on the card. */
+  assertEq(ui.triggerTag, "button", "the Target trigger must not be a <select>");
+  assertEq(ui.triggerPopup, "listbox", "trigger must advertise its popup");
+  assertEq(ui.triggerExpanded, "false", "trigger starts collapsed");
+  assertEq(ui.nativeSelects, ["provider", "mode"], "the only native selects left are Provider and Mode");
+  assert(ui.panelHidden, "the dropdown panel is hidden until opened");
+  assertEq(ui.optionsWhileClosed, 0, "no option rows exist while the dropdown is closed");
+  assert(ui.trigger.includes("brawny-dodo"), `trigger shows the committed candidate: ${ui.trigger}`);
+
+  /* Open it and read the real rows. */
+  const cands = await readCandidates(page, { close: false });
+  assertEq(cands.options.length, 4, "expected 4 candidates (exact, stack, project, create)");
+  assert(cands.options[0].includes("brawny-dodo") && cands.options[0].includes("exact match"), `option 0: ${cands.options[0]}`);
+  assert(cands.options[1].includes("stack #949"), `option 1 should be the rank-2 stack entry, got: ${cands.options[1]}`);
+  assert(cands.options[3].includes("Create worktree for PR #942"), `option 3: ${cands.options[3]}`);
+  assertEq(cands.selectedIndex, 0, "defaultCandidateIndex must be honoured");
+  assertEq(cands.activeIndex, 0, "the dropdown opens on the committed option, not on the top row");
+  /* ARIA wiring, since nothing native supplies it here. */
+  assertEq(cands.inputRole, "combobox", "the search input carries role=combobox");
+  assertEq(cands.listRole, "listbox", "the popup is a listbox");
+  assertEq(cands.optionRoles, ["option"], "every row is role=option");
+  assertEq(cands.inputControls, cands.listId, "aria-controls must point at the listbox");
+  assertEq(cands.activeDescendant, cands.activeRowId, "aria-activedescendant must name the active row");
+  assertEq(cands.triggerExpanded, "true", "aria-expanded flips when open");
+  await shot(page, "popover-candidate-combobox-open-light", POPOVER_CLIP);
+  await page.emulateMedia({ colorScheme: "dark" });
+  await shot(page, "popover-candidate-combobox-open-dark", POPOVER_CLIP);
+  await page.emulateMedia({ colorScheme: "light" });
+  await closeCandidates(page);
+
   assertEq(ui.providers.length, 3, "provider list from resolve");
   assert(ui.providers[0].includes("(default)"), "the default provider is marked");
   assertEq(ui.providerValue, "claude/claude-opus-5", "provider pre-set to the bridge default");
@@ -537,13 +711,9 @@ await test("4. Popover opens, calls /v1/resolve, renders target + candidates", a
   await shot(page, "popover-open-candidates-dark", POPOVER_CLIP);
   await page.emulateMedia({ colorScheme: "light" });
 
-  // Candidate dropdown genuinely switches the summary.
-  await page.evaluate(() => {
-    const root = document.querySelector("send-to-paseo-popover").shadowRoot;
-    const sel = root.querySelector("[data-stp-candidates]");
-    sel.value = "3";
-    sel.dispatchEvent(new Event("change"));
-  });
+  // Candidate dropdown genuinely switches the summary — driven through the real
+  // widget (open, click the row), not by assigning a value.
+  await pickCandidate(page, 3);
   const createSummary = await page.evaluate(() =>
     document
       .querySelector("send-to-paseo-popover")
@@ -559,7 +729,7 @@ await test("4. Popover opens, calls /v1/resolve, renders target + candidates", a
 
   return [
     `POST /v1/resolve body: ${JSON.stringify(req.body)}`,
-    `candidates: ${ui.options.join(" | ")}`,
+    `candidates: ${cands.options.join(" | ")}`,
     `summary: ${ui.summary}`,
     `footer keycaps: ${keys.map((k) => `${k.text}=${k.px}px`).join(" ")}`,
   ];
@@ -732,11 +902,11 @@ await test("8. SPA navigation to another PR re-targets the button", async () => 
 
   const ui = await page.evaluate(() => {
     const root = document.querySelector("send-to-paseo-popover").shadowRoot;
-    const sel = root.querySelector("[data-stp-candidates]");
     return {
       prref: root.querySelector("[data-stp-prref]").textContent.trim(),
       summary: root.querySelector("[data-stp-target-summary]").textContent.replace(/\s+/g, " ").trim(),
-      selected: sel.options[sel.selectedIndex].textContent,
+      // The closed combobox trigger shows the committed candidate's label.
+      selected: root.querySelector("[data-stp-candidates]").textContent.trim(),
     };
   });
   assertEq(ui.prref, "acmegizmos/gizmo-poc #948", "popover header follows the new PR");
@@ -1660,9 +1830,50 @@ await test("14. Compact window: popover stays on-screen, button still anchored",
     await page.emulateMedia({ colorScheme: "dark" });
     await shot(page, "compact-window-popover-dark");
     await page.emulateMedia({ colorScheme: "light" });
+
+    /* The Target dropdown opens in normal flow, so it GROWS the card — which is
+       exactly the input position() measures. In a 620px-tall window that is the
+       case most likely to push the card off-screen, so assert it explicitly:
+       the card, and the dropdown list inside it, both stay in the viewport. */
+    await openCandidates(page);
+    const open = await page.evaluate(() => {
+      const host = document.querySelector("send-to-paseo-popover");
+      const root = host.shadowRoot;
+      const card = root.querySelector(".card").getBoundingClientRect();
+      const list = root.querySelector("[data-stp-combo-list]").getBoundingClientRect();
+      return {
+        card: { left: card.left, top: card.top, right: card.right, bottom: card.bottom },
+        list: { top: list.top, bottom: list.bottom, height: list.height },
+        vw: window.innerWidth,
+        vh: window.innerHeight,
+      };
+    });
+    assert(open.card.top >= 0, `card overflows top with the dropdown open: ${open.card.top}`);
+    assert(open.card.left >= 0, `card overflows left with the dropdown open: ${open.card.left}`);
+    assert(
+      open.card.bottom <= open.vh + 1,
+      `card overflows bottom with the dropdown open: ${open.card.bottom} > ${open.vh}`,
+    );
+    assert(
+      open.card.right <= open.vw + 1,
+      `card overflows right with the dropdown open: ${open.card.right} > ${open.vw}`,
+    );
+    assert(open.list.top >= 0 && open.list.bottom <= open.vh + 1, `option list off-screen: ${JSON.stringify(open.list)}`);
+    assert(open.list.height > 0 && open.list.height <= 0.34 * open.vh + 1, `list must be capped, got ${open.list.height} in ${open.vh}`);
+    note(
+      `dropdown open: card ${Math.round(open.card.bottom - open.card.top)}px tall, ` +
+        `list ${Math.round(open.list.height)}px, viewport ${open.vw}x${open.vh}`,
+    );
+    await shot(page, "compact-window-combobox-open-light");
+    await page.emulateMedia({ colorScheme: "dark" });
+    await shot(page, "compact-window-combobox-open-dark");
+    await page.emulateMedia({ colorScheme: "light" });
+
     return [
       `860x620 viewport: card fits at (${Math.round(box.left)},${Math.round(box.top)})-(${Math.round(box.right)},${Math.round(box.bottom)})`,
       "button still on the primary anchor rung",
+      `with the Target dropdown open: card ${Math.round(open.card.top)}..${Math.round(open.card.bottom)}`
+        + ` of ${open.vh}px, option list ${Math.round(open.list.height)}px (capped at 34vh)`,
     ];
   } finally {
     await page.setViewportSize({ width: 1280, height: 800 });
@@ -1769,14 +1980,16 @@ await test("14. Compact window: popover stays on-screen, button still anchored",
           await waitForButton(page);
           await openPopover(page);
           await waitForPhase(page, "ready", 25000);
-          const live = await page.evaluate(() => {
-            const root = document.querySelector("send-to-paseo-popover").shadowRoot;
-            const sel = root.querySelector("[data-stp-candidates]");
-            return {
-              candidateCount: sel.options.length,
-              providerCount: root.querySelector("[data-stp-provider]").options.length,
-            };
-          });
+          const liveCands = await readCandidates(page);
+          const live = {
+            candidateCount: liveCands.options.length,
+            providerCount: await page.evaluate(
+              () =>
+                document.querySelector("send-to-paseo-popover").shadowRoot.querySelector(
+                  "[data-stp-provider]",
+                ).options.length,
+            ),
+          };
           assert(live.candidateCount > 1, `STP_LIVE_PR: candidates, got ${live.candidateCount}`);
           assert(live.providerCount > 1, `STP_LIVE_PR: providers, got ${live.providerCount}`);
           /* No screenshot here on purpose: candidate labels are the operator's
@@ -1797,26 +2010,22 @@ await test("14. Compact window: popover stays on-screen, button still anchored",
 }
 
 
-await test("19. Host-page keyboard shortcuts cannot reach the popover (regression)", async () => {
-  await bridgeReset();
-  await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
-  await waitForButton(page);
-  await openPopover(page);
-  await waitForPhase(page, "ready");
-
-  // A faithful stand-in for Graphite's shortcut layer, as measured on the live
-  // app on 2026-09-01: keydown listeners on window, document and body in BOTH
-  // phases, deciding "is the user typing?" from event.target.
-  //
-  // Shadow-DOM retargeting is what makes this hostile: a listener outside our
-  // shadow root sees event.target === <send-to-paseo-popover>, not our
-  // <textarea>, so the guard concludes "not a text field" and treats real
-  // typing as shortcuts. On live Graphite that stole focus on nearly every
-  // keystroke and typing this exact prompt produced the literal value "x ".
-  //
-  // Only the BUBBLE handlers act here, which mirrors the measurement: the
-  // capture-phase handlers on live Graphite do fire but take no action. See
-  // extension/src/content/ui/keyboard.ts.
+/**
+ * A faithful stand-in for Graphite's shortcut layer, as measured on the live
+ * app on 2026-09-01: keydown listeners on window, document and body in BOTH
+ * phases, deciding "is the user typing?" from event.target.
+ *
+ * Shadow-DOM retargeting is what makes this hostile: a listener outside our
+ * shadow root sees event.target === <send-to-paseo-popover>, not our
+ * <textarea>, so the guard concludes "not a text field" and treats real
+ * typing as shortcuts. On live Graphite that stole focus on nearly every
+ * keystroke and typing this exact prompt produced the literal value "x ".
+ *
+ * Only the BUBBLE handlers act here, which mirrors the measurement: the
+ * capture-phase handlers on live Graphite do fire but take no action. See
+ * extension/src/content/ui/keyboard.ts.
+ */
+async function installHostileGraphiteShortcuts(page) {
   await page.evaluate(() => {
     const state = { bubble: [], capture: [], targets: [] };
     window.__hostile = state;
@@ -1844,9 +2053,20 @@ await test("19. Host-page keyboard shortcuts cannot reach the popover (regressio
       target.addEventListener("keydown", handler("bubble", true), false);
     }
   });
+}
 
-  // Every character here is a plausible single-key Graphite shortcut.
-  const prompt = "Fix merge conflicts? c/j k n p a g r";
+/** Every character here is a plausible single-key Graphite shortcut. */
+const GRAPHITE_HOSTILE_KEYS = "Fix merge conflicts? c/j k n p a g r";
+
+await test("19. Host-page keyboard shortcuts cannot reach the popover (regression)", async () => {
+  await bridgeReset();
+  await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
+  await waitForButton(page);
+  await openPopover(page);
+  await waitForPhase(page, "ready");
+  await installHostileGraphiteShortcuts(page);
+
+  const prompt = GRAPHITE_HOSTILE_KEYS;
   await page.locator("[data-stp-prompt]").click();
   await page.keyboard.type(prompt, { delay: 5 });
 
@@ -1893,6 +2113,63 @@ await test("19. Host-page keyboard shortcuts cannot reach the popover (regressio
   await shot(page, "keyboard-containment-typed", POPOVER_CLIP);
 });
 
+await test("19b. Graphite: the Target SEARCH BOX is contained too (real keystrokes)", async () => {
+  await bridgeReset();
+  await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
+  await waitForButton(page);
+  await openPopover(page);
+  await waitForPhase(page, "ready");
+  await installHostileGraphiteShortcuts(page);
+
+  // The Target search box is a NEW text input, and containment is not automatic
+  // for new surfaces — it holds here only because the dropdown renders inside
+  // the popover's existing shadow root instead of being portalled into a host
+  // of its own. That is a design constraint, so it gets the same regression
+  // test as the textarea, with the same shortcut-shaped string.
+  await openCandidates(page);
+  await page.keyboard.type(GRAPHITE_HOSTILE_KEYS, { delay: 5 });
+
+  const observed = await page.evaluate(() => {
+    const host = document.querySelector("send-to-paseo-popover");
+    const root = host?.shadowRoot;
+    const input = root?.querySelector("[data-stp-combo-search]");
+    return {
+      value: input ? input.value : null,
+      focusInSearch: !!input && document.activeElement === host && root.activeElement === input,
+      focusStolen: document.activeElement?.id === "__hostile_thief",
+      bubbleShortcuts: window.__hostile.bubble.length,
+      captureShortcuts: window.__hostile.capture.length,
+      sawRetargetedHost: window.__hostile.targets.includes("send-to-paseo-popover"),
+      popoverStillOpen: !!host,
+      dropdownStillOpen:
+        root?.querySelector("[data-stp-combobox]")?.getAttribute("data-stp-combo-open") === "true",
+      emptyShown: !root?.querySelector("[data-stp-combo-empty]").hasAttribute("hidden"),
+    };
+  });
+
+  assert(
+    observed.sawRetargetedHost,
+    "test is vacuous: the hostile listeners never saw the retargeted shadow host",
+  );
+  assertEq(observed.value, GRAPHITE_HOSTILE_KEYS, "keystrokes must reach the search box byte-for-byte");
+  assert(observed.popoverStillOpen, "popover must survive typing in the search box");
+  assert(observed.dropdownStillOpen, "the dropdown must survive a barrage of shortcut keys");
+  assert(observed.focusInSearch, "focus must stay in the search box while typing");
+  assert(!observed.focusStolen, "the host page must not be able to steal focus mid-search");
+  assertEq(observed.bubbleShortcuts, 0, "no keystroke may reach a bubble-phase page listener");
+  assert(observed.emptyShown, "that string matches no workspace, so the empty row must show");
+
+  note(
+    `capture-phase page listeners still observed ${observed.captureShortcuts} keystrokes ` +
+      `(expected and unavoidable); bubble-phase: ${observed.bubbleShortcuts}`,
+  );
+  await shot(page, "keyboard-containment-combobox-search", POPOVER_CLIP);
+  return [
+    `typed "${GRAPHITE_HOSTILE_KEYS}" into the Target search box with real keystrokes; value byte-exact`,
+    `bubble-phase hits: ${observed.bubbleShortcuts} · capture-phase hits: ${observed.captureShortcuts}`,
+  ];
+});
+
 
 await test("20. One workspace per stack: a stack sibling is the default, not 'create'", async () => {
   await bridgeReset();
@@ -1917,19 +2194,19 @@ await test("20. One workspace per stack: a stack sibling is the default, not 'cr
   const resolved = await lastRequest("/v1/resolve");
   assertEq(resolved.body.number, 947, "resolve is for the navigated PR");
 
+  const cands = await readCandidates(page);
   const ui = await page.evaluate(() => {
     const root = document.querySelector("send-to-paseo-popover").shadowRoot;
-    const sel = root.querySelector("[data-stp-candidates]");
     return {
       summary: root.querySelector("[data-stp-target-summary]").textContent.replace(/\s+/g, " ").trim(),
       mismatch: root.querySelector("[data-stp-branch-mismatch]")?.textContent.trim() ?? null,
-      selected: sel.options[sel.selectedIndex].textContent,
-      optionCount: sel.options.length,
-      createOfferedButNotDefault:
-        [...sel.options].some((o) => /Create worktree/i.test(o.textContent)) &&
-        !/Create worktree/i.test(sel.options[sel.selectedIndex].textContent),
+      selected: root.querySelector("[data-stp-candidates]").textContent.trim(),
     };
   });
+  ui.optionCount = cands.options.length;
+  ui.createOfferedButNotDefault =
+    cands.options.some((o) => /Create worktree/i.test(o)) &&
+    !/Create worktree/i.test(ui.selected);
 
   assert(
     ui.summary.includes("workspace candid-otter"),
@@ -2118,13 +2395,10 @@ await test("20c. Degraded resolve: an empty pr.headBranch is UNKNOWN, not 'a dif
   await waitForButton(page);
   await openPopover(page);
   await waitForPhase(page, "ready");
-  const projectIndex = await page.evaluate(() => {
-    const root = document.querySelector("send-to-paseo-popover").shadowRoot;
-    const sel = root.querySelector("[data-stp-candidates]");
-    return [...sel.options].findIndex((o) => o.textContent.includes("same project"));
-  });
+  const control = await readCandidates(page);
+  const projectIndex = control.indices[control.options.findIndex((o) => o.includes("same project"))];
   assert(projectIndex >= 0, "fixture must offer a rank-3 project candidate");
-  await setSelect(page, "data-stp-candidates", String(projectIndex));
+  await pickCandidate(page, projectIndex);
   const withGh = await page.evaluate(() => {
     const root = document.querySelector("send-to-paseo-popover").shadowRoot;
     return {
@@ -2134,8 +2408,11 @@ await test("20c. Degraded resolve: an empty pr.headBranch is UNKNOWN, not 'a dif
   });
   assertEq(
     withGh.mismatch,
-    "worktree is on another branch of this stack",
-    "control: a genuinely different branch must still be called out",
+    "worktree is on a different branch",
+    // Deliberately NOT "another branch of this stack": this control candidate is
+    // rank 3 (`same project`) sitting on `main`, which is not in the stack at
+    // all. The note used to make that claim about every existing candidate.
+    "control: a genuinely different branch must still be called out, without claiming it is in the stack",
   );
   await page.keyboard.press("Escape");
 
@@ -2149,24 +2426,21 @@ await test("20c. Degraded resolve: an empty pr.headBranch is UNKNOWN, not 'a dif
     await openPopover(page);
     await waitForPhase(page, "ready");
 
-    const degradedIndex = await page.evaluate(() => {
-      const root = document.querySelector("send-to-paseo-popover").shadowRoot;
-      const sel = root.querySelector("[data-stp-candidates]");
-      return [...sel.options].findIndex((o) => o.textContent.includes("same project"));
-    });
+    const degradedList = await readCandidates(page);
+    const degradedIndex =
+      degradedList.indices[degradedList.options.findIndex((o) => o.includes("same project"))];
     assert(degradedIndex >= 0, "the project candidate must survive a degraded resolve");
-    await setSelect(page, "data-stp-candidates", String(degradedIndex));
+    await pickCandidate(page, degradedIndex);
 
     const degraded = await page.evaluate(() => {
       const root = document.querySelector("send-to-paseo-popover").shadowRoot;
-      const sel = root.querySelector("[data-stp-candidates]");
       return {
         mismatch: root.querySelector("[data-stp-branch-mismatch]")?.textContent.trim() ?? null,
         summary: root
           .querySelector("[data-stp-target-summary]")
           .textContent.replace(/\s+/g, " ")
           .trim(),
-        selected: sel.options[sel.selectedIndex].textContent,
+        selected: root.querySelector("[data-stp-candidates]").textContent.trim(),
       };
     });
 
@@ -2657,16 +2931,16 @@ await test("27. GitHub: popover resolves and sends with the right payload", asyn
     "resolve body for a GitHub PR page",
   );
 
+  const ghCands = await readCandidates(page);
   const ui = await page.evaluate(() => {
     const root = document.querySelector("send-to-paseo-popover").shadowRoot;
-    const sel = root.querySelector("[data-stp-candidates]");
     return {
       prref: root.querySelector("[data-stp-prref]").textContent.trim(),
       summary: root.querySelector("[data-stp-target-summary]").textContent.replace(/\s+/g, " ").trim(),
-      options: [...sel.options].map((o) => o.textContent),
-      selected: sel.options[sel.selectedIndex].textContent,
+      selected: root.querySelector("[data-stp-candidates]").textContent.trim(),
     };
   });
+  ui.options = ghCands.options;
   assertEq(ui.prref, "acmegizmos/gizmo-poc #942", "PR reference");
   assert(ui.summary.includes("brawny-dodo"), `PR 942 has an exact workspace match: ${ui.summary}`);
   // With stackPrNumbers: [] the mock offers no rank-2 candidate, which is
@@ -2716,36 +2990,32 @@ await test("27. GitHub: popover resolves and sends with the right payload", asyn
   ];
 });
 
-await test("28. GitHub: host-page keyboard shortcuts cannot reach the popover (regression)", async () => {
-  await bridgeReset();
-  await page.goto(fixtures.githubUrl(), { waitUntil: "domcontentloaded" });
-  await waitForButton(page);
-  await openPopover(page);
-  await waitForPhase(page, "ready");
-
-  // A faithful stand-in for GitHub's shortcut layer, as measured on live
-  // github.com on 2026-09-01 by instrumenting addEventListener from
-  // document_start (390 key-listener registrations in total):
-  //
-  //   keydown on document CAPTURE  45
-  //   keydown on document bubble   20
-  //   keydown on window  CAPTURE    2
-  //   keydown on window  bubble     0     <- none, unlike Graphite
-  //   keydown on body    either      0
-  //
-  // Registered by, among others, @github/hotkey (hotkey.js) — the global
-  // single-key layer behind `s`, `/`, `c`, `t`, `g c`, `j`/`k` — plus
-  // primer-react.js, catalyst.js and behaviors.js.
-  //
-  // The `isFormField` guard below mirrors @github/hotkey's own: it asks the
-  // event target whether it is a text field. Shadow-DOM retargeting is what
-  // makes that hostile — a listener outside our shadow root sees
-  // event.target === <send-to-paseo-popover>, an unknown custom element, so the
-  // guard answers "no" and every real keystroke is treated as a shortcut.
-  //
-  // Only the BUBBLE handlers act, mirroring the measurement: the capture-phase
-  // handlers on the live site fire and take no action. See
-  // extension/src/content/ui/keyboard.ts for why capture is unreachable.
+/**
+ * A faithful stand-in for GitHub's shortcut layer, as measured on live
+ * github.com on 2026-09-01 by instrumenting addEventListener from
+ * document_start (390 key-listener registrations in total):
+ *
+ *   keydown on document CAPTURE  45
+ *   keydown on document bubble   20
+ *   keydown on window  CAPTURE    2
+ *   keydown on window  bubble     0     <- none, unlike Graphite
+ *   keydown on body    either      0
+ *
+ * Registered by, among others, @github/hotkey (hotkey.js) — the global
+ * single-key layer behind `s`, `/`, `c`, `t`, `g c`, `j`/`k` — plus
+ * primer-react.js, catalyst.js and behaviors.js.
+ *
+ * The `isFormField` guard below mirrors @github/hotkey's own: it asks the
+ * event target whether it is a text field. Shadow-DOM retargeting is what
+ * makes that hostile — a listener outside our shadow root sees
+ * event.target === <send-to-paseo-popover>, an unknown custom element, so the
+ * guard answers "no" and every real keystroke is treated as a shortcut.
+ *
+ * Only the BUBBLE handlers act, mirroring the measurement: the capture-phase
+ * handlers on the live site fire and take no action. See
+ * extension/src/content/ui/keyboard.ts for why capture is unreachable.
+ */
+async function installHostileGithubShortcuts(page) {
   await page.evaluate(() => {
     const state = { bubble: [], capture: [], targets: [] };
     window.__hostileGh = state;
@@ -2782,11 +3052,24 @@ await test("28. GitHub: host-page keyboard shortcuts cannot reach the popover (r
     document.addEventListener("keydown", handler("bubble", true), false);
     window.addEventListener("keydown", handler("capture", false), true);
   });
+}
 
-  // Every token here is a live GitHub single-key shortcut: s (search),
-  // / (search), c (create), g (prefix, e.g. g c / g p), p, t (file finder),
-  // r (quote reply), j / k (list navigation).
-  const prompt = "Fix flaky test? s / c g p t r j k";
+/**
+ * Every token here is a live GitHub single-key shortcut: s (search),
+ * / (search), c (create), g (prefix, e.g. g c / g p), p, t (file finder),
+ * r (quote reply), j / k (list navigation).
+ */
+const GITHUB_HOSTILE_KEYS = "Fix flaky test? s / c g p t r j k";
+
+await test("28. GitHub: host-page keyboard shortcuts cannot reach the popover (regression)", async () => {
+  await bridgeReset();
+  await page.goto(fixtures.githubUrl(), { waitUntil: "domcontentloaded" });
+  await waitForButton(page);
+  await openPopover(page);
+  await waitForPhase(page, "ready");
+  await installHostileGithubShortcuts(page);
+
+  const prompt = GITHUB_HOSTILE_KEYS;
   await page.locator("[data-stp-prompt]").click();
   // REAL keystrokes. locator.fill() assigns .value and dispatches no key events
   // at all, which is precisely why the original containment bug reached a user.
@@ -2833,6 +3116,562 @@ await test("28. GitHub: host-page keyboard shortcuts cannot reach the popover (r
   return [
     `typed "${prompt}" with real keystrokes; value byte-exact, focus retained`,
     `bubble-phase hits: ${observed.bubbleShortcuts} · capture-phase hits: ${observed.captureShortcuts}`,
+  ];
+});
+
+await test("28b. GitHub: the Target SEARCH BOX is contained too (real keystrokes)", async () => {
+  await bridgeReset();
+  await page.goto(fixtures.githubUrl(), { waitUntil: "domcontentloaded" });
+  await waitForButton(page);
+  await openPopover(page);
+  await waitForPhase(page, "ready");
+  await installHostileGithubShortcuts(page);
+
+  // Same argument as 19b, against @github/hotkey's guard instead of Graphite's.
+  // `/` and `s` are the two that hurt most here: both focus GitHub's search.
+  await openCandidates(page);
+  await page.keyboard.type(GITHUB_HOSTILE_KEYS, { delay: 5 });
+
+  const observed = await page.evaluate(() => {
+    const host = document.querySelector("send-to-paseo-popover");
+    const root = host?.shadowRoot;
+    const input = root?.querySelector("[data-stp-combo-search]");
+    return {
+      value: input ? input.value : null,
+      focusInSearch: !!input && document.activeElement === host && root.activeElement === input,
+      focusStolen: document.activeElement?.id === "__hostile_thief_gh",
+      bubbleShortcuts: window.__hostileGh.bubble.length,
+      captureShortcuts: window.__hostileGh.capture.length,
+      sawRetargetedHost: window.__hostileGh.targets.includes("send-to-paseo-popover"),
+      popoverStillOpen: !!host,
+      dropdownStillOpen:
+        root?.querySelector("[data-stp-combobox]")?.getAttribute("data-stp-combo-open") === "true",
+    };
+  });
+
+  assert(
+    observed.sawRetargetedHost,
+    "test is vacuous: the hostile listeners never saw the retargeted shadow host",
+  );
+  assertEq(observed.value, GITHUB_HOSTILE_KEYS, "keystrokes must reach the search box byte-for-byte");
+  assert(observed.popoverStillOpen, "popover must survive typing in the search box");
+  assert(observed.dropdownStillOpen, "the dropdown must survive a barrage of shortcut keys");
+  assert(observed.focusInSearch, "focus must stay in the search box while typing");
+  assert(!observed.focusStolen, "GitHub must not be able to steal focus mid-search");
+  assertEq(observed.bubbleShortcuts, 0, "no keystroke may reach a bubble-phase page listener");
+
+  // The dropdown is drawn from the same --stp-* tokens on both sites, so this
+  // is also the GitHub half of the light/dark visual check.
+  await searchCandidates(page, "dodo");
+  await shot(page, "github-popover-combobox-open-light", POPOVER_CLIP);
+  await page.emulateMedia({ colorScheme: "dark" });
+  await shot(page, "github-popover-combobox-open-dark", POPOVER_CLIP);
+  await page.emulateMedia({ colorScheme: "light" });
+
+  note(
+    `capture-phase page listeners still observed ${observed.captureShortcuts} keystrokes ` +
+      `(expected and unavoidable); bubble-phase: ${observed.bubbleShortcuts}`,
+  );
+  return [
+    `typed "${GITHUB_HOSTILE_KEYS}" into the Target search box with real keystrokes; value byte-exact`,
+    `bubble-phase hits: ${observed.bubbleShortcuts} · capture-phase hits: ${observed.captureShortcuts}`,
+  ];
+});
+
+/* ---- 29-32. the searchable Target combobox ------------------------------ */
+/*
+ * The Target picker used to be a native <select>: 4 rows here, but dozens in a
+ * real Paseo install, with no way to type at it. These four cases are the ones
+ * that could not pass on that widget at all.
+ *
+ * Fixture candidate indices for PR 942 (test/mock-bridge.mjs):
+ *   0  brawny-dodo             giz-1133-widget-backed-inventory-audit-rule  exact match
+ *   1  candid-otter            giz-1132-stack-sibling-949                   stack #949
+ *   2  gizmo-poc (main checkout)  main                                     same project
+ *   3  Create worktree for PR #942
+ */
+
+await test("29. Target combobox: searching by WORKSPACE NAME narrows, commits, and reaches /v1/send", async () => {
+  await bridgeReset();
+  await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
+  await waitForButton(page);
+  await openPopover(page);
+  await waitForPhase(page, "ready");
+
+  const before = await candidateTrigger(page);
+  assert(before.includes("brawny-dodo"), `the default target must be the rank-1 workspace: ${before}`);
+
+  // "otter" appears in no branch, no reason tag and no PR number — only in the
+  // workspace label `candid-otter`. Searching by workspace name is the thing
+  // that was asked for, so it gets the unambiguous probe.
+  await searchCandidates(page, "otter");
+  const filtered = await readCandidates(page, { close: false });
+  assertEq(
+    filtered.options.length,
+    1,
+    `"otter" must narrow to one row, got: ${filtered.options.join(" | ")}`,
+  );
+  assert(filtered.options[0].includes("candid-otter"), `surviving row: ${filtered.options[0]}`);
+  assertEq(filtered.indices, [1], "a filtered row keeps its own candidate index");
+  assertEq(filtered.selectedIndex, -1, "the committed candidate is filtered out, so nothing is aria-selected");
+  assertEq(filtered.activeIndex, 1, "the only match becomes active, so Enter commits it");
+  await shot(page, "popover-candidate-search-by-name", POPOVER_CLIP);
+
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector("send-to-paseo-popover")
+        .shadowRoot.querySelector("[data-stp-candidates]")
+        .textContent.includes("candid-otter"),
+    undefined,
+    { timeout: 4000 },
+  );
+  assertEq(await candidatesOpen(page), false, "committing closes the dropdown");
+
+  const after = await page.evaluate(() => {
+    const root = document.querySelector("send-to-paseo-popover").shadowRoot;
+    return {
+      summary: root.querySelector("[data-stp-target-summary]").textContent.replace(/\s+/g, " ").trim(),
+      promptFocused: root.activeElement?.hasAttribute("data-stp-prompt") === true,
+    };
+  });
+  assert(
+    after.summary.includes("workspace candid-otter"),
+    `the target summary must follow the commit: ${after.summary}`,
+  );
+  assert(after.summary.includes("stack #949"), `and keep saying which stack PR it matched: ${after.summary}`);
+  assert(after.promptFocused, "committing hands focus to the instruction box");
+
+  await page.locator("[data-stp-prompt]").fill("Rebase this sibling onto main");
+  await page.locator("[data-stp-send]").click();
+  await waitForPhase(page, "sent");
+  const send = await lastRequest("/v1/send");
+  assertEq(
+    send.body.target,
+    { kind: "existing", workspaceId: "wks_7b3e5c9a1d8f6042" },
+    "the searched-for workspace must be the send target, not the default one",
+  );
+
+  return [
+    `typed "otter" -> 1 row (${filtered.options[0]})`,
+    `summary after commit: ${after.summary}`,
+    `POST /v1/send target: ${JSON.stringify(send.body.target)}`,
+  ];
+});
+
+await test("30. Target combobox: branch fragment, bare PR number, multi-word, and no match", async () => {
+  await bridgeReset();
+  await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
+  await waitForButton(page);
+  await openPopover(page);
+  await waitForPhase(page, "ready");
+
+  /* Each query must narrow to exactly the listed candidate indices. */
+  const cases = [
+    ["sibling", [1], "a branch fragment (giz-1132-stack-sibling-949)"],
+    ["1133", [0, 3], "a branch fragment shared by two candidates"],
+    ["949", [1], "a bare PR number, no hash"],
+    ["#949", [1], "the same PR number with a hash"],
+    ["942", [3], "the create row's PR number, bare"],
+    ["#942", [3], "and with a hash"],
+    ["exact", [0], "the reason tag"],
+    ["same project", [2], "a two-word reason tag"],
+    ["main", [2], "a branch name"],
+    ["create", [3], "the create row by intent, not by its wording"],
+    ["DODO", [0], "case-insensitive"],
+    ["otter stack", [1], "two tokens: one from the label, one from the tag"],
+    ["stack otter", [1], "the same two tokens in the other order"],
+  ];
+
+  const observed = [];
+  for (const [query, want, why] of cases) {
+    await searchCandidates(page, query);
+    const got = await readCandidates(page, { close: false });
+    assertEq(got.indices, want, `"${query}" (${why}) -> ${got.options.join(" | ") || "<no rows>"}`);
+    assert(!got.emptyShown, `"${query}" matched, so the empty row must be hidden`);
+    observed.push(`"${query}" -> [${got.indices.join(",")}]`);
+  }
+
+  /* A query that matches nothing: visible empty row, and the selection stands. */
+  await searchCandidates(page, "zzzznope");
+  const none = await readCandidates(page, { close: false });
+  assertEq(none.options.length, 0, "no rows may survive a query that matches nothing");
+  assert(none.emptyShown, "the empty row must be visible");
+  assertEq(none.emptyText, "No workspace matches", "the empty row's wording");
+  assertEq(none.activeIndex, -1, "nothing can be active when nothing matches");
+  assertEq(none.activeDescendant, null, "aria-activedescendant must be dropped, not left stale");
+  await shot(page, "popover-candidate-search-no-match", POPOVER_CLIP);
+
+  // Enter here must do nothing at all — not commit, not close, not blank the
+  // target. Committing "the first row" when there is no first row was the easy
+  // bug to write.
+  await page.keyboard.press("Enter");
+  assert(await candidatesOpen(page), "Enter on an empty result set must not close the dropdown");
+  const unchanged = await candidateTrigger(page);
+  assert(
+    unchanged.includes("brawny-dodo"),
+    `a query matching nothing must not change the selection: ${unchanged}`,
+  );
+  await closeCandidates(page);
+
+  return [...observed, `"zzzznope" -> empty row "${none.emptyText}", selection still ${unchanged}`];
+});
+
+await test("31. Target combobox: keyboard-only path — reach, filter, arrow, Enter, then Cmd/Ctrl+Enter", async () => {
+  await bridgeReset();
+  await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
+  await waitForButton(page);
+  await openPopover(page);
+  await waitForPhase(page, "ready");
+
+  /* From here on: no mouse. The textarea is autofocused, so type the
+     instruction first and then walk BACKWARD into the Target field, which sits
+     above it in the card. */
+  const prompt = "Fix the merge conflict";
+  await page.keyboard.type(prompt, { delay: 5 });
+  await page.keyboard.press("Shift+Tab");
+  const onTrigger = await page.evaluate(
+    () =>
+      document.querySelector("send-to-paseo-popover").shadowRoot.activeElement?.hasAttribute(
+        "data-stp-candidates",
+      ) === true,
+  );
+  assert(onTrigger, "Shift+Tab from the instruction box must land on the Target trigger");
+
+  /* ArrowDown opens the list on the committed option, and the list wraps. */
+  await page.keyboard.press("ArrowDown");
+  assertEq((await readCandidates(page, { close: false })).activeIndex, 0, "opens active on the committed candidate");
+  await page.keyboard.press("ArrowUp");
+  assertEq((await readCandidates(page, { close: false })).activeIndex, 3, "ArrowUp from the first row wraps to the last");
+  await page.keyboard.press("ArrowDown");
+  assertEq((await readCandidates(page, { close: false })).activeIndex, 0, "ArrowDown from the last row wraps to the first");
+  await page.keyboard.press("End");
+  assertEq((await readCandidates(page, { close: false })).activeIndex, 3, "End jumps to the last row");
+  await page.keyboard.press("Home");
+  const home = await readCandidates(page, { close: false });
+  assertEq(home.activeIndex, 0, "Home jumps to the first row");
+  assertEq(home.activeDescendant, home.activeRowId, "aria-activedescendant tracks every move");
+
+  /* Filter to two rows, arrow onto the second, commit it. Two rows so the
+     ArrowDown genuinely decides something. */
+  await page.keyboard.type("1133", { delay: 5 });
+  const two = await readCandidates(page, { close: false });
+  assertEq(two.indices, [0, 3], `"1133" should leave the two candidates on that branch: ${two.options.join(" | ")}`);
+  assertEq(two.activeIndex, 0, "the first match is active after typing");
+  await page.keyboard.press("ArrowDown");
+  assertEq((await readCandidates(page, { close: false })).activeIndex, 3, "ArrowDown moves within the FILTERED rows");
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector("send-to-paseo-popover")
+        .shadowRoot.querySelector("[data-stp-candidates]")
+        .textContent.includes("Create worktree"),
+    undefined,
+    { timeout: 4000 },
+  );
+
+  /* Focus is back on the instruction box, which is what lets the same hand
+     finish with Cmd/Ctrl+Enter and no click anywhere. */
+  const state = await page.evaluate(() => {
+    const root = document.querySelector("send-to-paseo-popover").shadowRoot;
+    return {
+      promptFocused: root.activeElement?.hasAttribute("data-stp-prompt") === true,
+      draft: root.querySelector("[data-stp-prompt]").value,
+      summary: root.querySelector("[data-stp-target-summary]").textContent.replace(/\s+/g, " ").trim(),
+    };
+  });
+  assert(state.promptFocused, "after a keyboard commit, focus must be on the instruction box");
+  assertEq(state.draft, prompt, "the draft must survive the re-render a commit causes");
+  assert(
+    state.summary.includes("will create worktree for PR #942"),
+    `the keyboard-picked candidate must be the live target: ${state.summary}`,
+  );
+
+  const chord = process.platform === "darwin" ? "Meta+Enter" : "Control+Enter";
+  await page.keyboard.press(chord);
+  await waitForPhase(page, "sent", 8000);
+  const send = await lastRequest("/v1/send");
+  assertEq(send.body.prompt, prompt, `${chord} must submit the typed prompt`);
+  assertEq(send.body.target, { kind: "create" }, "and the target picked with the keyboard");
+
+  return [
+    "no mouse after the button click: Shift+Tab -> ArrowDown/ArrowUp/End/Home -> type -> ArrowDown -> Enter",
+    `wrapping asserted at both ends; filtered arrowing stays inside the 2 matching rows`,
+    `${chord} produced POST /v1/send ${JSON.stringify({ prompt: send.body.prompt, target: send.body.target })}`,
+  ];
+});
+
+await test("32. Target combobox: Esc and click-outside dismiss the dropdown BEFORE the popover", async () => {
+  await bridgeReset();
+  await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
+  await waitForButton(page);
+  await openPopover(page);
+  await waitForPhase(page, "ready");
+
+  /* Esc, layer 1: the dropdown only. The popover's Esc listener is
+     document-level and capturing, so it sees the key first and has to defer. */
+  await openCandidates(page);
+  await page.keyboard.press("Escape");
+  assertEq(await candidatesOpen(page), false, "the first Escape must close the dropdown");
+  assertEq(
+    await page.evaluate((s) => document.querySelectorAll(s).length, POPOVER),
+    1,
+    "...and must leave the popover open",
+  );
+  const refocused = await page.evaluate(
+    () =>
+      document.querySelector("send-to-paseo-popover").shadowRoot.activeElement?.hasAttribute(
+        "data-stp-candidates",
+      ) === true,
+  );
+  assert(refocused, "closing the dropdown returns focus to the trigger, not to nothing");
+
+  /* Esc, layer 2: the popover. */
+  await page.keyboard.press("Escape");
+  await page.waitForSelector(POPOVER, { state: "detached", timeout: 4000 });
+  note("Escape, Escape: dropdown then popover");
+
+  /* Click-outside layers the same way. A pointerdown inside the card is inside
+     the shadow host, so the popover survives — but anywhere outside the
+     dropdown still dismisses the dropdown. */
+  await openPopover(page);
+  await waitForPhase(page, "ready");
+  await openCandidates(page);
+  await page.locator("[data-stp-prompt]").click();
+  assertEq(await candidatesOpen(page), false, "a pointerdown elsewhere in the card closes the dropdown");
+  assertEq(
+    await page.evaluate((s) => document.querySelectorAll(s).length, POPOVER),
+    1,
+    "...and the popover survives it, because the click was inside the host",
+  );
+
+  /* And a pointerdown inside the dropdown closes neither. */
+  await openCandidates(page);
+  await page.locator("[data-stp-combo-search]").click();
+  assertEq(await candidatesOpen(page), true, "clicking the search box must not close the dropdown");
+  assertEq(
+    await page.evaluate((s) => document.querySelectorAll(s).length, POPOVER),
+    1,
+    "nor the popover",
+  );
+
+  /* Outside everything: the whole popover goes, dropdown and all. */
+  await page.mouse.click(60, 700);
+  await page.waitForSelector(POPOVER, { state: "detached", timeout: 4000 });
+
+  return [
+    "Esc #1 closed the dropdown and refocused the trigger; Esc #2 detached the popover",
+    "pointerdown on the textarea closed the dropdown only; pointerdown in the dropdown closed nothing",
+    "pointerdown outside the card detached the popover with the dropdown open",
+  ];
+});
+
+await test("33. A stack workspace on a MERGED branch is the default, and says it has landed", async () => {
+  // The reported field bug, from the popover's side. The user opened a PR in a
+  // stack whose only workspace was parked on a branch that had already been
+  // merged; the bridge could not see it as a stack member, so it ranked as
+  // "same project" and the default fell through to "create a worktree".
+  //
+  // The bridge fix is plugin-side (merged/closed PRs in the stack graph, plus a
+  // local ancestry test). What this case pins is the half the extension owns:
+  // a rank-2 candidate carrying `stackPrState: "merged"` must be the DEFAULT,
+  // must be findable by typing "merged", and must not be described as a live
+  // sibling — "another branch of this stack" reads as still-open work.
+  await bridgeReset();
+  await bridgeConfig({ mergedStack: true });
+  try {
+    await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
+    await waitForButton(page);
+    await openPopover(page);
+    await waitForPhase(page, "ready");
+
+    const trigger = await candidateTrigger(page);
+    assert(
+      /candid-otter/.test(trigger) && !/Create worktree/i.test(trigger),
+      `the merged stack workspace must be the default, not a new worktree: ${trigger}`,
+    );
+    assert(
+      /,\s*merged/.test(trigger),
+      `the committed label must say the stack PR has merged: ${trigger}`,
+    );
+
+    const ui = await page.evaluate(() => {
+      const root = document.querySelector("send-to-paseo-popover").shadowRoot;
+      return {
+        summary: root
+          .querySelector("[data-stp-target-summary]")
+          .textContent.replace(/\s+/g, " ")
+          .trim(),
+        mismatch: root.querySelector("[data-stp-branch-mismatch]")?.textContent.trim() ?? null,
+      };
+    });
+    assert(
+      /stack #\d+, merged/.test(ui.summary),
+      `the resolved-target line must name the merged stack PR: ${ui.summary}`,
+    );
+    assertEq(
+      ui.mismatch,
+      "worktree is on a branch of this stack whose PR is merged",
+      "a landed branch must not be described as another (live) branch of the stack",
+    );
+
+    // The state reaches the search haystack through the reason tag, so a user
+    // who knows the worktree is parked on merged work can type that word.
+    const hit = await searchCandidates(page, "merged");
+    assert(hit !== null, "search box must accept the query");
+    const found = await readCandidates(page, { close: false });
+    assertEq(found.options.length, 1, `"merged" must narrow to one candidate: ${found.options}`);
+    assert(
+      /candid-otter/.test(found.options[0]),
+      `"merged" must find the merged stack workspace: ${found.options[0]}`,
+    );
+    await shot(page, "popover-stack-merged-default");
+    await closeCandidates(page);
+
+    // Still offered, still not the default — the product rule is unchanged.
+    const all = await readCandidates(page);
+    assert(
+      all.options.some((o) => /Create worktree/i.test(o)),
+      "creating a worktree must still be offered",
+    );
+
+    await page.keyboard.press("Escape");
+    return [
+      `default target: ${trigger}`,
+      `summary: ${ui.summary}`,
+      `note: ${ui.mismatch}`,
+      `search "merged" -> ${found.options.length} candidate`,
+    ];
+  } finally {
+    await bridgeConfig({ mergedStack: false });
+  }
+});
+
+await test("34. Header cog opens the options page, in every phase, without closing the popover", async () => {
+  // Until now the options page was reachable only from the browser's own
+  // extensions menu, or from the error state's link — i.e. exactly when the
+  // user had already hit a wall. The cog is in the header in every phase.
+  await bridgeReset();
+  await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
+  await waitForButton(page);
+  await openPopover(page);
+  await waitForPhase(page, "ready");
+
+  const cog = await page.evaluate(() => {
+    const root = document.querySelector("send-to-paseo-popover").shadowRoot;
+    const btn = root.querySelector("[data-stp-open-settings]");
+    if (!btn) return null;
+    const svg = btn.querySelector("svg");
+    const box = btn.getBoundingClientRect();
+    const header = root.querySelector("header").getBoundingClientRect();
+    return {
+      tag: btn.tagName.toLowerCase(),
+      type: btn.getAttribute("type"),
+      label: btn.getAttribute("aria-label"),
+      title: btn.getAttribute("title"),
+      // An icon-only control with no accessible name is unusable; and a decorative
+      // glyph left in the accessibility tree would read out as noise beside it.
+      svgNamespace: svg?.namespaceURI ?? null,
+      svgHidden: svg?.getAttribute("aria-hidden") ?? null,
+      // Built as nodes, never as markup: github.com enforces Trusted Types and a
+      // content script shares its document with the page.
+      usesMarkup: /[<>]/.test(btn.innerHTML.replace(/<\/?(svg|circle|path)\b[^>]*>/g, "")),
+      width: Math.round(box.width),
+      height: Math.round(box.height),
+      insideHeader: box.top >= header.top - 0.5 && box.bottom <= header.bottom + 0.5,
+    };
+  });
+  assert(cog !== null, "the header must carry a settings cog");
+  assertEq(cog.tag, "button", "the cog must be a real button, so Enter and Space work for free");
+  assertEq(cog.type, "button", "a bare <button> in a form context would submit");
+  assertEq(cog.label, "Extension settings", "an icon-only control needs an accessible name");
+  assertEq(cog.title, "Extension settings", "and a tooltip, since the glyph alone is ambiguous");
+  assertEq(cog.svgNamespace, "http://www.w3.org/2000/svg", "the glyph must be a real SVG node");
+  assertEq(cog.svgHidden, "true", "a decorative glyph must be out of the accessibility tree");
+  assert(!cog.usesMarkup, "the glyph must be built as nodes, not assigned as markup");
+  assert(
+    cog.insideHeader && cog.height <= 24,
+    `the cog must sit inside the header without growing it: ${JSON.stringify(cog)}`,
+  );
+
+  /* It is present in every phase, not just `ready` — the header is rendered by
+     the same code path in all of them, and that is worth pinning. */
+  const phases = {};
+  phases.ready = true;
+  await bridgeConfig({ contract: 2 });
+  try {
+    await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
+    await waitForButton(page);
+    await openPopover(page);
+    await waitForPhase(page, "error");
+    phases.error = await page.evaluate(() =>
+      Boolean(
+        document
+          .querySelector("send-to-paseo-popover")
+          .shadowRoot.querySelector("[data-stp-open-settings]"),
+      ),
+    );
+    await page.keyboard.press("Escape");
+  } finally {
+    await bridgeConfig({ contract: 1 });
+  }
+  assert(phases.error, "the cog must be there in the error phase too");
+
+  /* The real assertion: clicking it actually opens the options page, and the
+     popover survives — `openOptionsPage()` opens a new tab, so closing would
+     only discard a typed instruction. */
+  await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
+  await waitForButton(page);
+  await openPopover(page);
+  await waitForPhase(page, "ready");
+  await page.locator("[data-stp-prompt]").fill("Draft that must survive");
+  const before = context.pages().length;
+  const opened = context.waitForEvent("page", { timeout: 8000 });
+  await page.locator("[data-stp-open-settings]").click();
+  const optionsPage = await opened;
+  await optionsPage.waitForLoadState("domcontentloaded");
+  const openedUrl = optionsPage.url();
+  const survived = await page.evaluate(() => {
+    const host = document.querySelector("send-to-paseo-popover");
+    return {
+      present: Boolean(host),
+      phase: host?.getAttribute("data-stp-phase") ?? null,
+      draft: host?.shadowRoot?.querySelector("[data-stp-prompt]")?.value ?? null,
+    };
+  });
+  await optionsPage.close();
+
+  assertEq(openedUrl, optionsUrl(), "the cog must open the extension's own options page");
+  assert(survived.present, "the popover must not close when the cog is pressed");
+  assertEq(survived.phase, "ready", "and must stay in the phase it was in");
+  assertEq(survived.draft, "Draft that must survive", "a typed instruction must survive");
+
+  /* Keyboard: it is in the header, before the Target trigger in DOM order, so
+     it must be reachable and activate on Enter like any button. */
+  const openedByKey = context.waitForEvent("page", { timeout: 8000 });
+  await page.locator("[data-stp-open-settings]").focus();
+  const focused = await page.evaluate(() =>
+    document
+      .querySelector("send-to-paseo-popover")
+      .shadowRoot.activeElement?.getAttribute("data-stp-open-settings") === "",
+  );
+  await page.keyboard.press("Enter");
+  const byKey = await openedByKey;
+  await byKey.waitForLoadState("domcontentloaded");
+  const keyUrl = byKey.url();
+  await byKey.close();
+  assert(focused, "the cog must be focusable inside the shadow root");
+  assertEq(keyUrl, optionsUrl(), "Enter on the focused cog must open the options page");
+
+  await shot(page, "popover-header-settings-cog");
+  await page.keyboard.press("Escape");
+  return [
+    `cog: <${cog.tag} type=${cog.type}> ${cog.width}x${cog.height}, aria-label "${cog.label}", SVG node aria-hidden`,
+    `present in phases: ready + error`,
+    `click -> new tab ${openedUrl} (pages ${before} -> ${before + 1}); popover still ready, draft intact`,
+    `Enter on the focused cog -> ${keyUrl}`,
   ];
 });
 

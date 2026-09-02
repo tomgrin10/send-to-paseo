@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Send to Paseo",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Send an instruction from a Graphite or GitHub pull request to a new Paseo agent.",
   "minimum_chrome_version": "111",
   "permissions": ["storage"],

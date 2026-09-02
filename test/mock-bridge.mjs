@@ -68,6 +68,15 @@ const CONFIG = {
    * The extension must treat "" as UNKNOWN, not as "a different branch".
    */
   noGh: flag("no-gh"),
+  /**
+   * Reproduces the reported field bug: the only workspace of the stack is
+   * parked on a branch whose pull request has already been **merged**. The
+   * bridge now ranks that as rank 2 (`reason: "stack"`, `stackPrState:
+   * "merged"`) so it can be the default instead of "create a worktree", and
+   * the popover has to say the branch has landed rather than call it a live
+   * sibling.
+   */
+  mergedStack: flag("merged-stack"),
 };
 
 const MAX_BODY = 64 * 1024; // CONTRACT.md: 64 KiB
@@ -180,7 +189,7 @@ function candidatesFor(number, stackPrNumbers) {
   // Without gh there is no head branch to compare against, so nothing can be
   // ranked "exact" — but the workspaces themselves still report real branches,
   // exactly as measured against the live daemon (VERIFICATION §16.5).
-  if (number === 942 && !CONFIG.noGh) {
+  if (number === 942 && !CONFIG.noGh && !CONFIG.mergedStack) {
     out.push({
       kind: "existing",
       workspaceId: "wks_4d1a8b7c2e0f9351",
@@ -206,6 +215,9 @@ function candidatesFor(number, stackPrNumbers) {
       rank: 2,
       reason: "stack",
       stackPrNumber: stackPr,
+      // Omitted when the sibling PR is open: `open` is the value the wire
+      // format spells by absence, which is what keeps the field additive.
+      ...(CONFIG.mergedStack ? { stackPrState: "merged" } : {}),
       agentCount: 0,
     });
   }
@@ -559,6 +571,7 @@ async function handleControl(req, res, url, origin) {
     if (body.dryRun !== undefined) CONFIG.dryRun = Boolean(body.dryRun);
     if (body.daemonDown !== undefined) CONFIG.daemonDown = Boolean(body.daemonDown);
     if (body.noGh !== undefined) CONFIG.noGh = Boolean(body.noGh);
+    if (body.mergedStack !== undefined) CONFIG.mergedStack = Boolean(body.mergedStack);
     return sendJson(
       res,
       200,
@@ -567,6 +580,7 @@ async function handleControl(req, res, url, origin) {
         dryRun: CONFIG.dryRun,
         daemonDown: CONFIG.daemonDown,
         noGh: CONFIG.noGh,
+        mergedStack: CONFIG.mergedStack,
       },
       null,
     );
@@ -582,6 +596,7 @@ async function handleControl(req, res, url, origin) {
     CONFIG.dryRun = false;
     CONFIG.daemonDown = false;
     CONFIG.noGh = false;
+    CONFIG.mergedStack = false;
     return sendJson(res, 200, { ok: true }, null);
   }
   res.writeHead(404).end();

@@ -25,7 +25,8 @@ import { providerIdOf } from "../shared/contract";
 import { presentError } from "../shared/errors";
 import type { FailurePayload } from "../shared/messages";
 import { sendIntent } from "./bridge";
-import { clear, el, renderProse } from "./ui/dom";
+import { Combobox } from "./ui/combobox";
+import { clear, cogIcon, el, renderProse } from "./ui/dom";
 import { containKeyboard } from "./ui/keyboard";
 import { POPOVER_CSS } from "./ui/styles";
 
@@ -79,6 +80,8 @@ class Popover {
   private defaultProviderPref = "";
 
   private textarea: HTMLTextAreaElement | null = null;
+  /** The Target combobox of the *current* render, or null outside "ready". */
+  private candidateCombo: Combobox | null = null;
   private disposers: (() => void)[] = [];
 
   constructor(ctx: PopoverContext) {
@@ -108,17 +111,34 @@ class Popover {
     this.render();
     this.position();
 
+    // Dismissal LAYERS, and both layers are decided here rather than inside the
+    // widget. The Target dropdown is an inner overlay: a click or an Escape has
+    // to close it alone and leave the card up, and only reach the card once the
+    // dropdown is already closed.
     const onDocPointer = (e: Event) => {
       const path = e.composedPath();
-      if (path.includes(this.host) || path.includes(this.ctx.anchor)) return;
+      if (path.includes(this.host) || path.includes(this.ctx.anchor)) {
+        // Inside our own surface, so the card survives — but a pointerdown
+        // anywhere in the card that is NOT in the dropdown (the textarea, the
+        // Provider select, the header) dismisses the dropdown, which is what
+        // every other menu on both sites does.
+        if (this.candidateCombo && !this.candidateCombo.containsPath(path)) {
+          this.candidateCombo.close();
+        }
+        return;
+      }
       closePopover();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        closePopover();
-      }
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      // This listener is document-level and CAPTURING, so it runs before the
+      // event has descended into the shadow tree — a keydown handler on the
+      // search input could never see Escape first. Hence the inner layer is
+      // asked here, in order: dropdown, then card.
+      if (this.candidateCombo?.handleEscape()) return;
+      closePopover();
     };
     const onReflow = () => this.position();
 
@@ -235,6 +255,11 @@ class Popover {
   private render(): void {
     clear(this.card);
     this.textarea = null;
+    // A render throws the whole card away, so the previous combobox instance
+    // (and with it any half-typed query and its open state) goes with it. That
+    // is the one behaviour that keeps a commit from leaving a stale dropdown
+    // floating over a card that has been rebuilt underneath it.
+    this.candidateCombo = null;
     this.host.setAttribute("data-stp-phase", this.phase);
     if (this.phase === "sent") {
       this.host.setAttribute("data-stp-dryrun", String(this.sendResult?.dryRun === true));
@@ -275,10 +300,51 @@ class Popover {
 
   private renderHeader(): HTMLElement {
     const { owner, repo, number } = this.ctx.pr;
+    // The PR reference and the cog share a group so the header's
+    // `space-between` still puts the title hard left and both of these hard
+    // right; three bare children would strand the reference in the middle.
     return el("header", {}, [
       el("span", { class: "title" }, ["Send to Paseo"]),
-      el("span", { class: "pr", "data-stp-prref": "" }, [`${owner}/${repo} #${number}`]),
+      el("span", { class: "head-right" }, [
+        el("span", { class: "pr", "data-stp-prref": "" }, [`${owner}/${repo} #${number}`]),
+        this.settingsButton(),
+      ]),
     ]);
+  }
+
+  /**
+   * Opens the extension's options page.
+   *
+   * Rendered in *every* phase, deliberately. The error path already offers an
+   * options link, but the two things a user most often needs to fix — a token
+   * that was never pasted and a bridge URL that is wrong — are reachable from
+   * the options page and from nowhere else, and until now the only way there
+   * from a PR page was the browser's own extensions menu.
+   *
+   * It does NOT close the popover. `openOptionsPage()` opens a new tab, so this
+   * one is merely backgrounded; closing would also discard a typed
+   * instruction, and losing a draft is worse than pressing Esc once.
+   */
+  private settingsButton(): HTMLElement {
+    const btn = el("button", {
+      class: "cog",
+      type: "button",
+      "data-stp-open-settings": "",
+      "aria-label": "Extension settings",
+      title: "Extension settings",
+    }) as HTMLButtonElement;
+    // An SVG node, not a glyph: no font on any host page is guaranteed to carry
+    // a gear, and an emoji one is a different size on every OS. It strokes in
+    // `currentColor`, so it inherits the header's muted foreground and flips
+    // with the theme without a second rule.
+    btn.append(cogIcon());
+    // No `stopPropagation`: the popover's own outside-click handler already
+    // ignores anything whose composed path contains the host, and the card is
+    // not a child of the anchor, so nothing here can re-reach the toggle. The
+    // error state's options link has never needed it either. Verified by
+    // removing the guard and re-running the suite green.
+    btn.addEventListener("click", () => void sendIntent({ type: "openOptions" }));
+    return btn;
   }
 
   private renderForm(): HTMLElement {
@@ -292,30 +358,41 @@ class Popover {
 
     body.append(this.renderTargetSummary(resolved));
 
-    /* Candidate picker — ALWAYS rendered, even when rank 1 matched. */
-    const candidateSelect = el("select", {
-      "data-stp-candidates": "",
-      "aria-label": "Target workspace",
-    }) as HTMLSelectElement;
-    resolved.candidates.forEach((c, i) => {
-      const opt = el("option", { value: String(i) }, [candidateOptionLabel(c)]);
-      if (i === this.candidateIndex) opt.setAttribute("selected", "selected");
-      candidateSelect.append(opt);
+    /* Candidate picker — ALWAYS rendered, even when rank 1 matched.
+       A searchable, non-native combobox rather than a <select>: a workspace list
+       is long, and the thing the user knows is usually the workspace *name*.
+       `data-stp-candidates` stays on the trigger, whose textContent is exactly
+       the committed option's label. */
+    const combo = new Combobox({
+      options: resolved.candidates.map((c) => ({
+        label: candidateOptionLabel(c),
+        search: candidateSearchText(c),
+      })),
+      selected: this.candidateIndex,
+      label: "Target workspace",
+      searchPlaceholder: "Search workspace, branch or #PR…",
+      emptyText: "No workspace matches",
+      triggerAttrs: { "data-stp-candidates": "" },
+      onCommit: (i) => {
+        this.candidateIndex = clampIndex(i, resolved.candidates.length);
+        this.draft = this.textarea?.value ?? this.draft;
+        this.render();
+        // The card's height changes with the selection (the sibling-branch note
+        // comes and goes), so re-anchor before moving on.
+        this.position();
+        // Target chosen, so the next thing wanted is the instruction — which is
+        // also what makes ⌘/Ctrl+Enter work straight after a keyboard commit.
+        this.textarea?.focus();
+      },
+      // Opening the panel grows the card in normal flow; position() measures
+      // that height, so it has to run again on every open and close.
+      onResize: () => this.position(),
     });
-    candidateSelect.value = String(this.candidateIndex);
-    candidateSelect.addEventListener("change", () => {
-      this.candidateIndex = clampIndex(
-        Number.parseInt(candidateSelect.value, 10),
-        resolved.candidates.length,
-      );
-      this.draft = this.textarea?.value ?? this.draft;
-      this.render();
-      this.textarea?.focus();
-    });
+    this.candidateCombo = combo;
     body.append(
-      el("label", { class: "field" }, [
+      el("div", { class: "field" }, [
         el("span", { class: "lbl" }, [`Target (${resolved.candidates.length} candidates)`]),
-        candidateSelect,
+        combo.root,
       ]),
     );
 
@@ -468,7 +545,9 @@ class Popover {
     } else {
       box.append(document.createTextNode("workspace "), el("code", {}, [c.label]));
       if (c.reason === "stack" && c.stackPrNumber) {
-        box.append(document.createTextNode(` · stack #${c.stackPrNumber}`));
+        box.append(
+          document.createTextNode(` · stack #${c.stackPrNumber}${stackStateSuffix(c)}`),
+        );
       }
     }
     const sub = el("span", { class: "sub" });
@@ -494,7 +573,7 @@ class Popover {
     ) {
       box.append(
         el("span", { class: "mismatch", "data-stp-branch-mismatch": "" }, [
-          "worktree is on another branch of this stack",
+          branchMismatchNote(c),
         ]),
       );
     }
@@ -643,21 +722,82 @@ class Popover {
 
 /* -------------------------------------------------------------------------- */
 
+/** The human-readable reason tag shown in parentheses on an existing candidate. */
+function candidateReasonTag(c: Candidate): string {
+  return c.reason === "exact"
+    ? "exact match"
+    : c.reason === "stack"
+      ? `stack${c.stackPrNumber ? ` #${c.stackPrNumber}` : ""}${stackStateSuffix(c)}`
+      : c.reason === "project"
+        ? "same project"
+        : String(c.reason);
+}
+
+/**
+ * `, merged` / `, closed` for a stack candidate whose PR is no longer open.
+ *
+ * Additive field, so a plugin that predates merged-stack detection sends
+ * nothing — and nothing is exactly what `open` means on the wire, which is why
+ * absent and `"open"` are treated identically here rather than as "unknown".
+ *
+ * It goes through the reason tag rather than being appended separately so that
+ * one change reaches the option label, the trigger and the search haystack at
+ * once: a user who knows the workspace they want is parked on a merged branch
+ * can type "merged" and find it.
+ */
+function stackStateSuffix(c: Candidate): string {
+  const state = c.stackPrState;
+  if (state === undefined || state === "open") return "";
+  return `, ${state}`;
+}
+
 function candidateOptionLabel(c: Candidate): string {
   if (c.kind === "create") return `${c.label}${c.branch ? ` — ${c.branch}` : ""}`;
   const bits = [c.label];
   if (c.branch) bits.push(c.branch);
-  const tag =
-    c.reason === "exact"
-      ? "exact match"
-      : c.reason === "stack"
-        ? `stack${c.stackPrNumber ? ` #${c.stackPrNumber}` : ""}`
-        : c.reason === "project"
-          ? "same project"
-          : String(c.reason);
-  let out = `${bits.join(" — ")} (${tag}`;
+  let out = `${bits.join(" — ")} (${candidateReasonTag(c)}`;
   if (typeof c.agentCount === "number") out += `, ${c.agentCount} agent${c.agentCount === 1 ? "" : "s"}`;
   return `${out})`;
+}
+
+/**
+ * Everything the Target search matches against.
+ *
+ * Built separately from the option label, not scraped from it, because some of
+ * it is not in the label: a stack PR number is written `#941` there but people
+ * type it bare, and the create row is what you want when you type "create" or
+ * "new" even though it says "Create worktree for PR #942". Workspace label
+ * first — that is the field users actually remember.
+ */
+/**
+ * What to say about a target whose branch is not this PR's branch.
+ *
+ * Reason-aware, because a single sentence cannot be true of every case. It read
+ * "another branch of this stack" for *every* existing candidate, which is a
+ * false claim about a rank-3 "same project" workspace — that branch is not in
+ * the stack at all, and saying it is invites the user to trust a target the
+ * bridge deliberately refuses to default to. A merged branch gets its own
+ * wording for the opposite reason: "another branch of this stack" reads as a
+ * live sibling, and a worktree parked on a branch that has already landed is
+ * the case this whole ranking path exists to recognise.
+ */
+function branchMismatchNote(c: Candidate): string {
+  if (c.reason !== "stack") return "worktree is on a different branch";
+  const state = c.stackPrState;
+  if (state === "merged" || state === "closed") {
+    return `worktree is on a branch of this stack whose PR is ${state}`;
+  }
+  return "worktree is on another branch of this stack";
+}
+
+function candidateSearchText(c: Candidate): string {
+  const bits = [c.label];
+  if (c.branch) bits.push(c.branch);
+  if (c.kind === "create") bits.push("create", "new worktree");
+  else bits.push(candidateReasonTag(c));
+  // Both spellings, so "941" and "#941" behave the same.
+  if (typeof c.stackPrNumber === "number") bits.push(`#${c.stackPrNumber}`, String(c.stackPrNumber));
+  return bits.join(" ");
 }
 
 function pickProvider(providers: Provider[], preferred: string): string {

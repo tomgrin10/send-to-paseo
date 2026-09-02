@@ -40,8 +40,16 @@ sync.
 - **A Graphite stack is a real `base` → `head` chain on GitHub.** PR #943's `baseRefName` is
   PR #942's `headRefName`. So one `gh pr list --state open --json number,headRefName,baseRefName`
   rebuilds the entire stack, and the stack is the connected component containing the PR
-  (`viewStackGraph`). Verified on a live 7-PR stack. Trunk cannot create a false edge, because an
-  edge needs one PR's base to be another PR's *head*, and `main` is never a head.
+  (`viewStackGraph`). Verified on a live 7-PR stack.
+- **"Trunk can never be a PR head" is TRUE for open PRs and FALSE for merged ones.** It used to be
+  recorded here without that qualifier, as the reason trunk cannot create a false edge in the
+  stack graph: an edge needs one PR's base to be another PR's *head*. That reasoning is sound
+  only while the graph is built from `--state open`. `vercel/turborepo` #13875 is really `MERGED`
+  with `headRefName: "main"` **and** `baseRefName: "main"`, so the moment merged PRs were admitted
+  to the graph (2026-09-02, for merged-branch stack detection) trunk became a node and fused 13
+  unrelated open PRs into one false stack. Hence `trunkLikeHeads` in `gh.server.ts`: a non-open PR
+  whose head is trunk by name, or which has `TRUNK_FANOUT` children, is not a stack node. Do not
+  simplify that guard away on the grounds that `main` is never a head.
 - **The `graphite-base/942` ref in Graphite's UI is display-only.** `gh` reports the real base
   (`main` for the bottom of a stack). Don't key anything off `graphite-base/*`.
 - **Branch name prefixes do not identify a stack.** A single stack spanned `giz-1133`, `giz-1132`
@@ -199,7 +207,7 @@ Require `running`, an empty `ERROR` column, and `bridge listening on http://127.
 cd extension
 npm run typecheck
 npm run build
-node ../test/e2e.mjs                     # 44 cases; builds dist/ and dist-test/ itself
+node ../test/e2e.mjs                     # 52 cases; builds dist/ and dist-test/ itself
 ```
 
 The suite runs Chromium **headless by default** (`--headless=new` loads MV3 extensions fine, so
@@ -223,10 +231,13 @@ fixture at a real repository — every screenshot in `docs/screenshots/` is comm
 | 12 | Every bridge security rule: Origin on preflight and real request, Host, body cap, rate limit and its keying. |
 | 13 | The live bridge, read-only. The only test that proves the real plugin and the real extension agree. |
 | 18 | No fixture host, test port or `dist-test` in a shipping artifact, and that the only `host:port` form anywhere in it is `127.0.0.1:7788`. Bare `localhost` is allowed only as the optional host permission and the bridge-URL hint, by exact allowlist — "zero occurrences of localhost" is the wrong invariant and was asserted wrongly once. |
-| 19, 28 | Keyboard containment on Graphite and on GitHub, with faithful stand-ins for both shortcut layers. |
+| 19, 19b, 28, 28b | Keyboard containment on Graphite and on GitHub, with faithful stand-ins for both shortcut layers. `19b`/`28b` cover the Target combobox's own search input, which is a second text-entry surface inside the same shadow root and would otherwise be assumed covered rather than proved covered. |
 | 20 | One workspace per stack: a stack sibling is the default, not `create`. |
 | 20a–20c | The mode select is filtered per provider with the resolved default preselected and unattended modes marked, `modeId` reaches `/v1/send`, and a degraded resolve with an empty `pr.headBranch` reads as unknown rather than "a different branch". |
 | 21–27 | The GitHub adapter: anchor, Primer token colours, hash rotation, URL parsing, sub-routes, fallback rungs, and a full resolve-and-send. |
+| 34 | The header settings cog: present in every phase, opens the extension's own options page in a new tab (asserted on the real `page` event, not on the intent), does **not** close the popover or discard a typed draft, and activates on Enter. Its glyph is built with `createElementNS`, never `innerHTML` — a content script shares its document with the host page and github.com enforces Trusted Types, which no fixture can reproduce. |
+| 33 | The merged-branch case end to end from the popover's side: a rank-2 candidate carrying `stackPrState: "merged"` is the default rather than `create`, is findable by typing "merged", and is described as landed work. The note wording is reason-scoped — it used to read "another branch of this stack" for *every* existing candidate, which is a false claim about a rank-3 "same project" workspace. |
+| 29–32 | The Target combobox, which is a hand-built listbox rather than a `<select>`: filtering by workspace name, branch fragment, bare PR number with and without `#`, and multi-word tokens in any order; the empty-result row committing nothing; a keyboard-only path from open to send including wrap-around at both ends; and the two dismissal layers — Esc and click-outside must close the dropdown *before* the popover, which the popover's document-level capturing listeners have to cooperate on. |
 
 When changing a test, confirm it still fails for the right reason: break the thing on purpose,
 watch it fail, then restore. A test that cannot fail is worse than no test.
