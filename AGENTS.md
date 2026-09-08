@@ -1,5 +1,23 @@
 # Repository instructions
 
+## Keeping this file current
+
+This file's value is that it can be trusted without re-deriving anything, so a claim in it that
+has gone stale is worse than no claim. **Any change that invalidates something written here
+updates this file in the same commit** — a version, a case count, a command, a measured fact, a
+procedure that turned out to be wrong.
+
+The parts that rot fastest, and are therefore worth re-checking whenever you touch them:
+
+- **Counted things.** The e2e case count, `check-deps.mjs`'s check count, the number of places the
+  version lives. Grep for the number before trusting it.
+- **Procedures written before they were ever run.** The release section carried "there is no git
+  remote and no commits yet" through three published releases. If you run a procedure here and
+  reality differs, fix the section — that is the point of it.
+- **Anything under "Hard-won facts".** Each of those was measured against a specific version of
+  Graphite, GitHub, Chrome or Paseo. When one is contradicted, say what it is now *and* what it
+  used to be, because the old behaviour is usually why some guard exists.
+
 ## Project
 
 Two halves that meet at one frozen HTTP contract:
@@ -61,6 +79,14 @@ sync.
   needs a second credential, and its stack commands mutate repo-wide state (the reason for the
   standing `gt sync` prohibition). `gh` is read-only, already required, and sufficient. The one
   thing `gt` would add is stack branches with no PR yet; `gh` cannot see those.
+- **`chrome.runtime.openOptionsPage()` does not reliably create a tab.** Measured in Chromium
+  1243, three behaviours: with a spare `about:blank` present it **navigates that tab**; with no
+  spare tab it opens a new one; with an options tab already open it **focuses** it. Only the
+  middle case fires a Playwright `"page"` event. So never assert on
+  `context.waitForEvent("page")` for this — assert that a tab with the options URL exists
+  (`waitForOptionsPage()` in the suite). Case 34 was red for exactly this reason while the
+  feature worked fine, and `launchPersistentContext`'s initial `about:blank` is what triggers it,
+  because nothing ever closes it.
 - **Shadow DOM isolates CSS, not events.** Keyboard events are `composed`, so they escape our
   shadow root, and they are *retargeted*: page listeners see `event.target` as the shadow
   **host**, not our `<textarea>`. Graphite's shortcut layer therefore decides the user is not
@@ -97,6 +123,22 @@ sync.
   Graphite stack, the bridge derives the stack authoritatively from `gh pr list` anyway, and the
   only place the stack appears on a GitHub page is free-form markdown in a bot comment. `[]` is
   the honest answer and `CONTRACT.md` explicitly supports it.
+- **A daemon that listens on anything but loopback requires a password, and the plugin has to be
+  given it.** `daemon.listen: "0.0.0.0:6767"` turns on `daemon.auth.password`, and then the SDK
+  WebSocket is closed with `Password required`, so the bridge lists no providers, no modes, and
+  every send fails. What `config.json` stores is a **bcrypt hash**, so the plaintext cannot be
+  derived from it — `resolvePassword()` in `daemon.server.ts` reads
+  `SEND_TO_PASEO_DAEMON_PASSWORD`, then `PASEO_PASSWORD`, then `daemonPassword` in the plugin's
+  own `settings.json`. Prefer the settings file: the subprocess's environment is fixed at daemon
+  start and a daemon restart is forbidden, whereas a plugin reload is free.
+- **`401` from `/api/status` is not "the daemon is unreachable".** It is behind auth on such a
+  daemon, and reporting `daemon.reachable: false` was a false statement — the options page said
+  "Paseo daemon unreachable" about a daemon that was running perfectly. Liveness comes from
+  `/api/health`, which is unauthenticated. Do not collapse those two endpoints back together.
+- **`serverId` is on disk at `$PASEO_HOME/server-id`.** Reading it needs no daemon and no
+  credential, which is why `requireServerId()` prefers it: agent deep links were previously
+  unbuildable on a password-protected daemon even though the id was sitting in a file the plugin
+  could already read.
 - **The daemon's `PATH` is not the user's `PATH`.** `/Applications/Paseo.app` is launched by
   launchd with `PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin` — no `/opt/homebrew/bin`, so a
   Homebrew `gh` would be invisible to the plugin while working perfectly in a terminal. Paseo
@@ -221,13 +263,41 @@ actually runs in harder to see.
 Never restart the Paseo daemon; it kills running agents. Reloading the plugin is safe, and only
 the global `pluginsEnabled` switch needs `paseo reload`.
 
+### Testing against a live daemon
+
+**A daemon whose `listen` is not loopback requires a password, and then nothing local works
+without it** — not the plugin, and not the `paseo` CLI, so you cannot even reload the plugin.
+Measured on a daemon at `0.0.0.0:6767`:
+
+| Probe | Result |
+| --- | --- |
+| `GET /api/health` | `200` — unauthenticated, so this is what liveness is decided by |
+| `GET /api/status` | `401 Unauthorized` |
+| SDK WebSocket with no password | closed with `Password required` |
+| `daemon.auth.password` in `config.json` | a **bcrypt hash** (`$2b$12$…`), so the plaintext is not recoverable |
+
+Supply the plaintext and it all works:
+
+```sh
+export PASEO_PASSWORD='…'                     # the CLI reads this one
+paseo plugin reload send-to-paseo
+```
+
+For the plugin itself prefer `daemonPassword` in
+`$PASEO_HOME/plugin-data/send-to-paseo/settings.json`: the subprocess inherits the daemon's
+environment, which is fixed at **daemon start**, so a new env var would need a daemon restart —
+which is forbidden. A settings change only needs a plugin reload.
+
+Case 13 of the e2e suite is the only test that needs any of this. Every other case runs against
+the mock bridge.
+
 ### 1. Plugin
 
 ```sh
 cd plugin
 npm run typecheck
 node check-deps.mjs                      # 45 checks; doctors PATH, never touches ~/.config/gh
-paseo plugin reload send-to-paseo && paseo plugin ls
+paseo plugin reload send-to-paseo && paseo plugin ls   # needs PASEO_PASSWORD on an authed daemon
 paseo plugin logs send-to-paseo          # expect the three dependency self-check lines, no stack traces
 time paseo plugin reload send-to-paseo   # must finish in seconds, twice — proves no reload hang
 ```
@@ -312,8 +382,8 @@ deleting the record.
 
 ## Create a release
 
-**There is no git remote and no commits yet**, so nothing below has been exercised. It is the
-intended procedure, and the first release will be the test of it.
+Exercised: `v0.1.0`, `v0.2.0` and `v0.3.0` are published. `origin` is
+`github.com/tomgrin10/send-to-paseo`, and tags live on `main`.
 
 - Release user-facing features, bug fixes, compatibility changes, or contract changes.
   Documentation-only edits normally do not need a release.
@@ -329,5 +399,23 @@ intended procedure, and the first release will be the test of it.
   a secret audit of the exact release snapshot — the pairing token and `settings.json` must never
   be committed.
 - Tag the exact release commit as `vX.Y.Z`.
+- Attach `send-to-paseo-extension.zip`, built from `extension/dist` after a **shipping** build —
+  the README tells users to download it. Check the zipped `manifest.json` before publishing: the
+  right `version`, and a `name` without "(test build)".
 
 Never move or rewrite a published tag. Ship corrections as a new patch release.
+
+### Things that will stop a release on a fresh machine
+
+Each of these cost time on the v0.3.0 release and none of them is guessable:
+
+- **No git identity is configured.** Commits use
+  `Tom Gringauz <17593920+tomgrin10@users.noreply.github.com>`; pass it per command with
+  `git -c user.name=… -c user.email=…` rather than writing it into a shared config.
+- **Two GitHub accounts are logged into `gh`, and the default one cannot push.** `herotomg` has
+  pull-only access; the owner `tomgrin10` has admin. `gh auth switch --user tomgrin10` before
+  pushing, and switch back afterwards — it is global state other tools share.
+- **`zip` is not installed.** Build the artifact with Python's `zipfile`.
+- **`node test/e2e.mjs` cannot be fully green on a machine without a password-free Paseo
+  daemon.** Case 13 needs one. See "Testing against a live daemon" below, and do not read a
+  red 13 as a broken build.

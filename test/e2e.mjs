@@ -357,6 +357,46 @@ async function openPopover(page) {
   await page.waitForSelector(POPOVER, { state: "attached", timeout: 5000 });
 }
 
+/**
+ * Run `act`, then wait until the options page is actually open in some tab.
+ *
+ * Deliberately NOT `context.waitForEvent("page")`, which is what this used to
+ * be and which fails for a reason that has nothing to do with the extension:
+ * `chrome.runtime.openOptionsPage()` does not always CREATE a tab. Measured in
+ * this Chromium:
+ *
+ *   - no options tab open, a spare `about:blank` present -> Chrome NAVIGATES
+ *     the blank tab. No "page" event, and the page opens perfectly.
+ *   - no options tab, no spare blank tab              -> new tab, event fires.
+ *   - an options tab already open                     -> Chrome FOCUSES it.
+ *     No "page" event.
+ *
+ * The suite hits the first case: `launchPersistentContext` starts with an
+ * `about:blank` that nothing ever closes, so the cog navigates that instead of
+ * opening a tab. The behaviour under test is "the cog opens the options page",
+ * so that is what is asserted — by URL, across all three cases.
+ */
+async function waitForOptionsPage(context, extensionId, act, timeout = 8000) {
+  const url = `chrome-extension://${extensionId}/options.html`;
+  await act();
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    const found = context.pages().find((p) => p.url() === url);
+    if (found) {
+      await found.waitForLoadState("domcontentloaded");
+      return found;
+    }
+    if (Date.now() > deadline) {
+      throw new Error(
+        `the options page never appeared within ${timeout}ms. Tabs: ${JSON.stringify(
+          context.pages().map((p) => p.url()),
+        )}`,
+      );
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
 /** Dismiss the popover and wait for it to actually leave the DOM. */
 async function closePopover(page) {
   if ((await page.locator(POPOVER).count()) === 0) return;
@@ -4431,10 +4471,9 @@ await test("34. Header cog opens the options page, in every phase, without closi
   await waitForPhase(page, "ready");
   await page.locator("[data-stp-prompt]").fill("Draft that must survive");
   const before = context.pages().length;
-  const opened = context.waitForEvent("page", { timeout: 8000 });
-  await page.locator("[data-stp-open-settings]").click();
-  const optionsPage = await opened;
-  await optionsPage.waitForLoadState("domcontentloaded");
+  const optionsPage = await waitForOptionsPage(context, extId, () =>
+    page.locator("[data-stp-open-settings]").click(),
+  );
   const openedUrl = optionsPage.url();
   const survived = await page.evaluate(() => {
     const host = document.querySelector("send-to-paseo-popover");
@@ -4453,16 +4492,15 @@ await test("34. Header cog opens the options page, in every phase, without closi
 
   /* Keyboard: it is in the header, before the Target trigger in DOM order, so
      it must be reachable and activate on Enter like any button. */
-  const openedByKey = context.waitForEvent("page", { timeout: 8000 });
   await page.locator("[data-stp-open-settings]").focus();
   const focused = await page.evaluate(() =>
     document
       .querySelector("send-to-paseo-popover")
       .shadowRoot.activeElement?.getAttribute("data-stp-open-settings") === "",
   );
-  await page.keyboard.press("Enter");
-  const byKey = await openedByKey;
-  await byKey.waitForLoadState("domcontentloaded");
+  const byKey = await waitForOptionsPage(context, extId, () =>
+    page.keyboard.press("Enter"),
+  );
   const keyUrl = byKey.url();
   await byKey.close();
   assert(focused, "the cog must be focusable inside the shadow root");
@@ -4473,7 +4511,7 @@ await test("34. Header cog opens the options page, in every phase, without closi
   return [
     `cog: <${cog.tag} type=${cog.type}> ${cog.width}x${cog.height}, aria-label "${cog.label}", SVG node aria-hidden`,
     `present in phases: ready + error`,
-    `click -> new tab ${openedUrl} (pages ${before} -> ${before + 1}); popover still ready, draft intact`,
+    `click -> ${openedUrl} open in a tab (pages ${before} -> ${context.pages().length}); popover still ready, draft intact`,
     `Enter on the focused cog -> ${keyUrl}`,
   ];
 });
