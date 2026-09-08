@@ -943,7 +943,7 @@ never constructed, never parsed, and asserted only by shape.
 cd extension && npm install
 npm run typecheck
 npm run build
-node ../test/e2e.mjs          # 52 cases, ~60 s, headless by default
+node ../test/e2e.mjs          # 61 cases, ~60 s, headless by default
                               # STP_HEADED=1 node ../test/e2e.mjs  to watch it
 ```
 

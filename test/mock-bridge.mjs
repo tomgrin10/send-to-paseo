@@ -16,7 +16,10 @@
  *   - flat, provider-tagged `modes` on /v1/ping and /v1/resolve, plus
  *     `resolvedModeId` on /v1/resolve; optional `modeId` on /v1/send
  *   - Origin must be absent or start with chrome-extension:// (preflight AND real)
- *   - Host must be 127.0.0.1:<port> or localhost:<port>
+ *   - Host must have a LOOPBACK hostname; the port is a don't-care, because a
+ *     second Paseo machine is reached through `ssh -L <local>:127.0.0.1:<remote>`
+ *     and the browser then sends the local port while the bridge bound the remote
+ *     one. Pinning the port never added anything the hostname test did not.
  *   - CORS echo without Access-Control-Allow-Credentials, with Vary: Origin
  *   - 64 KiB body cap -> 413 payload_too_large
  *   - 60 requests / 10 s per origin -> 429 rate_limited (keyed on Origin when
@@ -26,15 +29,15 @@
  * CLI:
  *   node test/mock-bridge.mjs [--port 7788] [--token abc] [--fail <code>]
  *                             [--dry-run] [--daemon-down] [--contract N] [--no-gh]
- *                             [--quiet]
+ *                             [--machine-name devbox] [--quiet]
  *
- * Env: MOCK_PORT, MOCK_TOKEN, MOCK_FAIL, SEND_TO_PASEO_DRY_RUN=1
+ * Env: MOCK_PORT, MOCK_TOKEN, MOCK_FAIL, MOCK_MACHINE, SEND_TO_PASEO_DRY_RUN=1
  *
  * Test-only control surface (refused if an Origin header is present, so a
  * browser can never reach it):
  *   POST /__test/fail   {"code": "project_not_found" | null, "once": true?}
  *   POST /__test/config {"contract": 2?, "dryRun": true?, "daemonDown": true?,
- *                        "noGh": true?}
+ *                        "noGh": true?, "machineName": "devbox"?}
  *   POST /__test/reset
  *   GET  /__test/log    -> [{ method, path, origin, hasAuth, authState, body }]
  */
@@ -62,6 +65,12 @@ const CONFIG = {
   quiet: flag("quiet"),
   // Overridable so the extension's contract-mismatch refusal can be exercised.
   contract: Number(arg("contract", process.env.MOCK_CONTRACT ?? 1)),
+  /**
+   * `machine.name` on /v1/ping. Additive optional field: the extension labels a
+   * host with it so a list of loopback tunnels is readable. `--machine-name ""`
+   * reproduces a plugin built before it existed, which must degrade to the URL.
+   */
+  machineName: arg("machine-name", process.env.MOCK_MACHINE ?? "mock-machine"),
   /**
    * Reproduces the real bridge with `gh` unavailable: it deliberately never
    * guesses, so `pr.headBranch` comes back as "" rather than a plausible name.
@@ -97,7 +106,7 @@ const PLUGIN_VERSION = "0.1.0";
 const ERRORS = {
   unauthorized: [401, "Missing or invalid bearer token.", "Copy the pairing token from the Paseo plugin surface."],
   forbidden_origin: [403, "Requests from web page origins are refused.", undefined],
-  forbidden_host: [403, "Unexpected Host header.", "Use http://127.0.0.1:PORT or http://localhost:PORT."],
+  forbidden_host: [403, "Unexpected Host header.", "Use a loopback host: http://127.0.0.1:PORT or http://localhost:PORT."],
   bad_request: [400, "Request body failed validation.", undefined],
   payload_too_large: [413, "Request body exceeds 64 KiB.", undefined],
   rate_limited: [429, "Too many requests.", "Max 60 requests per 10 seconds."],
@@ -424,6 +433,10 @@ function handlePing(res, origin, authState) {
       daemon: CONFIG.daemonDown
         ? { reachable: false }
         : { reachable: true, version: DAEMON_VERSION, serverId: SERVER_ID },
+      // Additive and UNAUTHENTICATED, matching the real bridge: a host has to be
+      // nameable while it is still being paired. Omitted entirely when blank, so
+      // the "older plugin" case is a genuinely absent field.
+      ...(CONFIG.machineName ? { machine: { name: CONFIG.machineName } } : {}),
       paired: authed,
       providers: authed ? PROVIDERS : [],
       modes: authed ? MODES : [],
@@ -572,6 +585,7 @@ async function handleControl(req, res, url, origin) {
     if (body.daemonDown !== undefined) CONFIG.daemonDown = Boolean(body.daemonDown);
     if (body.noGh !== undefined) CONFIG.noGh = Boolean(body.noGh);
     if (body.mergedStack !== undefined) CONFIG.mergedStack = Boolean(body.mergedStack);
+    if (body.machineName !== undefined) CONFIG.machineName = String(body.machineName);
     return sendJson(
       res,
       200,
@@ -581,6 +595,7 @@ async function handleControl(req, res, url, origin) {
         daemonDown: CONFIG.daemonDown,
         noGh: CONFIG.noGh,
         mergedStack: CONFIG.mergedStack,
+        machineName: CONFIG.machineName,
       },
       null,
     );
@@ -597,6 +612,7 @@ async function handleControl(req, res, url, origin) {
     CONFIG.daemonDown = false;
     CONFIG.noGh = false;
     CONFIG.mergedStack = false;
+    CONFIG.machineName = "mock-machine";
     return sendJson(res, 200, { ok: true }, null);
   }
   res.writeHead(404).end();
@@ -606,6 +622,16 @@ async function handleControl(req, res, url, origin) {
 /* server                                                                     */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * ONE INSTANCE PER PROCESS. `CONFIG` and `state` are module-level singletons,
+ * so a second `createMockBridge()` in the same process silently overwrites the
+ * first one's port, token and machine name.
+ *
+ * That is fine for the suite's own bridge, and deliberately not "fixed" here:
+ * the multi-host tests need a second bridge with a *different* token, which is
+ * exactly the isolation a separate process gives for free. Spawn it as one —
+ * `node test/mock-bridge.mjs --port 7789 --token … --machine-name devbox`.
+ */
 export function createMockBridge(overrides = {}) {
   Object.assign(CONFIG, overrides);
 
@@ -618,9 +644,14 @@ export function createMockBridge(overrides = {}) {
       return handleControl(req, res, url, origin);
     }
 
-    /* 1. Host check (DNS-rebinding defence) --------------------------------- */
-    const allowedHosts = [`127.0.0.1:${CONFIG.port}`, `localhost:${CONFIG.port}`];
-    if (!allowedHosts.includes(host)) {
+    /* 1. Host check (DNS-rebinding defence) ---------------------------------
+       Loopback HOSTNAME, any port — the real bridge's rule. Rebinding turns an
+       attacker's own name into 127.0.0.1, so the request arrives as
+       `Host: evil.com`, which fails here; the port was never the guard. */
+    const hostname = host.startsWith("[")
+      ? host.slice(0, host.indexOf("]") + 1)
+      : host.split(":")[0];
+    if (!["127.0.0.1", "localhost", "::1", "[::1]"].includes(hostname.toLowerCase())) {
       log("reject forbidden_host", host);
       return sendError(res, "forbidden_host", origin);
     }

@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
+import { hostname } from "node:os";
 import {
   BridgeError,
   CONTRACT_VERSION,
@@ -39,8 +40,8 @@ import { previewToken, settings, tokenMatches } from "./settings.server";
  *  - it rejects any request carrying a non-extension `Origin`, on the preflight
  *    as well as the real request, because CORS only stops a page *reading* a
  *    response and would not stop the side effect;
- *  - it rejects any `Host` that is not the loopback address it bound, which
- *    closes DNS rebinding;
+ *  - it rejects any `Host` whose hostname is not loopback (or explicitly
+ *    allow-listed), which closes DNS rebinding;
  *  - it requires a bearer token everywhere except `GET /v1/ping`;
  *  - it caps bodies and rate limits per origin.
  *
@@ -151,11 +152,49 @@ function fail(
   writeJson(res, error.status, body, headers);
 }
 
-function hostAllowed(host: string | undefined, port: number): boolean {
+/** Hostnames that can only ever mean this machine. */
+const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+
+/** The hostname half of a `Host` header. IPv6 keeps its brackets. */
+function hostnameOf(hostHeader: string): string {
+  const h = hostHeader.trim().toLowerCase();
+  if (h.startsWith("[")) {
+    const close = h.indexOf("]");
+    return close === -1 ? h : h.slice(0, close + 1);
+  }
+  const colon = h.indexOf(":");
+  return colon === -1 ? h : h.slice(0, colon);
+}
+
+/**
+ * DNS-rebinding guard on the `Host` header.
+ *
+ * The rule is **loopback hostname, any port** — deliberately not "the exact
+ * `host:port` this listener bound", which is what it used to be. That older
+ * form broke the supported way to reach a second Paseo machine: an `ssh -L
+ * 7789:127.0.0.1:7788 devbox` tunnel makes the browser send `Host:
+ * 127.0.0.1:7789` while the remote bridge is bound on 7788, and the request was
+ * refused with `forbidden_host` even though it came from the extension over a
+ * loopback socket the user themselves opened.
+ *
+ * Pinning the port added no security on top of the hostname test. Rebinding
+ * works by making an attacker-controlled *name* resolve to 127.0.0.1; the
+ * request then carries `Host: evil.com` and `Origin: https://evil.com`, and both
+ * are already refused here — the hostname is not loopback, and the origin is not
+ * `chrome-extension://`. A port number was never what stood in the way.
+ *
+ * `allowedHosts` in settings.json is the escape hatch for a reverse proxy that
+ * presents a real name (Tailscale Serve, say). It is exact-match on the whole
+ * `host:port`, empty by default, and file-only on purpose: naming a non-loopback
+ * host here is a security decision, so it should not be one click away in a UI.
+ * The listener still binds 127.0.0.1 only, so such a proxy has to be something
+ * the user ran.
+ */
+function hostAllowed(host: string | undefined, extraAllowed: readonly string[]): boolean {
   if (host === undefined) return false;
-  const allowed = [`${BIND_HOST}:${port}`, `localhost:${port}`];
-  if (port === 80) allowed.push(BIND_HOST, "localhost");
-  return allowed.includes(host.toLowerCase());
+  const h = host.trim().toLowerCase();
+  if (LOOPBACK_HOSTNAMES.has(hostnameOf(h))) return true;
+  return extraAllowed.some((allowed) => allowed.trim().toLowerCase() === h);
 }
 
 /**
@@ -244,6 +283,27 @@ async function requireToken(req: IncomingMessage): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
+ * This machine's own name, for a bridge to introduce itself with.
+ *
+ * The point is the extension's host list: with two Paseo machines reached
+ * through loopback tunnels, every bridge URL is some `127.0.0.1:<port>`, and
+ * "127.0.0.1:7789" is a useless name for "devbox". Sending the hostname lets
+ * the extension label a host the way the user thinks of it without them typing
+ * anything. Unauthenticated too, so it is available while pairing.
+ *
+ * Not a secret: it is already all over the deep links and the daemon's own
+ * status endpoint, and the request had to clear the extension-origin check to
+ * get here. Falls back to "" rather than throwing on a host with no name.
+ */
+function machineName(): string {
+  try {
+    return hostname() || "";
+  } catch {
+    return "";
+  }
+}
+
+/**
  * Health, and the one place the extension can validate a pasted token.
  *
  * Auth is optional but not ignored, per CONTRACT.md "Token validation on ping":
@@ -279,6 +339,7 @@ async function ping(authenticated: boolean): Promise<PingResponse> {
     version: PLUGIN_VERSION,
     contract: CONTRACT_VERSION,
     daemon,
+    machine: { name: machineName() },
     paired: authenticated,
     providers,
     modes,
@@ -348,11 +409,13 @@ async function onRequest(req: IncomingMessage, res: ServerResponse): Promise<voi
   const port = runtime?.port ?? status.port;
   const origin = req.headers.origin;
   const cors = corsHeaders(origin);
+  // Read once: both the Origin pin and the Host allowlist come from settings,
+  // and the store is memory-cached so this does not touch the filesystem.
+  const current = await settings.read().catch(() => null);
 
   // 1. Origin. A page origin is refused outright, on the preflight too, so the
   //    real request is never even sent by the browser.
   if (origin !== undefined) {
-    const current = await settings.read().catch(() => null);
     const pinned = current?.allowedExtensionIds ?? [];
     const isExtension = origin.startsWith("chrome-extension://");
     const isPinned =
@@ -371,10 +434,14 @@ async function onRequest(req: IncomingMessage, res: ServerResponse): Promise<voi
   }
 
   // 2. Host. Closes DNS rebinding from a page that resolves a name to 127.0.0.1.
-  if (!hostAllowed(req.headers.host, port)) {
+  if (!hostAllowed(req.headers.host, current?.allowedHosts ?? [])) {
     fail(
       res,
-      new BridgeError("forbidden_host", "This bridge only answers on 127.0.0.1 or localhost."),
+      new BridgeError(
+        "forbidden_host",
+        "This bridge only answers on 127.0.0.1 or localhost.",
+        "Reach a bridge on another machine through a loopback tunnel (ssh -L), or add the proxy's host:port to allowedHosts in the plugin's settings.json.",
+      ),
       cors,
     );
     return;

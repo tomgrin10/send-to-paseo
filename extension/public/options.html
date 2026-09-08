@@ -143,6 +143,41 @@
         border-radius: 50%; animation: spin 700ms linear infinite;
       }
       @keyframes spin { to { transform: rotate(360deg); } }
+
+      /* ---- host list ---------------------------------------------------- */
+      .hosts { display: grid; gap: 12px; }
+      .host {
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        padding: 13px;
+        display: grid;
+        gap: 11px;
+        background: var(--bg);
+      }
+      .host[data-enabled="0"] { opacity: 0.62; }
+      .host-head { display: flex; gap: 8px; align-items: center; }
+      .host-head > input.hostLabel {
+        flex: 1;
+        font: 600 13px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+      }
+      .host-head .idx {
+        font: 600 11px/1 var(--mono);
+        color: var(--muted);
+        min-width: 15px;
+      }
+      .toggle { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); }
+      .toggle input { accent-color: var(--accent); }
+      button.danger { color: var(--bad); }
+      button.danger:hover { border-color: var(--bad-border); background: var(--bad-bg); }
+      .host .status { background: var(--card); }
+      .empty {
+        color: var(--muted);
+        font-size: 13px;
+        border: 1px dashed var(--border-strong);
+        border-radius: 9px;
+        padding: 16px;
+        text-align: center;
+      }
     </style>
   </head>
   <body>
@@ -154,32 +189,27 @@
         Send to Paseo
       </h1>
       <p class="sub">
-        Pairs this extension with the <code>send-to-paseo</code> Paseo plugin's local bridge.
+        Pairs this extension with the <code>send-to-paseo</code> Paseo plugin's local bridge —
+        on as many Paseo machines as you run one on.
       </p>
 
       <section>
-        <h2>Bridge</h2>
-        <label class="field">
-          <span class="lbl">Bridge URL</span>
-          <span class="help">The plugin binds 127.0.0.1 only. Default <code>http://127.0.0.1:7788</code>.</span>
-          <input id="bridgeUrl" type="text" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:7788" />
-        </label>
-        <div class="row" id="grantRow" hidden>
-          <button id="grant" type="button">Grant access to this address</button>
-          <span class="help" id="grantHelp"></span>
+        <h2>Paseo hosts</h2>
+        <span class="help">
+          Every pull request is resolved on <b>all</b> enabled hosts at once, and the composer
+          shows the workspaces each one has. Each host needs its own pairing token: tokens belong
+          to a plugin install and are not interchangeable.
+          <br />
+          A bridge on another machine binds <code>127.0.0.1</code> there, so reach it through a
+          loopback tunnel — <code>ssh -L 7789:127.0.0.1:7788 devbox</code> — and give this host
+          <code>http://127.0.0.1:7789</code>.
+        </span>
+        <div class="hosts" id="hosts"></div>
+        <div class="row">
+          <button id="addHost" type="button">Add a host</button>
+          <button id="testAll" class="primary" type="button">Test all connections</button>
+          <span class="saved" id="saved">Saved</span>
         </div>
-        <label class="field">
-          <span class="lbl">Pairing token</span>
-          <span class="help">
-            Copy it from Paseo → send-to-paseo → Pairing token. Stored in extension
-            storage and only ever read by the service worker.
-          </span>
-          <div class="row">
-            <input id="token" type="password" spellcheck="false" autocomplete="off" placeholder="paste token" />
-            <button id="reveal" type="button">Show</button>
-            <button id="clear" type="button">Clear</button>
-          </div>
-        </label>
       </section>
 
       <section>
@@ -187,8 +217,9 @@
         <label class="field">
           <span class="lbl">Default provider</span>
           <span class="help">
-            The list comes from the bridge — <code>GET /v1/ping</code> with your token returns
-            every provider Paseo has configured. Run <b>Test connection</b> to refresh it.
+            The list comes from the bridges — <code>GET /v1/ping</code> with a valid token returns
+            every provider that Paseo host has configured. Run <b>Test all connections</b> to
+            refresh it. Applied to whichever host a send lands on, when that host offers it.
           </span>
           <select id="defaultProvider" aria-label="Default provider">
             <option value="">(use the plugin's default)</option>
@@ -197,22 +228,49 @@
         </label>
       </section>
 
-      <section>
-        <h2>Connection</h2>
-        <div class="row">
-          <button id="test" class="primary" type="button">Test connection</button>
-          <span class="saved" id="saved">Saved</span>
-        </div>
-        <div class="status" id="status" data-tone="idle">
-          <span class="st">Not tested yet</span>
-          <span class="sd">Test connection calls <code>GET /v1/ping</code> on the bridge.</span>
-        </div>
-      </section>
-
       <footer>
         Settings save as you type. Troubleshooting lives in <code>extension/README.md</code>.
       </footer>
     </main>
+
+    <!-- Cloned per host. A template keeps the markup out of the JS, so the
+         page has no innerHTML anywhere. -->
+    <template id="hostTemplate">
+      <div class="host">
+        <div class="host-head">
+          <span class="idx"></span>
+          <input class="hostLabel" type="text" spellcheck="false" autocomplete="off" />
+          <label class="toggle">
+            <input class="hostEnabled" type="checkbox" />
+            Enabled
+          </label>
+          <button class="hostRemove danger" type="button">Remove</button>
+        </div>
+        <label class="field">
+          <span class="lbl">Bridge URL</span>
+          <input class="hostUrl" type="text" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:7788" />
+        </label>
+        <div class="row hostGrantRow" hidden>
+          <button class="hostGrant" type="button">Grant access to this address</button>
+          <span class="help hostGrantHelp"></span>
+        </div>
+        <label class="field">
+          <span class="lbl">Pairing token</span>
+          <div class="row">
+            <input class="hostToken" type="password" spellcheck="false" autocomplete="off" placeholder="paste token" />
+            <button class="hostReveal" type="button">Show</button>
+            <button class="hostClear" type="button">Clear</button>
+          </div>
+        </label>
+        <div class="row">
+          <button class="hostTest" type="button">Test connection</button>
+        </div>
+        <div class="status hostStatus" data-tone="idle">
+          <span class="st">Not tested yet</span>
+          <span class="sd">Test connection calls <code>GET /v1/ping</code> on this bridge.</span>
+        </div>
+      </div>
+    </template>
     <script src="options.js"></script>
   </body>
 </html>

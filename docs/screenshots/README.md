@@ -105,13 +105,35 @@ CONTRACT.md's Clarifications.
 
 | Image | What it demonstrates |
 | --- | --- |
-| `options-page.png` | Fresh, unpaired state. Bridge URL, masked pairing token (`type=password` by default), the provider picker, and an untested connection status. With no token stored the page does not auto-ping. |
+| `options-page.png` | Fresh, unpaired state. One host card — bridge URL, masked pairing token (`type=password` by default) — plus the provider picker and an untested connection status. With no token stored the page does not auto-ping. |
 | `options-page-paired.png` | **Test connection** with a valid token: ok tone, "Paired with Paseo", plugin name/version, contract v1, daemon version and `serverId`, and the provider count. The **Default provider** dropdown is populated straight from the authenticated `GET /v1/ping`, with the bridge's own default marked `(plugin default)`. |
 | `options-page-not-paired.png` | **Test connection** with no token: warn tone, "Bridge reachable, not paired yet", `0 providers`. This is the unauthenticated ping — liveness confirmed, pairing not done. |
 | `options-page-token-rejected.png` | **Test connection** with a wrong token: bad tone, "Token rejected", telling the user to re-copy it. Distinct from the bridge being down, which is the whole reason ping takes optional auth. |
 | `options-page-bridge-down.png` | **Test connection** with the bridge stopped: bad tone, naming the exact URL that was tried. |
 | `options-page-contract-mismatch.png` | **Test connection** against a plugin on contract v2: bad tone, "Update required", and an explicit warning that sends are blocked. |
 | `options-page-dark.png` | Dark theme, paired state. |
+
+## Multiple Paseo hosts
+
+Two mock bridges: the suite's own on `127.0.0.1:7799`, and a second in a separate process on
+`127.0.0.1:7798` reporting `machine.name: "devbox"`. That stands in for a second Paseo machine
+reached over an `ssh -L` tunnel, which is why both are loopback addresses on different ports.
+Neither host has a typed label in any of these — every name on screen came off the wire.
+
+| Image | What it demonstrates |
+| --- | --- |
+| `multihost-popover-merged.png` | Both bridges resolved the same pull request and the results are one list: 8 candidates, 4 per machine, each row led by its host. Ranked *across* machines, not grouped by them — both `exact match` rows are at the top and both `Create worktree` rows at the bottom. The field label reads "Target (8 candidates on 2 hosts)" and the resolved-target line leads with the machine. |
+| `multihost-default-crosses-hosts.png` | The primary machine has no `gh`, so it can rank nothing above "same project" and its own default is the create row. The default target therefore crosses to `devbox`, which has a real branch match. A machine that would only *create* a worktree never outranks one that already has it. |
+| `multihost-sent-to-second-host.png` | Success state after choosing a `devbox` target: the agent started there, and the host is named in the success line. The suite asserts the primary bridge received **zero** `/v1/send` requests. |
+| `multihost-one-host-down.png` | The second bridge's process was stopped, i.e. the dev box is asleep. The composer stays usable on the machine that answered: only its 4 candidates are offered, the field label drops to "on 1 host", and a warning row names `devbox` with code `bridge_unreachable`. It still keeps the name it was last known by rather than degrading to an address. |
+| `multihost-contract-mismatch-one-host.png` | The second bridge reports contract v2. Sends to it are refused, as the contract requires — but only to it: the row names that host alone, it is never sent a resolve, and the other machine is fully usable. |
+| `multihost-permission-required.png` | A host pointed at `127.0.0.1:7797`, an origin outside the build's `host_permissions`. Chrome blocks the fetch, which would otherwise surface as a bare network error reading exactly like "the bridge is down"; instead the row says `permission_required`. Named by address, because this host has never introduced itself. |
+| `multihost-search-by-machine.png` | Typing `devbox` in the Target search narrows the merged list to that machine's 4 rows. The tunnel port works too, and a workspace name still matches across both machines. |
+
+These seven, and the `options-page-*` set, were rendered on Linux; the rest of this directory was
+rendered on macOS. Fonts therefore differ slightly between the two groups. Only images the
+multi-host work actually changed were re-rendered, so a whole-directory re-run on one platform
+would show that difference everywhere and mean nothing.
 
 ## Against the real Paseo plugin
 

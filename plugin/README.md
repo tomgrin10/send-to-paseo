@@ -202,13 +202,42 @@ All of it lives in the Paseo surface; there is no config file to hunt for.
 State is stored at `$PASEO_HOME/plugin-data/send-to-paseo/settings.json`, written
 `0600` inside a `0700` directory. It holds the token, the port, the default
 model, the followed profile id, the default mode, the paired flag, the last 20
-sends, and an optional `allowedExtensionIds` list (see
-[Security model](#security-model)).
+sends, and two optional allowlists — `allowedExtensionIds` and `allowedHosts`
+(see [Security model](#security-model)).
 
-`defaultProfileId` and `defaultModeId` are read with a schema default of `null`,
-so a `settings.json` written before permission modes existed still validates. That
-matters more than it looks: a failed parse regenerates the file, and the file holds
-the pairing token — an upgrade must not silently unpair the extension.
+`defaultProfileId`, `defaultModeId` and `allowedHosts` are read with schema
+defaults, so a `settings.json` written before those fields existed still
+validates. That matters more than it looks: a failed parse regenerates the file,
+and the file holds the pairing token — an upgrade must not silently unpair the
+extension.
+
+### Reaching this bridge from another machine
+
+The listener is loopback-only, by design, so a browser on a different machine
+cannot contact it directly. Forward it instead:
+
+```sh
+# on the machine running the browser
+ssh -L 7789:127.0.0.1:7788 devbox
+```
+
+The extension then adds a host pointing at `http://127.0.0.1:7789` and pastes
+**this** machine's pairing token. Nothing needs configuring here: the `Host`
+check accepts any loopback hostname regardless of port, so the tunnel's local
+port does not have to match the port the bridge bound.
+
+If instead a reverse proxy fronts the bridge under a real name — Tailscale
+Serve, say — that name arrives in the `Host` header and is refused. Add it to
+`allowedHosts` by hand:
+
+```json
+{ "allowedHosts": ["devbox.example.ts.net:443"] }
+```
+
+Exact `host:port` matches, empty by default, and deliberately file-only with no
+UI: widening the set of names that can reach an endpoint which starts agents is
+a security decision, and it should not be one click away. The listener still
+binds `127.0.0.1`, so such a proxy has to be something you ran.
 
 ### Permission mode, and the profile it can come from
 
@@ -635,10 +664,20 @@ treated as a privilege boundary rather than a convenience.
    `Authorization` header forces a preflight, and failing that preflight means
    the browser never sends the real request. Set `allowedExtensionIds` in
    `settings.json` to pin specific extension IDs.
-4. **`Host` must be the loopback address actually bound** — `127.0.0.1:<port>` or
-   `localhost:<port>`, tracking the live port, not the default. This closes
-   DNS rebinding, where a hostile page resolves a name it controls to
-   `127.0.0.1`. Anything else gets `403 forbidden_host`.
+4. **`Host` must have a loopback hostname** — `127.0.0.1`, `localhost` or `::1`.
+   Anything else gets `403 forbidden_host`. This closes DNS rebinding, where a
+   hostile page resolves a name it controls to `127.0.0.1`: the request then
+   arrives carrying `Host: evil.com` and `Origin: https://evil.com`, and rule 3
+   and this rule both refuse it.
+
+   The **port is not checked**. It used to be pinned to the port the listener
+   bound, which refused the supported way to reach a bridge on another machine —
+   an `ssh -L 7789:127.0.0.1:7788` tunnel makes the browser send
+   `Host: 127.0.0.1:7789` while this bridge is on 7788. Pinning the port never
+   added anything on top of the hostname test, because the hostname is what a
+   rebinding attack cannot control. `allowedHosts` in `settings.json` extends
+   this to explicit non-loopback `host:port` values for a reverse proxy; it is
+   empty by default, exact-match, and not settable from the extension.
 5. **CORS echo on success only.** The request's own `chrome-extension://` origin,
    `GET, POST, OPTIONS`, `Authorization, Content-Type`, `Max-Age: 600`. No
    `Access-Control-Allow-Credentials`, ever. `Vary: Origin` on every response,

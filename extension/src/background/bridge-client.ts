@@ -1,6 +1,11 @@
 /**
- * The only place in the extension that speaks HTTP to the bridge, and the only
- * place the bearer token is read. Implements the client half of CONTRACT.md v1.
+ * The only place in the extension that speaks HTTP to a bridge, and the only
+ * place a bearer token is read. Implements the client half of CONTRACT.md v1.
+ *
+ * Every function here takes the `HostConfig` it is talking to. There is no
+ * ambient "the bridge" any more: with several Paseo machines paired, each has
+ * its own URL, its own token and its own contract version, and picking the
+ * wrong one would send an instruction to the wrong machine.
  */
 
 import {
@@ -12,7 +17,7 @@ import {
   type SendResponse,
 } from "../shared/contract";
 import type { FailurePayload, Result } from "../shared/messages";
-import { readSettings } from "./settings";
+import { hostDisplayName, originPatternFor, type HostConfig } from "./settings";
 
 const PING_TIMEOUT_MS = 4000;
 const RESOLVE_TIMEOUT_MS = 10000;
@@ -76,7 +81,28 @@ async function readResponse<T>(res: Response): Promise<Result<T>> {
   return { ok: true, data: parsed as T };
 }
 
+/**
+ * A fetch to a host Chrome has no permission for fails as an opaque network
+ * error, which the UI would report as "bridge down" — sending the user to look
+ * for a daemon that is running fine. Checked before the request so the message
+ * can name the actual fix.
+ *
+ * Only the default `127.0.0.1:7788` is granted in the manifest; every other
+ * tunnel port or proxy name is user-consented through the options page.
+ */
+async function permissionGranted(host: HostConfig): Promise<boolean> {
+  const pattern = originPatternFor(host.bridgeUrl);
+  if (pattern === null) return true; // not an http(s) URL; let fetch report it
+  try {
+    return await chrome.permissions.contains({ origins: [pattern] });
+  } catch {
+    // An unexpected pattern rejection must not block a send that might work.
+    return true;
+  }
+}
+
 async function request<T>(
+  host: HostConfig,
   path: string,
   init: {
     method: "GET" | "POST";
@@ -86,30 +112,36 @@ async function request<T>(
     timeoutMs: number;
   },
 ): Promise<Result<T>> {
-  const settings = await readSettings();
-
-  if (init.auth === "required" && !settings.token) {
+  if (init.auth === "required" && !host.token) {
     return fail(
       "not_configured",
-      "No pairing token is stored for the Paseo bridge.",
+      `No pairing token is stored for ${hostDisplayName(host)}.`,
     );
   }
 
   const headers: Record<string, string> = { Accept: "application/json" };
   if (init.body !== undefined) headers["Content-Type"] = "application/json";
-  if (init.auth !== "none" && settings.token) {
-    headers["Authorization"] = `Bearer ${settings.token}`;
+  if (init.auth !== "none" && host.token) {
+    headers["Authorization"] = `Bearer ${host.token}`;
   }
 
   let url: string;
   try {
-    url = `${settings.bridgeUrl}${path}`;
+    url = `${host.bridgeUrl}${path}`;
     // Validate early so a typo'd bridge URL is a clear message, not a TypeError.
     new URL(url);
   } catch {
     return fail(
       "not_configured",
-      `"${settings.bridgeUrl}" is not a valid bridge URL.`,
+      `"${host.bridgeUrl}" is not a valid bridge URL.`,
+    );
+  }
+
+  if (!(await permissionGranted(host))) {
+    return fail(
+      "permission_required",
+      `Chrome hasn't been given access to ${host.bridgeUrl}.`,
+      { hint: "Open the extension options and press Grant access on this host." },
     );
   }
 
@@ -130,14 +162,14 @@ async function request<T>(
     if (name === "TimeoutError" || name === "AbortError") {
       return fail(
         "bridge_unreachable",
-        `The bridge at ${settings.bridgeUrl} didn't answer within ${Math.round(
+        `The bridge at ${host.bridgeUrl} didn't answer within ${Math.round(
           init.timeoutMs / 1000,
         )}s.`,
       );
     }
     return fail(
       "bridge_unreachable",
-      `Couldn't connect to the bridge at ${settings.bridgeUrl}.`,
+      `Couldn't connect to the bridge at ${host.bridgeUrl}.`,
     );
   }
 
@@ -164,9 +196,10 @@ async function request<T>(
  * to *report* a mismatch rather than be blocked by it.
  */
 export function ping(
+  host: HostConfig,
   { authenticated = true }: { authenticated?: boolean } = {},
 ): Promise<Result<PingResponse>> {
-  return request<PingResponse>("/v1/ping", {
+  return request<PingResponse>(host, "/v1/ping", {
     method: "GET",
     auth: authenticated ? "optional" : "none",
     timeoutMs: PING_TIMEOUT_MS,
@@ -177,10 +210,10 @@ export function ping(
 /* contract version gate                                                      */
 /* -------------------------------------------------------------------------- */
 
-function mismatchFailure(theirs: number) {
+function mismatchFailure(host: HostConfig, theirs: number) {
   return fail(
     "contract_mismatch",
-    `The Paseo plugin speaks bridge contract v${theirs}; this extension was built for v${CONTRACT_VERSION}.`,
+    `The Paseo plugin on ${hostDisplayName(host)} speaks bridge contract v${theirs}; this extension was built for v${CONTRACT_VERSION}.`,
   );
 }
 
@@ -196,22 +229,30 @@ function mismatchFailure(theirs: number) {
  * meant a plugin updated while the composer was open could still be sent to.
  * "Refuse to send" is a guarantee, and one loopback round trip is far cheaper
  * than the resolve or send it guards.
+ *
+ * Per host, and never shared between them: two paired machines can easily be on
+ * different plugin versions, and one being stale must not block the other.
  */
-export async function requireCompatibleContract(): Promise<Result<number>> {
-  const res = await ping();
+export async function requireCompatibleContract(
+  host: HostConfig,
+): Promise<Result<PingResponse>> {
+  const res = await ping(host);
   if (!res.ok) return res; // bridge_unreachable / unauthorized / ... surface as-is
 
   return res.data.contract === CONTRACT_VERSION
-    ? { ok: true, data: res.data.contract }
-    : mismatchFailure(res.data.contract);
+    ? { ok: true, data: res.data }
+    : mismatchFailure(host, res.data.contract);
 }
 
 /* -------------------------------------------------------------------------- */
 /* mutating / PR-scoped endpoints                                             */
 /* -------------------------------------------------------------------------- */
 
-export function resolve(body: ResolveRequest): Promise<Result<ResolveResponse>> {
-  return request<ResolveResponse>("/v1/resolve", {
+export function resolve(
+  host: HostConfig,
+  body: ResolveRequest,
+): Promise<Result<ResolveResponse>> {
+  return request<ResolveResponse>(host, "/v1/resolve", {
     method: "POST",
     body,
     auth: "required",
@@ -219,8 +260,8 @@ export function resolve(body: ResolveRequest): Promise<Result<ResolveResponse>> 
   });
 }
 
-export function send(body: SendRequest): Promise<Result<SendResponse>> {
-  return request<SendResponse>("/v1/send", {
+export function send(host: HostConfig, body: SendRequest): Promise<Result<SendResponse>> {
+  return request<SendResponse>(host, "/v1/send", {
     method: "POST",
     body,
     auth: "required",

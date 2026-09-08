@@ -33,7 +33,7 @@ const TABLE: Record<ContractErrorCode | LocalErrorCode, PresentedError> = {
   },
   forbidden_host: {
     title: "Bridge rejected the request host",
-    hint: "The bridge URL must be http://127.0.0.1:<port> or http://localhost:<port>. Check the bridge URL in options.",
+    hint: "The bridge URL must be http://127.0.0.1:<port> or http://localhost:<port>. A bridge on another machine has to be reached through a loopback tunnel, or have its proxy name added to allowedHosts in the plugin's settings.json.",
     openOptions: true,
   },
   bad_request: {
@@ -86,6 +86,11 @@ const TABLE: Record<ContractErrorCode | LocalErrorCode, PresentedError> = {
   not_configured: {
     title: "Not paired with Paseo",
     hint: "Open the extension options and paste the pairing token from the Paseo plugin surface.",
+    openOptions: true,
+  },
+  permission_required: {
+    title: "Chrome hasn't been given access to this bridge",
+    hint: "Only 127.0.0.1:7788 is granted up front. Open the extension options and press Grant access on this host.",
     openOptions: true,
   },
   bad_response: {

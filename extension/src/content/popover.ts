@@ -2,14 +2,21 @@
  * The composer popover: shadow-DOM card anchored to the injected button.
  *
  * Flow (PLAN.md §4):
- *   open -> POST /v1/resolve immediately (before the user types)
- *        -> show resolved target + a dropdown of every candidate
+ *   open -> resolve immediately, on EVERY paired Paseo host at once
+ *        -> show the resolved target + a dropdown of every candidate, on every
+ *           host, in one cross-host ranking
  *        -> autofocused textarea, provider dropdown pre-set to the default
  *        -> Cmd/Ctrl+Enter sends, Esc closes
  *        -> success state with an "Open in Paseo" deep link
  *
  * Product decision, enforced here: the picker is ALWAYS shown and a send always
  * requires an explicit action. Nothing is ever created silently.
+ *
+ * Multi-host rule that runs through the whole file: the PR, the project, the
+ * provider list and the mode list are all properties of ONE host. They are
+ * always read through `selectedSlice()`, never off some other slice, because
+ * offering the laptop's models for a workspace on the dev box would send a
+ * provider that machine has never heard of.
  */
 
 import type {
@@ -17,13 +24,18 @@ import type {
   Mode,
   PrRef,
   Provider,
-  ResolveResponse,
   SendResponse,
   SendTarget,
 } from "../shared/contract";
 import { providerIdOf } from "../shared/contract";
 import { presentError } from "../shared/errors";
-import type { FailurePayload } from "../shared/messages";
+import { clampIndex } from "../shared/merge";
+import type {
+  FailurePayload,
+  HostSlice,
+  MergedCandidate,
+  MultiResolveResponse,
+} from "../shared/messages";
 import { sendIntent } from "./bridge";
 import { Combobox } from "./ui/combobox";
 import { clear, cogIcon, el, renderProse } from "./ui/dom";
@@ -69,9 +81,12 @@ class Popover {
   private readonly ctx: PopoverContext;
 
   private phase: Phase = "loading";
-  private resolved: ResolveResponse | null = null;
+  private resolved: MultiResolveResponse | null = null;
   private failure: FailurePayload | null = null;
   private sendResult: SendResponse | null = null;
+  /** Host the last send went to, captured before any re-render can move the
+   *  selection. Empty with a single host, where naming it says nothing. */
+  private sentHostLabel = "";
 
   private draft = "";
   private candidateIndex = 0;
@@ -195,18 +210,65 @@ class Popover {
 
     this.resolved = res.data;
     this.candidateIndex = clampIndex(res.data.defaultCandidateIndex, res.data.candidates.length);
-    this.providerId = pickProvider(res.data.providers, this.defaultProviderPref);
-    this.modeId = pickMode(res.data.modes ?? [], this.providerId, res.data.resolvedModeId ?? "");
+    this.syncProviderToSelectedHost();
     this.phase = "ready";
     this.render();
     this.position();
     this.textarea?.focus();
   }
 
+  /* ---------------------------------------------------------------------- */
+  /* selection                                                               */
+  /* ---------------------------------------------------------------------- */
+
+  private selectedCandidate(): MergedCandidate | undefined {
+    return this.resolved?.candidates[this.candidateIndex];
+  }
+
+  /** The host slice the current target belongs to, and the only valid source
+   *  of its PR, project, providers and modes. */
+  private selectedSlice(): HostSlice | undefined {
+    const candidate = this.selectedCandidate();
+    if (candidate === undefined) return undefined;
+    return this.resolved?.hosts[candidate.hostIndex];
+  }
+
+  /** True once more than one host is configured, which is what turns on the
+   *  per-row host names. With one host they would be noise on every line. */
+  private get multiHost(): boolean {
+    return (this.resolved?.hosts.length ?? 0) > 1;
+  }
+
+  /** Display names for every host, disambiguated as a set. See `hostChips`. */
+  private chips(): string[] {
+    return hostChips(this.resolved?.hosts ?? []);
+  }
+
+  private chipFor(hostIndex: number): string {
+    return this.chips()[hostIndex] ?? "unknown host";
+  }
+
+  /**
+   * Re-pick provider and mode from the host now selected.
+   *
+   * Called on load and whenever the target moves to a *different* host — not on
+   * every commit. Within one host a manual provider choice stays put, because
+   * it is still offered there; across hosts it cannot be preserved, since the
+   * two machines need not have a single model in common.
+   */
+  private syncProviderToSelectedHost(): void {
+    const resolved = this.selectedSlice()?.resolved;
+    this.providerId = pickProvider(resolved?.providers ?? [], this.defaultProviderPref);
+    this.modeId = pickMode(
+      resolved?.modes ?? [],
+      this.providerId,
+      resolved?.resolvedModeId ?? "",
+    );
+  }
+
   private async doSend(): Promise<void> {
     if (this.phase === "sending") return;
-    const resolved = this.resolved;
-    if (!resolved) return;
+    if (!this.resolved) return;
     const prompt = (this.textarea?.value ?? this.draft).trim();
     if (!prompt) {
       this.textarea?.focus();
@@ -214,9 +276,22 @@ class Popover {
     }
     this.draft = prompt;
 
-    const candidate = resolved.candidates[this.candidateIndex];
+    const candidate = this.selectedCandidate();
+    const slice = this.selectedSlice();
+    // No fallback host. A target with no slice is a bug, and guessing which
+    // machine to start an agent on is worse than refusing to.
+    if (!candidate || !slice) {
+      this.failure = {
+        code: "extension_internal",
+        message: "The selected target is no longer attached to a Paseo host. Reopen the composer.",
+      };
+      this.phase = "error";
+      this.render();
+      return;
+    }
+
     const target: SendTarget =
-      candidate?.kind === "existing" && candidate.workspaceId
+      candidate.kind === "existing" && candidate.workspaceId
         ? { kind: "existing", workspaceId: candidate.workspaceId }
         : { kind: "create" };
 
@@ -226,6 +301,7 @@ class Popover {
 
     const res = await sendIntent({
       type: "send",
+      hostId: slice.hostId,
       pr: this.ctx.pr,
       prompt,
       target,
@@ -243,6 +319,7 @@ class Popover {
       return;
     }
     this.sendResult = res.data;
+    this.sentHostLabel = this.multiHost ? this.chipFor(candidate.hostIndex) : "";
     this.phase = "sent";
     this.render();
     this.position();
@@ -356,25 +433,39 @@ class Popover {
     const sendBtn = this.sendButton();
     this.pendingSendBtn = sendBtn;
 
-    body.append(this.renderTargetSummary(resolved));
+    body.append(this.renderTargetSummary());
 
     /* Candidate picker — ALWAYS rendered, even when rank 1 matched.
        A searchable, non-native combobox rather than a <select>: a workspace list
        is long, and the thing the user knows is usually the workspace *name*.
        `data-stp-candidates` stays on the trigger, whose textContent is exactly
        the committed option's label. */
+    const multi = this.multiHost;
+    const chips = this.chips();
     const combo = new Combobox({
-      options: resolved.candidates.map((c) => ({
-        label: candidateOptionLabel(c),
-        search: candidateSearchText(c),
-      })),
+      options: resolved.candidates.map((c) => {
+        const slice = resolved.hosts[c.hostIndex];
+        return {
+          label: candidateOptionLabel(c, multi ? chips[c.hostIndex] ?? null : null),
+          search: candidateSearchText(c, slice),
+        };
+      }),
       selected: this.candidateIndex,
       label: "Target workspace",
-      searchPlaceholder: "Search workspace, branch or #PR…",
+      searchPlaceholder: multi
+        ? "Search host, workspace, branch or #PR…"
+        : "Search workspace, branch or #PR…",
       emptyText: "No workspace matches",
       triggerAttrs: { "data-stp-candidates": "" },
       onCommit: (i) => {
+        const previousHost = this.selectedCandidate()?.hostIndex;
         this.candidateIndex = clampIndex(i, resolved.candidates.length);
+        // Only when the target moved to another machine: within one host the
+        // current provider is still on offer, and silently resetting a manual
+        // choice because the workspace changed would be its own bug.
+        if (this.selectedCandidate()?.hostIndex !== previousHost) {
+          this.syncProviderToSelectedHost();
+        }
         this.draft = this.textarea?.value ?? this.draft;
         this.render();
         // The card's height changes with the selection (the sibling-branch note
@@ -391,10 +482,16 @@ class Popover {
     this.candidateCombo = combo;
     body.append(
       el("div", { class: "field" }, [
-        el("span", { class: "lbl" }, [`Target (${resolved.candidates.length} candidates)`]),
+        el("span", { class: "lbl" }, [targetFieldLabel(resolved)]),
         combo.root,
       ]),
     );
+
+    // Hosts that did not answer, named individually. A partial fan-out is a
+    // normal state — a dev box asleep, a tunnel not up yet — and the composer
+    // stays usable, but silently offering half the candidates would look like
+    // the missing workspace had been deleted.
+    for (const note of this.renderHostFailures(resolved)) body.append(note);
 
     /* Instruction */
     const ta = el("textarea", {
@@ -419,13 +516,17 @@ class Popover {
       el("label", { class: "field" }, [el("span", { class: "lbl" }, ["Instruction"]), ta]),
     );
 
-    /* Provider */
-    if (resolved.providers.length) {
+    /* Provider — from the SELECTED host, never a union across hosts. Sending a
+       provider the target machine has not configured is a send that either
+       fails or silently runs a different model. */
+    const hostResolved = this.selectedSlice()?.resolved;
+    const providers = hostResolved?.providers ?? [];
+    if (providers.length) {
       const providerSelect = el("select", {
         "data-stp-provider": "",
         "aria-label": "Provider",
       }) as HTMLSelectElement;
-      for (const p of resolved.providers) {
+      for (const p of providers) {
         providerSelect.append(
           el("option", { value: p.id }, [p.isDefault ? `${p.label} (default)` : p.label]),
         );
@@ -436,7 +537,7 @@ class Popover {
         // Mode ids belong to a provider, so the Mode select's contents change
         // with this one. Re-render (keeping the draft, exactly as the candidate
         // select does) and re-pick the mode for the new provider.
-        this.modeId = pickMode(resolved.modes ?? [], this.providerId, "");
+        this.modeId = pickMode(hostResolved?.modes ?? [], this.providerId, "");
         this.draft = this.textarea?.value ?? this.draft;
         this.render();
         this.textarea?.focus();
@@ -450,7 +551,7 @@ class Popover {
     }
 
     /* Mode — filtered to the selected provider, because mode ids are per-provider. */
-    const providerModes = modesFor(resolved.modes ?? [], this.providerId);
+    const providerModes = modesFor(hostResolved?.modes ?? [], this.providerId);
     if (providerModes.length) {
       const modeSelect = el("select", {
         "data-stp-mode": "",
@@ -531,17 +632,33 @@ class Popover {
     return el("footer", {}, [hint, btn]);
   }
 
-  private renderTargetSummary(resolved: ResolveResponse): HTMLElement {
-    const c = resolved.candidates[this.candidateIndex];
+  private renderTargetSummary(): HTMLElement {
+    const c = this.selectedCandidate();
+    const slice = this.selectedSlice();
     const box = el("div", { class: "target-summary", "data-stp-target-summary": "" });
     box.append(el("span", { class: "arrow" }, ["→ "]));
 
-    if (!c) {
+    if (!c || !slice || !slice.resolved) {
       box.append(document.createTextNode("no candidate selected"));
       return box;
     }
+    const hostResolved = slice.resolved;
+
+    // The host comes first, and is a distinct element rather than part of the
+    // sentence: which machine the agent starts on is the one fact this popover
+    // could not tell you before, and it is the one that is expensive to get
+    // wrong.
+    if (this.multiHost) {
+      box.append(
+        el("span", { class: "host", "data-stp-target-host": slice.hostId }, [
+          this.chipFor(c.hostIndex),
+        ]),
+        document.createTextNode(" · "),
+      );
+    }
+
     if (c.kind === "create") {
-      box.append(document.createTextNode(`will create worktree for PR #${resolved.pr.number}`));
+      box.append(document.createTextNode(`will create worktree for PR #${hostResolved.pr.number}`));
     } else {
       box.append(document.createTextNode("workspace "), el("code", {}, [c.label]));
       if (c.reason === "stack" && c.stackPrNumber) {
@@ -552,8 +669,8 @@ class Popover {
     }
     const sub = el("span", { class: "sub" });
     sub.append(
-      document.createTextNode(c.branch ? `${c.branch}` : resolved.pr.headBranch),
-      document.createTextNode(` · ${resolved.project.name}`),
+      document.createTextNode(c.branch ? `${c.branch}` : hostResolved.pr.headBranch),
+      document.createTextNode(` · ${hostResolved.project.name}`),
     );
     box.append(sub);
 
@@ -568,8 +685,8 @@ class Popover {
     if (
       c.kind === "existing" &&
       c.branch &&
-      resolved.pr.headBranch &&
-      c.branch !== resolved.pr.headBranch
+      hostResolved.pr.headBranch &&
+      c.branch !== hostResolved.pr.headBranch
     ) {
       box.append(
         el("span", { class: "mismatch", "data-stp-branch-mismatch": "" }, [
@@ -578,6 +695,37 @@ class Popover {
       );
     }
     return box;
+  }
+
+  /**
+   * One row per host that failed, while at least one other succeeded.
+   *
+   * Deliberately not folded into a single "1 host unavailable" line: the two
+   * failures a user actually hits need different actions — a token that was
+   * never pasted on the new machine, and a tunnel that is not up — and only the
+   * host's own name and code distinguish them.
+   */
+  private renderHostFailures(resolved: MultiResolveResponse): HTMLElement[] {
+    const chips = this.chips();
+    return resolved.hosts
+      .map((slice, hostIndex) => ({ slice, hostIndex }))
+      .filter(({ slice }) => slice.error !== null)
+      .map(({ slice, hostIndex }) => {
+        const presented = presentError(slice.error!.code);
+        return el(
+          "div",
+          { class: "host-error", "data-stp-host-error": slice.hostId, role: "status" },
+          [
+            el("span", { class: "host" }, [chips[hostIndex] ?? slice.hostLabel]),
+            // The headline is used verbatim. Lower-casing it to splice into a
+            // sentence produced "chrome hasn't been given access…" — these
+            // titles are sentences of their own, several starting with a proper
+            // noun, so the row is a label and a sentence rather than one clause.
+            document.createTextNode(` — ${presented.title} · `),
+            el("span", { class: "hcode" }, [slice.error!.code]),
+          ],
+        );
+      });
   }
 
   private renderError(): HTMLElement {
@@ -655,6 +803,12 @@ class Popover {
     }
 
     const detail = el("div", { class: "sdetail" });
+    if (this.sentHostLabel) {
+      detail.append(
+        el("span", { class: "host", "data-stp-sent-host": "" }, [this.sentHostLabel]),
+        document.createTextNode(" · "),
+      );
+    }
     detail.append(document.createTextNode(r.title));
     if (r.workspaceLabel) {
       detail.append(
@@ -751,11 +905,56 @@ function stackStateSuffix(c: Candidate): string {
   return `, ${state}`;
 }
 
-function candidateOptionLabel(c: Candidate): string {
-  if (c.kind === "create") return `${c.label}${c.branch ? ` — ${c.branch}` : ""}`;
+/**
+ * How each host is named in the UI: its label, and its authority appended ONLY
+ * where two hosts would otherwise read identically.
+ *
+ * Computed over the whole list rather than per host, because ambiguity is a
+ * property of the set. Unconditionally appending `(127.0.0.1:7789)` was the
+ * first attempt and it made every row in the Target list long enough to
+ * truncate, burying the workspace name — the thing being chosen — behind an
+ * address that is identical on all but two characters.
+ *
+ * Two hosts really can collide: an unlabelled pair falls back to a hostname, and
+ * two machines can share one.
+ */
+function hostChips(hosts: HostSlice[]): string[] {
+  const base = hosts.map(
+    (h) => h.hostLabel.trim() || h.bridgeAuthority || "unknown host",
+  );
+  const counts = new Map<string, number>();
+  for (const name of base) counts.set(name, (counts.get(name) ?? 0) + 1);
+  return base.map((name, i) =>
+    (counts.get(name) ?? 0) > 1 && hosts[i].bridgeAuthority
+      ? `${name} (${hosts[i].bridgeAuthority})`
+      : name,
+  );
+}
+
+/**
+ * `Target (5 candidates on 2 hosts)`.
+ *
+ * The host count is the honest denominator: it counts hosts that *answered*,
+ * not hosts configured, so a count of 1 while two are paired is a visible cue
+ * that something is missing — reinforced by the failure rows underneath.
+ */
+function targetFieldLabel(resolved: MultiResolveResponse): string {
+  const n = resolved.candidates.length;
+  const answered = resolved.hosts.filter((h) => h.resolved !== null).length;
+  const candidates = `${n} candidate${n === 1 ? "" : "s"}`;
+  return resolved.hosts.length > 1
+    ? `Target (${candidates} on ${answered} host${answered === 1 ? "" : "s"})`
+    : `Target (${candidates})`;
+}
+
+function candidateOptionLabel(c: Candidate, hostLabel: string | null): string {
+  // The host leads the row, so scanning a merged list down the left edge
+  // groups by machine even though the ranking deliberately interleaves them.
+  const prefix = hostLabel ? `${hostLabel} · ` : "";
+  if (c.kind === "create") return `${prefix}${c.label}${c.branch ? ` — ${c.branch}` : ""}`;
   const bits = [c.label];
   if (c.branch) bits.push(c.branch);
-  let out = `${bits.join(" — ")} (${candidateReasonTag(c)}`;
+  let out = `${prefix}${bits.join(" — ")} (${candidateReasonTag(c)}`;
   if (typeof c.agentCount === "number") out += `, ${c.agentCount} agent${c.agentCount === 1 ? "" : "s"}`;
   return `${out})`;
 }
@@ -790,13 +989,21 @@ function branchMismatchNote(c: Candidate): string {
   return "worktree is on another branch of this stack";
 }
 
-function candidateSearchText(c: Candidate): string {
+function candidateSearchText(c: Candidate, slice: HostSlice | undefined): string {
   const bits = [c.label];
   if (c.branch) bits.push(c.branch);
   if (c.kind === "create") bits.push("create", "new worktree");
   else bits.push(candidateReasonTag(c));
   // Both spellings, so "941" and "#941" behave the same.
   if (typeof c.stackPrNumber === "number") bits.push(`#${c.stackPrNumber}`, String(c.stackPrNumber));
+  // The host is searchable even when it is not shown, so typing "devbox"
+  // narrows to one machine. Its authority goes in too: with two unlabelled
+  // tunnels the port is the only thing that tells them apart, and it is what
+  // the user has in their `ssh -L` command.
+  if (slice !== undefined) {
+    if (slice.hostLabel) bits.push(slice.hostLabel);
+    if (slice.bridgeAuthority) bits.push(slice.bridgeAuthority);
+  }
   return bits.join(" ");
 }
 
@@ -822,11 +1029,6 @@ function pickMode(modes: Mode[], providerModel: string, resolved: string): strin
   const forProvider = modesFor(modes, providerModel);
   if (resolved && forProvider.some((m) => m.id === resolved)) return resolved;
   return forProvider.find((m) => m.isDefault)?.id ?? forProvider[0]?.id ?? "";
-}
-
-function clampIndex(i: number, len: number): number {
-  if (!Number.isFinite(i) || i < 0 || i >= len) return 0;
-  return Math.trunc(i);
 }
 
 function isMac(): boolean {

@@ -103,6 +103,37 @@ sync.
   0.7.0 does enrich the subprocess environment (measured: the plugin subprocess got the full login
   `PATH`), so this is **latent, not currently biting**. `deps.server.ts` probes well-known install
   locations after `PATH` anyway, because that enrichment is a host behaviour and not a contract.
+- **The extension is paired with a LIST of bridges, not one.** Two Paseo machines is the normal
+  case, the remote one reached by forwarding its loopback port here (`ssh -L 7789:127.0.0.1:7788`).
+  Consequences that are easy to get wrong:
+  - **A token, a provider list, a mode list, a PR and a project all belong to ONE host.** The
+    composer reads them through `selectedSlice()`, never off another slice. Offering the laptop's
+    models for a workspace on the dev box sends a provider that machine has never heard of.
+  - **A send names its `hostId` and the worker never re-derives it.** Guessing which machine to
+    start an agent on is worse than refusing to.
+  - **Failure is per host and is data, not an exception.** One bridge asleep, or on a stale
+    contract, must not stop the other from being used; `handleResolve` only errors when *nothing*
+    resolved. The contract gate therefore runs per host too.
+  - **Ids in `readSettings` must be DERIVED, never random.** The migration from the old
+    single-bridge store runs in memory on every read and is not persisted, so a random id would
+    differ between two reads — `writeHost` would silently no-op, and a send would look up the
+    `hostId` its own resolve had just returned, miss, and refuse. That bug was real and is what
+    `LEGACY_HOST_ID` and `derivedId()` exist to prevent. Only `addHost` (a write) may mint a UUID.
+  - **`chrome.permissions` is checked before the fetch.** Only `127.0.0.1:7788` is granted by the
+    manifest; a fetch to an unpermitted origin fails as a bare network error that reads as "bridge
+    down" and sends the user hunting a healthy daemon. Hence `permission_required`.
+  - **A Chrome match pattern's host makes the port a don't-care**, so the existing
+    `http://127.0.0.1/*` optional permission already covers every tunnel port. Multi-host support
+    needed no new permission. Do not widen this to `http://*/*`.
+- **The bridge's `Host` check is loopback-hostname, ANY port.** It used to pin the listener's own
+  port, which refused every `ssh -L` tunnel whose local port differed. The port was never the
+  guard: rebinding arrives as `Host: evil.com` with a page `Origin`, and both are refused already.
+  Do not "restore" the port pin. `allowedHosts` in `settings.json` is the file-only escape hatch
+  for a named reverse proxy; it stays out of the UI because widening the set of names that can
+  reach an agent-starting endpoint is a security decision.
+- **`machine.name` on `/v1/ping` is how a host gets a readable name.** Additive optional field, so
+  no `contract` bump, and unauthenticated so a host is nameable while being paired. Without it
+  every tunnelled bridge is an indistinguishable `127.0.0.1:<port>`.
 - **`gh` is optional; `git` is not.** Without `gh` the send still works, because Paseo checks the
   PR out with its own forge credentials and only needs the number. `/v1/resolve` returns 200 in
   that state — degradation is signalled through the create candidate's label
@@ -149,6 +180,8 @@ probe and the self-check.
   posts intents via `chrome.runtime.sendMessage`; the service worker performs every `fetch`. A
   daemon-controlling credential must never sit next to a host page's JS.
 - Button and popover render in a **shadow root**. No global CSS, ever.
+- `shared/merge.ts` is the only place that decides which machine a send defaults to. It is pure and
+  has no `chrome.*` dependency on purpose — that decision should be readable without a browser.
 - All site-specific logic lives behind `SiteAdapter`. Adding a site touches exactly four places:
   `src/content/adapters/<site>.ts`, the `ADAPTERS` registry in `adapters/index.ts`, the
   `content_scripts[].matches` in `public/manifest.json`, and the `styleHint()` CSS branch in
@@ -207,11 +240,25 @@ Require `running`, an empty `ERROR` column, and `bridge listening on http://127.
 cd extension
 npm run typecheck
 npm run build
-node ../test/e2e.mjs                     # 52 cases; builds dist/ and dist-test/ itself
+node ../test/e2e.mjs                     # 61 cases; builds dist/ and dist-test/ itself
 ```
 
 The suite runs Chromium **headless by default** (`--headless=new` loads MV3 extensions fine, so
 it no longer steals focus). Set `STP_HEADED=1` to watch it.
+
+It starts **two** mock bridges: one in-process on `7799`, and a second as a CHILD PROCESS on
+`7798` for the multi-host cases (18b–18h). A child process, not a second `createMockBridge()` —
+that module keeps its config in a module singleton, so two in one process would share a port, a
+token and a machine name, and these must differ. `startBridge2()` races readiness against the
+child's own exit so a port left occupied by a previous run fails loudly; it once did not, and a
+whole run passed green against a stale bridge.
+
+Every multi-host test restores the single-host seed in a `finally`. Without that, a failing test
+leaks a two-host store or a provider preference and the *next* tests fail instead — which is how
+one broken assertion in 18h once presented as two unrelated failures in the Mode-select tests.
+
+`findChromium()` looks under the macOS Playwright cache only. On Linux, pass
+`STP_CHROMIUM=~/.cache/ms-playwright/chromium-<build>/chrome-linux64/chrome`.
 
 The suite is the real unpacked extension in a real Chromium against captured fixtures and a mock
 bridge. Case 13 additionally hits the *live* plugin bridge on 7788, and is read-only by

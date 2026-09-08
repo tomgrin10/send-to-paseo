@@ -1,8 +1,12 @@
 /**
- * Service worker. Owns the bearer token and performs every fetch.
+ * Service worker. Owns the bearer tokens and performs every fetch.
  *
  * The content script can only ask for an *intent* to be carried out; it never
- * receives the token and never sees a bridge URL it could authenticate against.
+ * receives a token and never sees a bridge URL it could authenticate against.
+ *
+ * With more than one Paseo machine paired, this is also the fan-out point: one
+ * `resolve` intent becomes one request per host, in parallel, and the answers
+ * are merged into a single ranked candidate list before the composer sees them.
  */
 
 import {
@@ -10,18 +14,39 @@ import {
   PROMPT_MIN,
   promptLength,
   type Provider,
+  type ResolveRequest,
   type SendRequest,
 } from "../shared/contract";
-import type { Intent, PublicSettings, Result } from "../shared/messages";
+import type {
+  HostSlice,
+  Intent,
+  MultiResolveResponse,
+  PublicSettings,
+  Result,
+} from "../shared/messages";
+import { mergeHostAnswers, primaryFailure } from "../shared/merge";
 import { ping, requireCompatibleContract, resolve, send } from "./bridge-client";
-import { readSettings } from "./settings";
+import {
+  authorityOf,
+  enabledHosts,
+  hostById,
+  hostDisplayName,
+  readSettings,
+  writeHost,
+  type HostConfig,
+} from "./settings";
 
 async function publicSettings(): Promise<PublicSettings> {
   const s = await readSettings();
   return {
-    bridgeUrl: s.bridgeUrl,
     defaultProvider: s.defaultProvider,
-    hasToken: s.token.length > 0,
+    hosts: s.hosts.map((h) => ({
+      id: h.id,
+      label: hostDisplayName(h),
+      bridgeUrl: h.bridgeUrl,
+      enabled: h.enabled,
+      hasToken: h.token.length > 0,
+    })),
   };
 }
 
@@ -29,61 +54,153 @@ async function publicSettings(): Promise<PublicSettings> {
  * Cache the provider list so the options page has something to show before its
  * first ping, and so the popover can pre-select a default. Written from both
  * /v1/ping and /v1/resolve — they return the same shape.
+ *
+ * Keyed per host, because two machines can have entirely different models
+ * configured and a picker offering one host's models for the other would send a
+ * provider the bridge then has to reject or silently substitute.
  */
-async function cacheProviders(providers: Provider[] | undefined): Promise<void> {
+async function cacheProviders(hostId: string, providers: Provider[] | undefined): Promise<void> {
   if (!providers?.length) return;
+  const got = await chrome.storage.local.get("lastProviders");
+  const byHost = (got?.lastProviders ?? {}) as Record<string, unknown>;
   await chrome.storage.local.set({
-    lastProviders: providers.map((p) => ({
-      id: p.id,
-      label: p.label,
-      isDefault: p.isDefault,
-    })),
+    lastProviders: {
+      ...byHost,
+      [hostId]: providers.map((p) => ({ id: p.id, label: p.label, isDefault: p.isDefault })),
+    },
   });
 }
 
 /**
- * Everything PR-scoped goes through the same preflight: token present, then the
- * contract version gate. Ordered so that an unpaired extension fires NO HTTP
- * request at all.
+ * Remember what a bridge called its machine, so the host list can read "devbox"
+ * instead of "127.0.0.1:7789" — the URL is the least memorable thing about a
+ * host when every one of them is a loopback tunnel.
+ *
+ * Only written when it actually changed: this runs on every ping, and a storage
+ * write per PR opened would be pure churn.
  */
-async function preflight(): Promise<Result<true>> {
-  const settings = await readSettings();
-  if (!settings.token) {
+async function cacheMachineName(host: HostConfig, name: string | undefined): Promise<void> {
+  const next = (name ?? "").trim();
+  if (!next || next === host.machineName) return;
+  await writeHost(host.id, { machineName: next });
+}
+
+/**
+ * One host's resolve, as a slice that can never reject.
+ *
+ * Failure is data here, not an exception: with two machines paired, the dev box
+ * being asleep must not stop the laptop's workspaces from being offered. The
+ * contract gate runs per host for the same reason — one stale plugin blocks
+ * sends to itself, not to the other machine.
+ */
+async function resolveOnHost(
+  host: HostConfig,
+  request: ResolveRequest,
+): Promise<HostSlice> {
+  const slice: HostSlice = {
+    hostId: host.id,
+    hostLabel: hostDisplayName(host),
+    bridgeAuthority: authorityOf(host.bridgeUrl),
+    resolved: null,
+    error: null,
+  };
+
+  // An unpaired host is reported WITHOUT touching the network. A never-paired
+  // extension must fire no request at all — the same guarantee the single-host
+  // version made, now per host.
+  if (!host.token) {
+    slice.error = {
+      code: "not_configured",
+      message: `No pairing token is stored for ${hostDisplayName(host)}.`,
+    };
+    return slice;
+  }
+
+  const gate = await requireCompatibleContract(host);
+  if (!gate.ok) {
+    slice.error = gate.error;
+    return slice;
+  }
+  await cacheMachineName(host, gate.data.machine?.name);
+  // The label may have only just become knowable, so re-derive it.
+  slice.hostLabel = hostDisplayName({ ...host, machineName: gate.data.machine?.name ?? host.machineName });
+
+  const res = await resolve(host, request);
+  if (!res.ok) {
+    slice.error = res.error;
+    return slice;
+  }
+  await cacheProviders(host.id, res.data.providers);
+  slice.resolved = res.data;
+  return slice;
+}
+
+async function handleResolve(request: ResolveRequest): Promise<Result<MultiResolveResponse>> {
+  const hosts = await enabledHosts();
+  if (hosts.length === 0) {
+    const configured = (await readSettings()).hosts.length;
     return {
       ok: false,
       error: {
         code: "not_configured",
-        message: "No pairing token is stored for the Paseo bridge.",
+        message:
+          configured === 0
+            ? "No Paseo host is configured."
+            : "Every configured Paseo host is disabled.",
       },
     };
   }
-  const contract = await requireCompatibleContract();
-  if (!contract.ok) return contract;
-  return { ok: true, data: true };
+
+  // Parallel: the whole point of this being a fan-out is that two hosts cost
+  // one host's latency, not two. Every slice settles, so one timeout does not
+  // hold up a bridge that already answered.
+  const slices = await Promise.all(hosts.map((h) => resolveOnHost(h, request)));
+  const merged = mergeHostAnswers(slices);
+
+  // Only a total failure is an error. If any host answered, the composer opens
+  // and reports the others inline — a sleeping dev box is a footnote, not a
+  // wall.
+  if (merged.candidates.length === 0) {
+    const worst = primaryFailure(slices);
+    return {
+      ok: false,
+      error:
+        worst?.error ??
+        {
+          code: "internal",
+          message: "No Paseo host returned a target for this pull request.",
+        },
+    };
+  }
+  return { ok: true, data: merged };
 }
 
 async function handle(intent: Intent): Promise<Result<unknown>> {
   switch (intent.type) {
     case "ping": {
-      const res = await ping({ authenticated: intent.authenticated ?? true });
-      if (res.ok) await cacheProviders(res.data.providers);
+      const host = await hostById(intent.hostId);
+      if (!host) {
+        return {
+          ok: false,
+          error: { code: "not_configured", message: "That Paseo host is no longer configured." },
+        };
+      }
+      const res = await ping(host, { authenticated: intent.authenticated ?? true });
+      if (res.ok) {
+        await cacheProviders(host.id, res.data.providers);
+        await cacheMachineName(host, res.data.machine?.name);
+      }
       return res;
     }
 
-    case "resolve": {
-      const gate = await preflight();
-      if (!gate.ok) return gate;
-
-      const res = await resolve({
+    case "resolve":
+      return handleResolve({
         forge: intent.pr.forge,
         owner: intent.pr.owner,
         repo: intent.pr.repo,
         number: intent.pr.number,
         stackPrNumbers: intent.stackPrNumbers,
       });
-      if (res.ok) await cacheProviders(res.data.providers);
-      return res;
-    }
 
     case "send": {
       const prompt = intent.prompt.trim();
@@ -107,10 +224,26 @@ async function handle(intent: Intent): Promise<Result<unknown>> {
         };
       }
 
+      // The host is named by the intent and never re-derived. The composer's
+      // chosen target belongs to exactly one machine, and quietly falling back
+      // to a different one would start an agent somewhere the user did not look
+      // at.
+      const host = await hostById(intent.hostId);
+      if (!host) {
+        return {
+          ok: false,
+          error: {
+            code: "not_configured",
+            message:
+              "The Paseo host this target belongs to is no longer configured. Reopen the composer.",
+          },
+        };
+      }
+
       // The contract requires refusing to send on a version mismatch. Re-checked
       // here and not only at resolve time, because the plugin can be updated
       // while the popover sits open.
-      const gate = await preflight();
+      const gate = await requireCompatibleContract(host);
       if (!gate.ok) return gate;
 
       const body: SendRequest = {
@@ -124,7 +257,7 @@ async function handle(intent: Intent): Promise<Result<unknown>> {
       if (intent.provider) body.provider = intent.provider;
       if (intent.modeId) body.modeId = intent.modeId;
       if (intent.pageUrl) body.pageUrl = intent.pageUrl;
-      return send(body);
+      return send(host, body);
     }
 
     case "getPublicSettings":

@@ -31,8 +31,21 @@ The bridge MUST:
    real request. (CORS alone only prevents a page from *reading* a response; the request would
    otherwise still fire and cause the side effect. Requiring `Authorization` forces a preflight,
    and failing that preflight means the request never executes.)
-2. Reject any request whose `Host` header is not `127.0.0.1:<port>` or `localhost:<port>`
-   → `403 forbidden_host`. Closes DNS rebinding.
+2. Reject any request whose `Host` header does not have a **loopback hostname** — `127.0.0.1`,
+   `localhost`, `::1` — → `403 forbidden_host`. Closes DNS rebinding.
+
+   The **port is a don't-care**, and that is deliberate. It was originally pinned to the port the
+   listener bound, which broke the supported way to reach a bridge on a second machine: an
+   `ssh -L 7789:127.0.0.1:7788 devbox` tunnel makes the browser send `Host: 127.0.0.1:7789` while
+   the remote bridge is bound on 7788, so every request was refused. Pinning the port added
+   nothing on top of the hostname test — rebinding works by making an attacker's own *name*
+   resolve to 127.0.0.1, so the request arrives as `Host: evil.com` with `Origin:
+   https://evil.com`, and rule 1 and the hostname test both already refuse it.
+
+   A bridge MAY additionally accept an explicit allowlist of non-loopback `host:port` values, for
+   a reverse proxy that presents a real name. That list MUST be empty by default and MUST NOT be
+   settable from the extension. (In this implementation it is `allowedHosts` in the plugin's
+   `settings.json`, with no UI.) The listener still binds `127.0.0.1` only.
 3. On success, echo CORS headers:
    ```
    Access-Control-Allow-Origin: <the request's chrome-extension:// origin>
@@ -135,6 +148,7 @@ decide whether to render the button at all.
   "version": "0.1.0",
   "contract": 1,
   "daemon": { "reachable": true, "version": "0.7.0", "serverId": "srv_Ab3xY9pQ2mNt" },
+  "machine": { "name": "devbox" },
   "paired": true,
   "providers": [
     { "id": "claude/claude-opus-5", "label": "Opus 5", "isDefault": true },
@@ -152,6 +166,22 @@ decide whether to render the button at all.
 ```
 
 `daemon.reachable: false` still returns 200 — ping reports status, it doesn't fail.
+
+### `machine` (additive, optional)
+
+`machine.name` is the bridge machine's own hostname, or `""` where it has none. It is an
+**additive optional field**, so a plugin that predates it omits `machine` entirely and a client
+MUST fall back to naming that host some other way (its URL authority) rather than treating the
+absence as an error. No `contract` bump — see "Additive fields".
+
+It exists because a client can be paired with several Paseo machines at once, and when the remote
+ones are reached through loopback tunnels every bridge URL is an interchangeable
+`127.0.0.1:<port>`. `machine.name` is what lets a host list read "devbox" instead of
+"127.0.0.1:7789" without the user typing anything.
+
+Sent **unauthenticated** as well, because a host has to be nameable while it is still being
+paired. It is not a secret: it already appears in `serverId`-keyed deep links and on the daemon's
+own status endpoint, and the request had to clear the extension-origin check to arrive at all.
 
 ### Token validation on ping
 

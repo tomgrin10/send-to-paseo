@@ -14,7 +14,7 @@
  * test/.last-run.json for transcription into extension/VERIFICATION.md.
  */
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,6 +40,14 @@ const FIXTURE_PORT = 4173;
 // manifest keeps only http://127.0.0.1:7788/*.
 const BRIDGE_PORT = Number(process.env.STP_TEST_BRIDGE_PORT ?? 7799);
 const BRIDGE_URL = `http://127.0.0.1:${BRIDGE_PORT}`;
+// A SECOND mock bridge, standing in for a second Paseo machine reached over an
+// `ssh -L` tunnel. Run as a child process, not a second createMockBridge():
+// that module keeps its config in a singleton, and these two need different
+// tokens and different machine names. See mock-bridge.mjs.
+const BRIDGE_PORT_2 = Number(process.env.STP_TEST_BRIDGE_PORT_2 ?? 7798);
+const BRIDGE_URL_2 = `http://127.0.0.1:${BRIDGE_PORT_2}`;
+const TOKEN_2 = "mock-token-second-host-4b1e";
+const MACHINE_2 = "devbox";
 
 /* -------------------------------------------------------------------------- */
 /* tiny test harness                                                          */
@@ -172,8 +180,53 @@ async function serviceWorker(context) {
   throw new Error("extension service worker not available");
 }
 
-async function seedSettings(context, _extensionId, patch) {
-  const settings = { bridgeUrl: BRIDGE_URL, token: DEFAULT_TOKEN, defaultProvider: "", ...patch };
+const PRIMARY_HOST_ID = "e2e-host-primary";
+const SECOND_HOST_ID = "e2e-host-second";
+
+/** One entry of the stored `hosts` list, with the suite's primary bridge. */
+function hostEntry(patch = {}) {
+  return {
+    id: PRIMARY_HOST_ID,
+    label: "",
+    bridgeUrl: BRIDGE_URL,
+    token: DEFAULT_TOKEN,
+    enabled: true,
+    machineName: "",
+    ...patch,
+  };
+}
+
+/** The second host: same shape, the other bridge, its own token. */
+function secondHostEntry(patch = {}) {
+  return hostEntry({
+    id: SECOND_HOST_ID,
+    bridgeUrl: BRIDGE_URL_2,
+    token: TOKEN_2,
+    ...patch,
+  });
+}
+
+/**
+ * Write settings straight into the service worker's storage.
+ *
+ * `bridgeUrl` / `token` in the patch address the SINGLE primary host, which is
+ * what almost every test wants; pass `hosts: [...]` to write the list outright.
+ */
+async function seedSettings(context, _extensionId, patch = {}) {
+  const { bridgeUrl, token, hosts, ...rest } = patch;
+  const settings = {
+    version: 2,
+    hosts:
+      hosts ??
+      [
+        hostEntry({
+          ...(bridgeUrl === undefined ? {} : { bridgeUrl }),
+          ...(token === undefined ? {} : { token }),
+        }),
+      ],
+    defaultProvider: "",
+    ...rest,
+  };
   const sw = await serviceWorker(context);
   const written = await sw.evaluate(async (s) => {
     await chrome.storage.local.set({ settings: s });
@@ -188,6 +241,102 @@ async function seedSettings(context, _extensionId, patch) {
 async function readStoredSettings(context) {
   const sw = await serviceWorker(context);
   return sw.evaluate(async () => (await chrome.storage.local.get("settings")).settings);
+}
+
+/** The first stored host. Most assertions are about "the" bridge, singular. */
+async function readStoredHost(context, index = 0) {
+  return (await readStoredSettings(context)).hosts[index];
+}
+
+/**
+ * The second bridge, as a CHILD PROCESS.
+ *
+ * Not a second `createMockBridge()`: that module holds its config in a
+ * singleton, so two in one process would share a port, a token and a machine
+ * name — and these must differ, which is also the isolation two real machines
+ * have. Being a process makes it genuinely stoppable, which is what lets a test
+ * reproduce "the dev box is asleep".
+ *
+ * Races readiness against the child's own exit, so a port left occupied by a
+ * previous run fails loudly here instead of silently serving the whole suite —
+ * which is exactly what happened once, and the run looked green.
+ */
+async function startBridge2() {
+  const child = spawn(
+    process.execPath,
+    [
+      join(here, "mock-bridge.mjs"),
+      "--port", String(BRIDGE_PORT_2),
+      "--token", TOKEN_2,
+      "--machine-name", MACHINE_2,
+      "--quiet",
+    ],
+    { stdio: ["ignore", "pipe", "pipe"] },
+  );
+  let stderr = "";
+  child.stderr.on("data", (d) => {
+    stderr += d;
+  });
+  const exited = new Promise((_, reject) =>
+    child.once("exit", (code) =>
+      reject(
+        new Error(
+          `the second mock bridge exited with code ${code} before it was ready. ` +
+            `Is something else already on ${BRIDGE_PORT_2} — a previous run's bridge?\n${stderr}`,
+        ),
+      ),
+    ),
+  );
+  await Promise.race([waitForBridge(BRIDGE_URL_2), exited]);
+  return child;
+}
+
+/** Stop it and WAIT for the port to be free, so a restart cannot race. */
+async function stopBridge2() {
+  if (bridge2 === null) return;
+  const child = bridge2;
+  bridge2 = null;
+  const exited = new Promise((r) => child.once("exit", r));
+  child.kill("SIGTERM");
+  await exited;
+}
+
+/** Poll a bridge's unauthenticated /v1/ping until it answers. */
+async function waitForBridge(base, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      const r = await fetch(`${base}/v1/ping`);
+      if (r.ok) return;
+    } catch {
+      // not up yet
+    }
+    if (Date.now() > deadline) throw new Error(`bridge at ${base} never came up`);
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
+/** The second bridge's test-only control surface, mirroring `control`. */
+async function control2(path, body) {
+  const res = await fetch(`${BRIDGE_URL_2}/__test/${path}`, {
+    method: body === undefined ? "GET" : "POST",
+    headers: body === undefined ? {} : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  return res.json();
+}
+
+const bridge2Log = () => control2("log");
+const bridge2Reset = () => control2("reset", {});
+const bridge2Config = (patch) => control2("config", patch);
+
+/** Both bridges back to a clean slate. Every multi-host test starts here. */
+async function resetBoth() {
+  await bridgeReset();
+  await bridge2Reset();
+  // reset() restores the default machine name, so re-assert the one that makes
+  // the two hosts distinguishable in the UI.
+  await bridge2Config({ machineName: MACHINE_2 });
 }
 
 async function clearCachedProviders(context) {
@@ -206,6 +355,17 @@ async function waitForButton(page, timeout = 12000) {
 async function openPopover(page) {
   await page.locator("[data-stp-button]").click();
   await page.waitForSelector(POPOVER, { state: "attached", timeout: 5000 });
+}
+
+/** Dismiss the popover and wait for it to actually leave the DOM. */
+async function closePopover(page) {
+  if ((await page.locator(POPOVER).count()) === 0) return;
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(
+    (sel) => document.querySelectorAll(sel).length === 0,
+    POPOVER,
+    { timeout: 4000 },
+  );
 }
 
 async function waitForPhase(page, phase, timeout = 15000) {
@@ -381,7 +541,16 @@ execFileSync(process.execPath, [join(here, "fixtures", "rotate.mjs")], { stdio: 
 console.log("· regenerated graphite-pr-rotated.html");
 execFileSync(
   process.execPath,
-  [join(extDir, "build.mjs"), "--test", "--port", String(FIXTURE_PORT), "--bridge-port", String(BRIDGE_PORT)],
+  [
+    join(extDir, "build.mjs"),
+    "--test",
+    "--port",
+    String(FIXTURE_PORT),
+    // Both bridges get a pre-granted host permission: chrome.permissions.request
+    // needs a user gesture, so a test build cannot consent at runtime.
+    "--bridge-port",
+    `${BRIDGE_PORT},${BRIDGE_PORT_2}`,
+  ],
   {
     stdio: "pipe",
     cwd: extDir,
@@ -395,6 +564,9 @@ console.log(`· built shipping bundle -> ${join(extDir, "dist")} (for hygiene as
 let bridge = createMockBridge({ port: BRIDGE_PORT, token: DEFAULT_TOKEN, quiet: true });
 await bridge.listen();
 console.log(`· mock bridge on ${BRIDGE_URL}`);
+
+let bridge2 = await startBridge2();
+console.log(`· second mock bridge on ${BRIDGE_URL_2} (machine "${MACHINE_2}")`);
 
 const fixtures = createFixtureServer({ port: FIXTURE_PORT });
 await fixtures.listen();
@@ -1101,31 +1273,40 @@ await test("9f. First-run path: no token stored -> not_configured, no request se
 
 const optionsUrl = () => `chrome-extension://${extId}/options.html`;
 
-async function readOptionsStatus(opt) {
-  return opt.evaluate(() => ({
-    tone: document.querySelector("#status").dataset.tone,
-    title: document.querySelector("#status .st").textContent.trim(),
-    detail: document.querySelector("#status .sd")?.textContent.trim() ?? "",
-    hint: document.querySelector("#status .sh")?.textContent.trim() ?? "",
-    providerOptions: [...document.querySelectorAll("#defaultProvider option")].map((o) => o.textContent),
-    providerHelp: document.querySelector("#providerHelp").textContent.trim(),
-  }));
+/* The bridge URL, token and verdict are per host, so they live on a host CARD
+   rather than on page-level ids. These helpers read the Nth card, defaulting to
+   the first — every pre-existing test is about one bridge. */
+const HOST_CARD = (i) => `.host:nth-of-type(${i + 1})`;
+
+async function readOptionsStatus(opt, index = 0) {
+  return opt.evaluate((i) => {
+    const card = document.querySelectorAll(".host")[i];
+    const status = card.querySelector(".hostStatus");
+    return {
+      tone: status.dataset.tone,
+      title: status.querySelector(".st").textContent.trim(),
+      detail: status.querySelector(".sd")?.textContent.trim() ?? "",
+      hint: status.querySelector(".sh")?.textContent.trim() ?? "",
+      providerOptions: [...document.querySelectorAll("#defaultProvider option")].map((o) => o.textContent),
+      providerHelp: document.querySelector("#providerHelp").textContent.trim(),
+    };
+  }, index);
 }
 
-async function runTestConnection(opt) {
-  await opt.evaluate(() => {
-    document.querySelector("#status").dataset.tone = "pending";
-  });
-  await opt.locator("#test").click();
+async function runTestConnection(opt, index = 0) {
+  await opt.evaluate((i) => {
+    document.querySelectorAll(".host")[i].querySelector(".hostStatus").dataset.tone = "pending";
+  }, index);
+  await opt.locator(`${HOST_CARD(index)} .hostTest`).click();
   await opt.waitForFunction(
-    () => {
-      const t = document.querySelector("#status").dataset.tone;
+    (i) => {
+      const t = document.querySelectorAll(".host")[i].querySelector(".hostStatus").dataset.tone;
       return t !== "pending" && t !== "idle";
     },
-    null,
+    index,
     { timeout: 20000 },
   );
-  return readOptionsStatus(opt);
+  return readOptionsStatus(opt, index);
 }
 
 await test("10a. Options page: paired token -> ok, and providers come from /v1/ping", async () => {
@@ -1143,9 +1324,9 @@ await test("10a. Options page: paired token -> ok, and providers come from /v1/p
 
   // The picker is populated from ping — no <datalist> workaround any more.
   assertEq(st.providerOptions.length, 4, "placeholder + 3 providers");
-  assertEq(st.providerOptions[0], "(use the plugin's default)", "placeholder option");
+  assertEq(st.providerOptions[0], "(use each host's own default)", "placeholder option");
   assert(
-    st.providerOptions[1].includes("Opus 5") && st.providerOptions[1].includes("(plugin default)"),
+    st.providerOptions[1].includes("Opus 5") && st.providerOptions[1].includes("(a host default)"),
     `the bridge's isDefault provider must be marked: ${st.providerOptions[1]}`,
   );
   assert(st.providerHelp.includes("3 providers"), `provider help: ${st.providerHelp}`);
@@ -1271,11 +1452,14 @@ await test("10f. Options page fresh state: masked token, hidden grant row", asyn
   await opt.reload();
   await opt.waitForTimeout(400);
   await opt.screenshot({ path: join(shots, "options-page.png") });
-  const ui = await opt.evaluate(() => ({
-    tokenType: document.querySelector("#token").type,
-    grantRowVisible: document.querySelector("#grantRow").getBoundingClientRect().height > 0,
-    statusTone: document.querySelector("#status").dataset.tone,
-  }));
+  const ui = await opt.evaluate(() => {
+    const card = document.querySelector(".host");
+    return {
+      tokenType: card.querySelector(".hostToken").type,
+      grantRowVisible: card.querySelector(".hostGrantRow").getBoundingClientRect().height > 0,
+      statusTone: card.querySelector(".hostStatus").dataset.tone,
+    };
+  });
   assertEq(ui.tokenType, "password", "the token field must be masked by default");
   assert(
     !ui.grantRowVisible,
@@ -1303,7 +1487,7 @@ await test("11. Bearer token is not reachable from the page", async () => {
   await waitForPhase(page, "sent");
 
   // Positive control: the token really IS stored, in the extension's own world.
-  const stored = await readStoredSettings(context);
+  const stored = await readStoredHost(context);
   assertEq(stored.token, DEFAULT_TOKEN, "sanity: the token is in extension storage");
 
   const scan = await page.evaluate((token) => {
@@ -1724,7 +1908,7 @@ await test("18. Shipping build contains no test host or test bridge port", async
     "both content scripts must be declared, with the MAIN-world shim at document_start",
   );
 
-  const forbidden = [String(FIXTURE_PORT), String(BRIDGE_PORT), "dist-test"];
+  const forbidden = [String(FIXTURE_PORT), String(BRIDGE_PORT), String(BRIDGE_PORT_2), "dist-test"];
   const files = ["manifest.json", "content.js", "mainworld.js", "background.js", "options.js", "options.html"];
   const hits = [];
   for (const f of files) {
@@ -1758,6 +1942,19 @@ await test("18. Shipping build contains no test host or test bridge port", async
     for (const m of src.matchAll(originForms)) {
       // The real bridge origin is the one legitimate host:port in a shipping build.
       if (m[0] === "127.0.0.1:7788") continue;
+      // PROSE, not a fetch target: the hosts section shows the `ssh -L` command
+      // and the URL that a tunnelled second Paseo machine gets, because that is
+      // the whole setup step and a placeholder would not teach it. The extension
+      // only ever contacts a URL the user stored, and a non-default origin also
+      // needs a Chrome permission the user grants by hand.
+      //
+      // Deliberately allowed in options.html ONLY. A port literal in options.js,
+      // background.js or content.js would mean code had grown an assumption
+      // about a second bridge's address, which is what this scan is for.
+      if (f === "options.html" && m[0] === "127.0.0.1:7789") {
+        originHits.push("options.html: 127.0.0.1:7789 (documented tunnel example)");
+        continue;
+      }
       originHits.push(`${f}: ${m[0]}`);
     }
     for (const line of src.split("\n")) {
@@ -1768,7 +1965,11 @@ await test("18. Shipping build contains no test host or test bridge port", async
       bareLocalhost.push(line.includes(HINT) ? `${f}: BRIDGE-URL HINT` : `${f}: ${line.trim()}`);
     }
   }
-  assertEq(originHits, [], "no localhost/127.0.0.1 origin other than the real bridge may ship");
+  assertEq(
+    originHits,
+    ["options.html: 127.0.0.1:7789 (documented tunnel example)"],
+    "the only non-default origin in a shipping build is the tunnel example in the options prose",
+  );
   assertEq(
     bareLocalhost,
     [
@@ -1791,11 +1992,613 @@ await test("18. Shipping build contains no test host or test bridge port", async
     `shipping host_permissions: ${JSON.stringify(manifest.host_permissions)}`,
     `shipping optional_host_permissions: ${JSON.stringify(manifest.optional_host_permissions)}`,
     `no occurrence of ${forbidden.join(", ")} in any shipping file`,
-    "the only localhost/127.0.0.1 origin in the shipping build is 127.0.0.1:7788",
+    "the only localhost/127.0.0.1 origins in the shipping build are 127.0.0.1:7788 and the documented tunnel example in options.html",
     `the only bare \`localhost\` substrings are the optional permission + the error hint (${bareLocalhost.length})`,
     "__STP_EXTRA_HOSTS__ compiles to [] in the shipping bundle",
     `test build (for contrast): ${JSON.stringify(testManifest.host_permissions)}`,
   ];
+});
+
+/* ---- 18b-18h. multiple Paseo hosts ------------------------------------- */
+/*
+ * The topology under test: two Paseo machines, the second reached over a
+ * loopback tunnel (`ssh -L`). Both bridges answer on 127.0.0.1, on different
+ * ports, with DIFFERENT pairing tokens — tokens belong to a plugin install.
+ *
+ * `bothHosts()` seeds exactly that. Every test here resets both bridges first,
+ * and restores the single-host seed on the way out so nothing downstream
+ * inherits a two-host store.
+ */
+
+const bothHosts = () => [hostEntry(), secondHostEntry()];
+
+/** The `data-stp-host-error` rows currently rendered, host label + code. */
+async function readHostErrors(page) {
+  return page.evaluate(() =>
+    [
+      ...document
+        .querySelector("send-to-paseo-popover")
+        .shadowRoot.querySelectorAll("[data-stp-host-error]"),
+    ].map((el) => ({
+      hostId: el.getAttribute("data-stp-host-error"),
+      text: el.textContent.trim(),
+      code: el.querySelector(".hcode")?.textContent.trim() ?? "",
+    })),
+  );
+}
+
+/** The host named on the resolved-target line, or null with a single host. */
+async function readTargetHost(page) {
+  return page.evaluate(() => {
+    const el = document
+      .querySelector("send-to-paseo-popover")
+      .shadowRoot.querySelector("[data-stp-target-host]");
+    return el === null ? null : { hostId: el.getAttribute("data-stp-target-host"), label: el.textContent.trim() };
+  });
+}
+
+async function readTargetFieldLabel(page) {
+  return page.evaluate(() => {
+    const root = document.querySelector("send-to-paseo-popover").shadowRoot;
+    return [...root.querySelectorAll(".field .lbl")]
+      .map((el) => el.textContent.trim())
+      .find((t) => t.startsWith("Target")) ?? "";
+  });
+}
+
+await test("18b. Two hosts: candidates from both bridges, merged and host-labelled", async () => {
+  try {
+    await resetBoth();
+    await seedSettings(context, extId, { hosts: bothHosts() });
+    await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
+    await waitForButton(page);
+    await openPopover(page);
+    await waitForPhase(page, "ready");
+
+    // Both bridges were actually asked. The fan-out is the whole feature; a test
+    // that only checked the merged list would pass with one bridge queried twice.
+    const [log1, log2] = [await bridgeLog(), await bridge2Log()];
+    assertEq(
+      log1.filter((r) => r.path === "/v1/resolve").length,
+      1,
+      "the primary bridge received exactly one resolve",
+    );
+    assertEq(
+      log2.filter((r) => r.path === "/v1/resolve").length,
+      1,
+      "the second bridge received exactly one resolve",
+    );
+    // And each got ITS OWN token, never the other's.
+    assertEq(
+      log1.filter((r) => r.path === "/v1/resolve").map((r) => r.authState),
+      ["valid"],
+      "the primary bridge accepted the token stored for it",
+    );
+    assertEq(
+      log2.filter((r) => r.path === "/v1/resolve").map((r) => r.authState),
+      ["valid"],
+      "the second bridge accepted its own, different token",
+    );
+
+    const cands = await readCandidates(page, { close: false });
+    // 4 candidates per bridge for PR #942 with a stack sibling: exact, stack,
+    // project, create.
+    assertEq(cands.options.length, 8, `expected 4 candidates per host, got ${cands.options.length}`);
+
+    // Every row names its machine, and the two names come from `machine.name` on
+    // /v1/ping — nothing was typed into the label fields.
+    const byHost = { "mock-machine": 0, devbox: 0 };
+    for (const label of cands.options) {
+      const machine = Object.keys(byHost).find((m) => label.startsWith(`${m} · `));
+      assert(machine !== undefined, `every candidate row must be prefixed with its host: ${label}`);
+      byHost[machine] += 1;
+    }
+    assertEq(byHost, { "mock-machine": 4, devbox: 4 }, "four candidates from each host");
+
+    // Cross-host RANKING, not per-host grouping: rank beats host, so the two
+    // exact matches lead and the two create rows trail.
+    assert(
+      cands.options[0].includes("exact match") && cands.options[1].includes("exact match"),
+      `the two rank-1 rows must lead: ${cands.options.slice(0, 2).join(" | ")}`,
+    );
+    assert(
+      cands.options[6].includes("Create worktree") && cands.options[7].includes("Create worktree"),
+      `the two create rows must trail: ${cands.options.slice(6).join(" | ")}`,
+    );
+    await closeCandidates(page);
+
+    const fieldLabel = await readTargetFieldLabel(page);
+    assertEq(fieldLabel, "Target (8 candidates on 2 hosts)", "the field label counts hosts that answered");
+
+    const targetHost = await readTargetHost(page);
+    assert(targetHost !== null, "with two hosts the resolved target must name one");
+    assertEq(targetHost.hostId, PRIMARY_HOST_ID, "tie on rank 1 goes to the first host");
+    assertEq(await readHostErrors(page), [], "both hosts answered, so no failure rows");
+
+    await shot(page, "multihost-popover-merged", POPOVER_CLIP);
+    await closePopover(page);
+    return [
+      "both bridges received exactly one /v1/resolve, each with its own token",
+      `merged list: ${cands.options.length} candidates, 4 per host, every row host-prefixed`,
+      'ranked across hosts: both "exact match" rows first, both "create" rows last',
+      `field label: ${fieldLabel}`,
+      `default target host: ${targetHost.label}`,
+    ];
+  } finally {
+    // Restore the single-host seed even on failure. A leaked two-host store —
+    // or a leaked provider preference — silently breaks a later test, and the
+    // cascade then looks like a bug in whatever failed next.
+    await seedSettings(context, extId, {});
+  }
+});
+
+await test("18c. Two hosts: the default target is on whichever host ranks best", async () => {
+  await resetBoth();
+  // `gh` missing on the primary machine only. It then cannot rank anything above
+  // "same project", so its own default is the create row (rank 4) — while the
+  // second host still has an exact branch match (rank 1).
+  await bridgeConfig({ noGh: true });
+  try {
+    await seedSettings(context, extId, { hosts: bothHosts() });
+    await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
+    await waitForButton(page);
+    await openPopover(page);
+    await waitForPhase(page, "ready");
+
+    const targetHost = await readTargetHost(page);
+    assertEq(
+      targetHost.hostId,
+      SECOND_HOST_ID,
+      "the default must cross to the host that has a real workspace",
+    );
+    const trigger = await candidateTrigger(page);
+    assert(
+      trigger.startsWith("devbox · ") && trigger.includes("exact match"),
+      `the committed row must be the second host's exact match: ${trigger}`,
+    );
+
+    // The point of the rule, stated as an assertion: a host that would only
+    // create a worktree never beats a host that already has one.
+    const cands = await readCandidates(page);
+    assertEq(cands.selectedIndex, 0, "the best-ranked candidate across hosts is the selection");
+
+    await shot(page, "multihost-default-crosses-hosts", POPOVER_CLIP);
+    await closePopover(page);
+    return [
+      "primary host with no gh -> its own default is the create row (rank 4)",
+      `second host still ranks an exact match, and the default crossed to it: ${trigger}`,
+    ];
+  } finally {
+    await bridgeConfig({ noGh: false });
+    await seedSettings(context, extId, {});
+  }
+});
+
+await test("18d. Two hosts: a send goes to the host owning the target, and to no other", async () => {
+  try {
+    await resetBoth();
+    await seedSettings(context, extId, { hosts: bothHosts() });
+    await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
+    await waitForButton(page);
+    await openPopover(page);
+    await waitForPhase(page, "ready");
+
+    // Candidate 1 is the SECOND host's exact match (index 0 is the primary's).
+    const picked = await pickCandidate(page, 1);
+    assert(picked.startsWith("devbox · "), `sanity: picked a second-host row: ${picked}`);
+
+    await page.locator("[data-stp-prompt]").fill("Fix the flaky test");
+    await page.locator("[data-stp-send]").click();
+    await waitForPhase(page, "sent");
+
+    const sends1 = (await bridgeLog()).filter((r) => r.path === "/v1/send");
+    const sends2 = (await bridge2Log()).filter((r) => r.path === "/v1/send");
+    assertEq(sends1.length, 0, "the primary bridge must receive NO send when the target is elsewhere");
+    assertEq(sends2.length, 1, "the owning bridge receives exactly one send");
+    assertEq(
+      sends2[0].body.target,
+      { kind: "existing", workspaceId: "wks_4d1a8b7c2e0f9351" },
+      "and it carries the workspace id from that host's own candidate",
+    );
+
+    const sentHost = await page.evaluate(() =>
+      document
+        .querySelector("send-to-paseo-popover")
+        .shadowRoot.querySelector("[data-stp-sent-host]")
+        ?.textContent.trim() ?? null,
+    );
+    assertEq(sentHost, "devbox", "the success state names the machine the agent started on");
+    await shot(page, "multihost-sent-to-second-host", POPOVER_CLIP);
+
+    // Now the other direction, in the same popover: "Send another", pick a
+    // primary-host row, and the traffic must swap.
+    await page.locator("[data-stp-send-another]").click();
+    await waitForPhase(page, "ready");
+    const picked2 = await pickCandidate(page, 0);
+    assert(picked2.startsWith("mock-machine · "), `sanity: picked a primary-host row: ${picked2}`);
+    await page.locator("[data-stp-prompt]").fill("Rebase this");
+    await page.locator("[data-stp-send]").click();
+    await waitForPhase(page, "sent");
+
+    assertEq(
+      (await bridgeLog()).filter((r) => r.path === "/v1/send").length,
+      1,
+      "the primary bridge now receives the send",
+    );
+    assertEq(
+      (await bridge2Log()).filter((r) => r.path === "/v1/send").length,
+      1,
+      "and the second bridge receives no second send",
+    );
+
+    await closePopover(page);
+    return [
+      `target on the second host -> 1 send to ${BRIDGE_URL_2}, 0 to ${BRIDGE_URL}`,
+      "success state names the host: devbox",
+      "switching the target back swaps the traffic, with no send to the other bridge",
+    ];
+  } finally {
+    // Restore the single-host seed even on failure. A leaked two-host store —
+    // or a leaked provider preference — silently breaks a later test, and the
+    // cascade then looks like a bug in whatever failed next.
+    await seedSettings(context, extId, {});
+  }
+});
+
+await test("18e. Two hosts: one down or ungranted — the composer works and names it", async () => {
+  await resetBoth();
+  // The dev box is asleep: its bridge is really gone, and the tunnel that
+  // forwards to it therefore refuses the connection.
+  await stopBridge2();
+  try {
+    /* Seeded WITH the cached machine name, which is the true state of a host
+       you have paired: it introduced itself on an earlier ping. A host that has
+       gone away should still be recognisable by the name you know it by, rather
+       than degrading to an address at the moment you most need to identify it.
+       (18b is what proves the name comes off the wire in the first place — it
+       seeds "" and reads "devbox" back.) */
+    await seedSettings(context, extId, {
+      hosts: [hostEntry(), secondHostEntry({ machineName: MACHINE_2 })],
+    });
+    await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
+    await waitForButton(page);
+    await openPopover(page);
+    // Ready, not error: one host answering is enough to compose a send.
+    await waitForPhase(page, "ready");
+
+    const errors = await readHostErrors(page);
+    assertEq(errors.length, 1, `exactly one host failure row, got ${JSON.stringify(errors)}`);
+    assertEq(errors[0].hostId, SECOND_HOST_ID, "the row names the host that failed");
+    assertEq(errors[0].code, "bridge_unreachable", "with its own error code");
+    assert(
+      errors[0].text.startsWith("devbox"),
+      `it keeps the name it was last known by, rather than becoming an address: ${errors[0].text}`,
+    );
+
+    const cands = await readCandidates(page);
+    assertEq(cands.options.length, 4, "only the surviving host's candidates are offered");
+    for (const label of cands.options) {
+      assert(
+        label.startsWith("mock-machine · "),
+        `nothing from the dead host may appear: ${label}`,
+      );
+    }
+    assertEq(
+      await readTargetFieldLabel(page),
+      "Target (4 candidates on 1 host)",
+      "the field label reports 1 host answering out of 2, which is the visible cue",
+    );
+
+    // Captured BEFORE the send: the warning row is the whole point of this
+    // shot, and the success state replaces the body it lives in.
+    await shot(page, "multihost-one-host-down", POPOVER_CLIP);
+
+    // And it is genuinely usable, not merely rendered.
+    await page.locator("[data-stp-prompt]").fill("Still works");
+    await page.locator("[data-stp-send]").click();
+    await waitForPhase(page, "sent");
+    assertEq(
+      (await bridgeLog()).filter((r) => r.path === "/v1/send").length,
+      1,
+      "the reachable host accepted the send",
+    );
+
+    await closePopover(page);
+    return [
+      "second host's bridge process stopped -> phase stays `ready`",
+      `a [data-stp-host-error] row names it: ${errors[0].text} (bridge_unreachable)`,
+      "only the surviving host's 4 candidates are offered, and a send to it succeeds",
+    ];
+  } finally {
+    bridge2 = await startBridge2();
+    await seedSettings(context, extId, {});
+  }
+});
+
+await test("18e2. A host Chrome has no permission for says so, instead of looking down", async () => {
+  try {
+    await resetBoth();
+    /* A tunnel on a port the user never pressed "Grant access" for.
+       This is the failure mode that would otherwise be unreadable: the fetch is
+       blocked by Chrome, not by the network, so it surfaces as a bare network
+       error and reads exactly like a bridge that is not running — sending the
+       user to debug a daemon that is running perfectly well.
+
+       7797 is deliberately NOT in the test build's host_permissions (7788, 7799
+       and 7798 are), so this is the real Chrome behaviour and not a stub. */
+    await seedSettings(context, extId, {
+      hosts: [hostEntry(), secondHostEntry({ bridgeUrl: "http://127.0.0.1:7797" })],
+    });
+    await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
+    await waitForButton(page);
+    await openPopover(page);
+    await waitForPhase(page, "ready");
+
+    const errors = await readHostErrors(page);
+    assertEq(errors.length, 1, `exactly one host failure row, got ${JSON.stringify(errors)}`);
+    assertEq(errors[0].code, "permission_required", "the row must name the permission, not the network");
+    assert(
+      errors[0].text.startsWith("127.0.0.1:7797"),
+      `a host that has never answered has no name to show, so it falls back to its address: ${errors[0].text}`,
+    );
+
+    // No request was attempted: the check is before the fetch, which is the point
+    // — a blocked fetch is what produced the misleading message.
+    assertEq(
+      (await bridge2Log()).filter((r) => r.path === "/v1/ping").length,
+      0,
+      "sanity: nothing was sent to the other bridge either",
+    );
+
+    const cands = await readCandidates(page);
+    assertEq(cands.options.length, 4, "the granted host still resolves normally");
+
+    await shot(page, "multihost-permission-required", POPOVER_CLIP);
+    await closePopover(page);
+    return [
+      "an origin outside host_permissions -> permission_required, not bridge_unreachable",
+      `named by address since it has never introduced itself: ${errors[0].text}`,
+      "and the granted host is unaffected",
+    ];
+  } finally {
+    // Restore the single-host seed even on failure. A leaked two-host store —
+    // or a leaked provider preference — silently breaks a later test, and the
+    // cascade then looks like a bug in whatever failed next.
+    await seedSettings(context, extId, {});
+  }
+});
+
+await test("18i. Two hosts: one enabled but never paired says so, and sends nothing", async () => {
+  try {
+    await resetBoth();
+    /* You added the machine and have not pasted its token yet. Dropping it from
+       the composer without a word is the confusing case — the machine you just
+       configured simply never appears. It gets a row instead.
+
+       The `enabled` tick is the only thing that makes a host vanish silently;
+       that is asserted below. */
+    await seedSettings(context, extId, {
+      hosts: [hostEntry(), secondHostEntry({ token: "" })],
+    });
+    await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
+    await waitForButton(page);
+    await openPopover(page);
+    await waitForPhase(page, "ready");
+
+    const errors = await readHostErrors(page);
+    assertEq(errors.length, 1, `the unpaired host must be named, got ${JSON.stringify(errors)}`);
+    assertEq(errors[0].code, "not_configured", "with the code that says what is missing");
+    assertEq(errors[0].hostId, SECOND_HOST_ID, "and it is the unpaired one");
+
+    // And NOT a single request to it: a never-paired host must not be probed,
+    // which is the same guarantee the single-host version made (case 9f).
+    assertEq(await bridge2Log(), [], "an unpaired host must be sent no request at all");
+
+    /* Now untick Enabled. That is the deliberate "skip this" signal, so the
+       host disappears completely — no row, no host names, back to the
+       single-host composer. */
+    await closePopover(page);
+    await seedSettings(context, extId, {
+      hosts: [hostEntry(), secondHostEntry({ token: "", enabled: false })],
+    });
+    await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
+    await waitForButton(page);
+    await openPopover(page);
+    await waitForPhase(page, "ready");
+
+    assertEq(await readHostErrors(page), [], "a disabled host is silent, not a warning");
+    assertEq(await readTargetHost(page), null, "and with one host left, nothing is host-labelled");
+    assertEq(
+      await readTargetFieldLabel(page),
+      "Target (4 candidates)",
+      "the label drops the host count entirely rather than saying 1 of 2",
+    );
+
+    await closePopover(page);
+    return [
+      "enabled + no token -> a not_configured row naming the host, and ZERO requests to it",
+      "unticking Enabled -> the host disappears silently, and the composer is single-host again",
+    ];
+  } finally {
+    await seedSettings(context, extId, {});
+  }
+});
+
+await test("18f. Two hosts: a stale plugin on one blocks only that one", async () => {
+  await resetBoth();
+  // CONTRACT.md: on a `contract` mismatch the extension MUST refuse to send.
+  // Per host — the other machine's plugin is fine and must stay usable.
+  await bridge2Config({ contract: 2 });
+  try {
+    await seedSettings(context, extId, { hosts: bothHosts() });
+    await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
+    await waitForButton(page);
+    await openPopover(page);
+    await waitForPhase(page, "ready");
+
+    const errors = await readHostErrors(page);
+    assertEq(errors.length, 1, `one failure row, got ${JSON.stringify(errors)}`);
+    assertEq(errors[0].code, "contract_mismatch", "the stale host reports the mismatch");
+    assertEq(errors[0].hostId, SECOND_HOST_ID, "and it is the stale one");
+
+    // The gate ran BEFORE the resolve, so the stale bridge was never asked to
+    // resolve anything.
+    assertEq(
+      (await bridge2Log()).filter((r) => r.path === "/v1/resolve").length,
+      0,
+      "a host that fails the contract gate is never sent a resolve",
+    );
+    const cands = await readCandidates(page);
+    assertEq(cands.options.length, 4, "only the compatible host contributes candidates");
+
+    await shot(page, "multihost-contract-mismatch-one-host", POPOVER_CLIP);
+    await closePopover(page);
+    return [
+      "one host on contract v2 -> contract_mismatch row for that host alone",
+      "it is never sent a /v1/resolve, and the other host stays fully usable",
+    ];
+  } finally {
+    await bridge2Config({ contract: 1 });
+    await seedSettings(context, extId, {});
+  }
+});
+
+await test("18g. Two hosts: typing a machine name narrows the merged list", async () => {
+  try {
+    await resetBoth();
+    await seedSettings(context, extId, { hosts: bothHosts() });
+    await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
+    await waitForButton(page);
+    await openPopover(page);
+    await waitForPhase(page, "ready");
+
+    await searchCandidates(page, "devbox");
+    const byName = await readCandidates(page, { close: false });
+    assertEq(byName.options.length, 4, "searching a machine name leaves only that machine's rows");
+    for (const label of byName.options) {
+      assert(label.startsWith("devbox · "), `every remaining row is on that host: ${label}`);
+    }
+
+    // The port is searchable too: with two unlabelled tunnels it is the only
+    // thing that tells them apart, and it is what the user typed into `ssh -L`.
+    await searchCandidates(page, String(BRIDGE_PORT_2));
+    const byPort = await readCandidates(page, { close: false });
+    assertEq(byPort.options.length, 4, "searching the tunnel port finds the same host");
+    for (const label of byPort.options) {
+      assert(label.startsWith("devbox · "), `port search stays on one host: ${label}`);
+    }
+
+    // A workspace name still wins across hosts, which is the pre-existing
+    // behaviour and must not have been narrowed by adding the host to the haystack.
+    await searchCandidates(page, "brawny-dodo");
+    const byWorkspace = await readCandidates(page, { close: false });
+    assertEq(byWorkspace.options.length, 2, "a workspace name that both hosts have matches on both");
+
+    await shot(page, "multihost-search-by-machine", POPOVER_CLIP);
+    await closeCandidates(page);
+    await closePopover(page);
+    return [
+      'search "devbox" -> 4 rows, all on that host',
+      `search "${BRIDGE_PORT_2}" (the tunnel port) -> the same 4 rows`,
+      'search "brawny-dodo" -> 2 rows, one per host: workspace search still spans hosts',
+    ];
+  } finally {
+    // Restore the single-host seed even on failure. A leaked two-host store —
+    // or a leaked provider preference — silently breaks a later test, and the
+    // cascade then looks like a bug in whatever failed next.
+    await seedSettings(context, extId, {});
+  }
+});
+
+await test("18h. A pre-multi-host settings store migrates to one host, still paired", async () => {
+  try {
+    await resetBoth();
+    // Exactly what a version before this feature wrote: no `version`, no `hosts`.
+    const legacy = { bridgeUrl: BRIDGE_URL, token: DEFAULT_TOKEN, defaultProvider: "codex/gpt-5-codex" };
+    const sw = await serviceWorker(context);
+    await sw.evaluate(async (s) => chrome.storage.local.set({ settings: s }), legacy);
+
+    // It must resolve and send with no intervention: an upgrade that silently
+    // unpaired the extension would be indistinguishable from a broken bridge.
+    await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
+    await waitForButton(page);
+    await openPopover(page);
+    await waitForPhase(page, "ready");
+
+    assertEq(await readTargetHost(page), null, "a single migrated host is not labelled — there is nothing to disambiguate");
+    const cands = await readCandidates(page);
+    assertEq(cands.options.length, 4, "the migrated host resolves normally");
+    for (const label of cands.options) {
+      assert(!label.includes(" · mock-machine"), `no host prefix with one host: ${label}`);
+    }
+
+    /* The migrated shape, asserted field by field.
+       The one write that DOES happen on a first resolve is the machine-name
+       cache — a bridge reporting `machine.name` for the first time. That is a
+       legitimate save, and it is what persists the migration. What must never
+       happen is a *read* writing, which is asserted where that bug actually was:
+       the options page's load, below. */
+    const migrated = await readStoredSettings(context);
+    assertEq(migrated.version, 2, "the store is upgraded in place");
+    assertEq(migrated.hosts.length, 1, "the single legacy bridge became exactly one host");
+    assertEq(migrated.hosts[0].bridgeUrl, legacy.bridgeUrl, "carrying the legacy bridge URL");
+    assertEq(migrated.hosts[0].token, legacy.token, "and the legacy token, so the upgrade stays paired");
+    assertEq(migrated.hosts[0].enabled, true, "enabled, or the upgrade would resolve nothing");
+    assertEq(migrated.hosts[0].label, "", "unlabelled: the user never named it");
+    assertEq(migrated.hosts[0].machineName, "mock-machine", "and it learned its name from the bridge");
+    assert(migrated.hosts[0].id.length > 0, "with a generated id, which a send routes on");
+    assertEq(migrated.defaultProvider, legacy.defaultProvider, "the legacy provider preference survives");
+
+    // The preserved provider preference proves the legacy fields were carried
+    // across rather than reset to defaults.
+    const opt = await context.newPage();
+    await opt.goto(optionsUrl());
+    await opt.waitForTimeout(400);
+    const beforePageLoad = await readStoredSettings(context);
+    const ui = await opt.evaluate(() => ({
+      cards: document.querySelectorAll(".host").length,
+      url: document.querySelector(".host .hostUrl").value,
+      provider: document.querySelector("#defaultProvider").value,
+      removeDisabled: document.querySelector(".host .hostRemove").disabled,
+    }));
+    assertEq(
+      await readStoredSettings(context),
+      beforePageLoad,
+      "opening the options page must not write settings — that once clobbered a concurrent write",
+    );
+    assertEq(ui.cards, 1, "the options page shows exactly one host card");
+    assertEq(ui.url, BRIDGE_URL, "carrying the legacy bridge URL");
+    assertEq(ui.provider, "codex/gpt-5-codex", "and the legacy provider preference");
+    assert(ui.removeDisabled, "the only host cannot be removed — that would leave no way back");
+    await opt.close();
+
+    /* The load-bearing one: a SEND, not just a resolve.
+       A send names the `hostId` the resolve returned and the worker looks it up
+       again. If migration invented a fresh id per read, that lookup would miss
+       and the first send after an upgrade would refuse with "no longer
+       configured" — a resolve-only test passes straight through that bug. */
+    await page.locator("[data-stp-prompt]").fill("Works right after the upgrade");
+    await page.locator("[data-stp-send]").click();
+    await waitForPhase(page, "sent");
+    assertEq(
+      (await bridgeLog()).filter((r) => r.path === "/v1/send").length,
+      1,
+      "a send on a freshly migrated store must reach the bridge",
+    );
+
+    await closePopover(page);
+    return [
+      "legacy {bridgeUrl, token, defaultProvider} store resolves and sends unchanged",
+      "it upgrades in place to one host, keeping the URL, the token and the provider preference",
+      "the options page renders it as one host card, with Remove disabled, and writes nothing on load",
+      "and a send routes correctly on the very first attempt after the upgrade",
+    ];
+  } finally {
+    // Restore the single-host seed even on failure. A leaked two-host store —
+    // or a leaked provider preference — silently breaks a later test, and the
+    // cascade then looks like a bug in whatever failed next.
+    await seedSettings(context, extId, {});
+  }
 });
 
 /* ---- 14. compact viewport, light + dark ------------------------------- */
@@ -3682,6 +4485,7 @@ await test("34. Header cog opens the options page, in every phase, without closi
 if (!keepOpen) {
   await context.close();
   await bridge.close();
+  await stopBridge2();
   await fixtures.close();
   rmSync(profile, { recursive: true, force: true });
 }

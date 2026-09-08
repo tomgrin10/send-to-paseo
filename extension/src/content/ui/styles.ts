@@ -458,6 +458,31 @@ select:focus, textarea:focus { outline: 2px solid var(--stp-accent); outline-off
 .target-summary .sub { display: block; margin-top: 3px; color: var(--stp-fg-muted); font-weight: 400; font-size: 11px; }
 .target-summary .mismatch { display: block; margin-top: 3px; color: var(--stp-warn); font-weight: 400; font-size: 11px; }
 
+/* Host name. Weighted like a tag rather than prose, because with two Paseo
+   machines paired it is the first thing to read on the line — it says which
+   computer is about to run the agent — and it also has to survive being the
+   left-hand prefix of every row in the Target list. */
+.host {
+  font: 600 11px/1 var(--stp-mono);
+  letter-spacing: 0.01em;
+  color: var(--stp-accent);
+}
+
+/* A host that did not answer, while another did. Warning, not danger: the
+   composer still works, and the send the user came for is still available on
+   the host that replied. */
+.host-error {
+  display: block;
+  font: 400 11px/1.4 var(--stp-font);
+  color: var(--stp-warn);
+  padding: 5px 8px;
+  border: 1px solid var(--stp-warn-border);
+  border-radius: var(--stp-radius);
+  background: var(--stp-warn-bg);
+}
+.host-error .host { color: inherit; }
+.host-error .hcode { font: 500 10.5px/1 var(--stp-mono); opacity: 0.8; }
+
 footer {
   display: flex;
   align-items: center;

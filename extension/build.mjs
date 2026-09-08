@@ -29,10 +29,20 @@ const isTest = argv.includes("--test");
 const watch = argv.includes("--watch");
 const portArg = argv[argv.indexOf("--port") + 1];
 const testPort = argv.includes("--port") ? Number(portArg) : 4173;
-// The e2e suite's mock bridge port. Defaults to the real 7788, but the suite
+// The e2e suite's mock bridge ports. Defaults to the real 7788, but the suite
 // overrides it because the actual Paseo plugin may already own that port.
+//
+// Comma-separated, because the multi-host tests run TWO mock bridges and each
+// needs its own pre-granted host_permissions entry: `chrome.permissions.request`
+// needs a user gesture, so a test build cannot consent to an extra origin at
+// runtime the way the options page does.
 const bridgePortArg = argv[argv.indexOf("--bridge-port") + 1];
-const testBridgePort = argv.includes("--bridge-port") ? Number(bridgePortArg) : 7788;
+const testBridgePorts = argv.includes("--bridge-port")
+  ? String(bridgePortArg)
+      .split(",")
+      .map((p) => Number(p.trim()))
+      .filter((p) => Number.isInteger(p) && p > 0)
+  : [7788];
 
 const outdir = join(here, isTest ? "dist-test" : "dist");
 
@@ -316,9 +326,11 @@ function writeStatic() {
     for (const cs of manifest.content_scripts) {
       cs.matches = [...cs.matches, ...extraMatches];
     }
-    const bridgePattern = `http://127.0.0.1:${testBridgePort}/*`;
-    if (!manifest.host_permissions.includes(bridgePattern)) {
-      manifest.host_permissions = [...manifest.host_permissions, bridgePattern];
+    for (const port of testBridgePorts) {
+      const bridgePattern = `http://127.0.0.1:${port}/*`;
+      if (!manifest.host_permissions.includes(bridgePattern)) {
+        manifest.host_permissions = [...manifest.host_permissions, bridgePattern];
+      }
     }
     manifest.name = `${manifest.name} (test build)`;
   }
@@ -368,6 +380,6 @@ if (watch) {
   writeStatic();
   console.log(
     `[build] ${isTest ? "TEST" : "shipping"} build -> ${outdir}` +
-      (isTest ? ` (extra hosts: ${extraHosts.join(", ")}; bridge port ${testBridgePort})` : ""),
+      (isTest ? ` (extra hosts: ${extraHosts.join(", ")}; bridge ports ${testBridgePorts.join(", ")})` : ""),
   );
 }

@@ -21,6 +21,11 @@ on github.com and on Graphite.
   and it resolves to the workspace you already have, then tells the agent which branch the change
   belongs on — so one workspace per stack is enough. It still finds that workspace when the branch
   it is parked on has already merged.
+- **More than one Paseo machine.** Pair a laptop and a dev box and every pull request is resolved
+  on both at once, in one list, with the machine named on each row. The default target is
+  whichever machine already has a worktree for the PR, not whichever you configured first, and the
+  send goes only to the machine you picked. A host that is asleep is a footnote in the composer,
+  not a wall.
 
 ## Install
 
@@ -73,18 +78,37 @@ Pair the two halves once:
 
 Then open a pull request and press **Send to Paseo**. There is no config file on either side.
 
+### A second Paseo machine
+
+Each bridge binds `127.0.0.1` on its own machine, so forward it to a loopback port here:
+
+```sh
+ssh -L 7789:127.0.0.1:7788 devbox
+```
+
+Then in the extension's options press **Add a host**, set its bridge URL to
+`http://127.0.0.1:7789`, press **Grant access to this address** (only `127.0.0.1:7788` is
+permitted up front), and paste **that machine's** pairing token — tokens belong to a plugin
+install and are not interchangeable. Each host names itself, so the list reads `devbox` rather
+than `127.0.0.1:7789`.
+
+Every enabled, paired host is queried on each pull request. Untick **Enabled** to keep a host's
+token but skip it.
+
 ## Where it shows up
 
 - **A button on the pull-request page**, in the PR header next to the site's own actions. It
   re-targets as you navigate between PRs, so a stale PR number can never be sent.
 - **The composer popover**, with the resolved target, a searchable picker holding every
-  alternative — type a workspace name, a branch or a PR number — and provider and mode pickers.
-  ⌘↵ sends, Esc closes.
+  alternative — type a workspace name, a branch, a PR number, or a machine name — and provider and
+  mode pickers. With more than one host paired, every row names its machine and the resolved
+  target line leads with it. ⌘↵ sends, Esc closes.
 - **The Send to Paseo surface** in Paseo's sidebar and under ⌘K: bridge status, the pairing token,
   the port, which agent profile to follow, the default permission mode, a **Requirements** card,
   and your last 20 sends.
-- **The extension's options page**: bridge URL, token, and **Test connection**. The cog in the
-  composer's header opens it, so it is reachable from the pull request itself.
+- **The extension's options page**: one card per Paseo host — name, bridge URL, token, **Grant
+  access** and **Test connection** — plus **Add a host** and **Test all connections**. The cog in
+  the composer's header opens it, so it is reachable from the pull request itself.
 
 ## How it works
 
@@ -101,16 +125,26 @@ links, and those are only a hint — everything else is resolved on the daemon s
 5. Candidates are ranked: **exact** branch match, then another branch in the same **stack**
    (nearest first), then any workspace in the **project**, then a synthetic **create** option
 
+Every paired host runs all five steps, in parallel, and the results are merged into one list
+ranked across machines: rank first, so an exact match on the dev box outranks a same-project
+workspace on the laptop; then position within a rank, so each bridge's own nearest-first ordering
+survives the interleave. Each host contributes its own **create** row, because creating a worktree
+is a different action on each machine.
+
 The default target is the exact match, else the nearest stack workspace — open siblings ahead of
-merged ones — else create. When the target sits on a sibling branch, the composer says so, says
-whether that branch has landed, and the agent's prompt names the branch the change belongs on.
+merged ones — else create; across hosts, it is whichever host's own default ranks best, so a
+machine that would only create a worktree never beats one that already has it.
+
+When the target sits on a sibling branch, the composer says so, says whether that branch has
+landed, and the agent's prompt names the branch the change belongs on.
 Paseo does the hard part itself: it can already check a pull request out into a managed worktree,
 so nothing here creates one by hand. The only git this project runs is read-only — the branch a
 workspace is on, a remote's `owner/repo`, and one ancestry query that recognises a stack whose
 chain GitHub has already retargeted past a merged branch.
 
 The extension never talks to the Paseo daemon. It talks only to the plugin's local HTTP bridge on
-`127.0.0.1:7788`, over one frozen contract, [`CONTRACT.md`](CONTRACT.md).
+`127.0.0.1:7788` — or to whatever loopback port a tunnel forwards a remote one to — over one
+frozen contract, [`CONTRACT.md`](CONTRACT.md).
 
 <details>
 <summary>Why a plugin, and not the extension talking to the daemon</summary>
@@ -151,14 +185,17 @@ line per dependency at every start.
 The bridge can start agents that execute code on your machine, so it is treated as a real
 privilege boundary:
 
-- binds `127.0.0.1` only, never `0.0.0.0`
+- binds `127.0.0.1` only, never `0.0.0.0` — a bridge on another machine is reached by forwarding
+  it to a loopback port here, never by opening it up there
 - bearer token on every endpoint except `GET /v1/ping`, whose auth is *optional*: with no
   `Authorization` header it is an unauthenticated liveness check, with a valid one it confirms
   pairing and returns the provider list, and with an invalid one it returns `401`. That is what
   lets **Test connection** tell "bridge down" from "bad token"
 - rejects any request whose `Origin` is not `chrome-extension://…`, on the preflight *and* the
   real request — CORS alone stops a page reading a response, not the request firing
-- validates the `Host` header, closing DNS rebinding
+- validates the `Host` header, closing DNS rebinding: the hostname must be loopback. The port is
+  not pinned, so an `ssh -L` tunnel works; pinning it never added anything, because a rebinding
+  request arrives carrying the attacker's own hostname and origin, both already refused
 - 64 KiB body cap, 60 requests per 10 s, no shell anywhere, and no token, prompt or agent title
   in any log line
 
@@ -173,8 +210,12 @@ this one listens on a socket: read the source before installing it.
   the page console for `[send-to-paseo]` warnings.
 - **"Can't reach the Paseo bridge".** `paseo plugin ls` should show `send-to-paseo` as `running`;
   `paseo plugin logs send-to-paseo` says why if it is not.
-- **"Not paired with Paseo" or "Token rejected".** Re-copy the token from the Paseo surface. The
-  two are deliberately different messages.
+- **"Not paired with Paseo" or "Token rejected".** Re-copy the token from the Paseo surface, on
+  the machine that host points at. The two are deliberately different messages.
+- **"Chrome hasn't been given access to this bridge".** A host on a non-default port needs a
+  one-time consent: options → that host → **Grant access to this address**.
+- **A host named in a warning row under the target picker.** That machine did not answer; the
+  others still did. The row carries its own error code.
 - **"Update required".** The plugin and extension are on different contract versions and sends are
   blocked on purpose. Update the older side.
 - **No PR title, and everything ranks as "same project".** `gh` is missing or not signed in.
@@ -201,7 +242,7 @@ Longer tables, keyed on exact message text, are in
 
 Nothing here is claimed without evidence: [`plugin/VERIFICATION.md`](plugin/VERIFICATION.md) and
 [`extension/VERIFICATION.md`](extension/VERIFICATION.md) record real output for both halves,
-failures included, behind 52 end-to-end cases with the extension genuinely loaded in Chromium.
+failures included, behind 61 end-to-end cases with the extension genuinely loaded in Chromium.
 [`docs/screenshots/`](docs/screenshots/) is indexed and names, per image, which bridge answered it.
 
 ## Credits

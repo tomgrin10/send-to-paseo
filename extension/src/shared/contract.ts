@@ -55,6 +55,7 @@ export type ContractErrorCode = (typeof CONTRACT_ERROR_CODES)[number];
 export const LOCAL_ERROR_CODES = [
   "bridge_unreachable",
   "not_configured",
+  "permission_required",
   "bad_response",
   "contract_mismatch",
   "extension_internal",
@@ -127,6 +128,16 @@ export interface PingResponse {
     version?: string;
     serverId?: string;
   };
+  /**
+   * The machine the bridge runs on. Additive (CONTRACT.md "Additive fields"),
+   * so a plugin older than multi-host support omits it and the extension falls
+   * back to labelling that host by its URL authority.
+   *
+   * This is how a host list of loopback tunnels becomes readable: two paired
+   * bridges are `127.0.0.1:7788` and `127.0.0.1:7789`, and neither URL says
+   * which machine is which.
+   */
+  machine?: { name?: string };
   paired: boolean;
   providers: Provider[];
   /** Additive; absent from a plugin older than permission-mode support. */

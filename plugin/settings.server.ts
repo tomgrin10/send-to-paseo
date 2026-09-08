@@ -40,6 +40,22 @@ const SettingsSchema = z.object({
    * Empty means any extension origin, which is the documented default.
    */
   allowedExtensionIds: z.array(z.string()),
+  /**
+   * Extra `Host` header values this bridge will answer on, beyond loopback.
+   *
+   * Exact `host:port` matches, empty by default. Only needed when a reverse
+   * proxy that presents a real name (Tailscale Serve, a corporate ingress)
+   * fronts the bridge; a plain `ssh -L` tunnel already arrives as loopback and
+   * needs nothing here. `.default([])` for the same reason as the fields above:
+   * a settings.json written before this existed must still validate, or the
+   * parse failure would regenerate the file and silently rotate the pairing
+   * token on upgrade.
+   *
+   * File-only, with no UI, because widening the set of names that can reach an
+   * agent-starting endpoint is a security decision — see `hostAllowed` in
+   * bridge.server.ts.
+   */
+  allowedHosts: z.array(z.string()).default([]),
 });
 
 export type Settings = z.infer<typeof SettingsSchema>;
@@ -68,6 +84,7 @@ function defaults(): Settings {
     paired: false,
     recentSends: [],
     allowedExtensionIds: [],
+    allowedHosts: [],
   };
 }
 

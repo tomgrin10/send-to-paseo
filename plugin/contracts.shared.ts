@@ -9,7 +9,7 @@ import { z } from "zod";
 
 /** Advertised in `GET /v1/ping`. Keep in step with `package.json`. */
 export const PLUGIN_NAME = "send-to-paseo";
-export const PLUGIN_VERSION = "0.2.0";
+export const PLUGIN_VERSION = "0.3.0";
 /** Bumped only for an incompatible bridge API; the paths stay `/v1`. */
 export const CONTRACT_VERSION = 1;
 
@@ -149,6 +149,15 @@ export interface PingResponse {
   version: string;
   contract: number;
   daemon: { reachable: boolean; version: string | null; serverId: string | null };
+  /**
+   * The machine this bridge runs on. Additive optional field (CONTRACT.md
+   * "Additive fields"), so an older extension ignores it.
+   *
+   * `name` is `os.hostname()`, or `""` where the host has none. It exists so an
+   * extension paired with several Paseo machines can label them by name instead
+   * of by the interchangeable `127.0.0.1:<port>` each loopback tunnel presents.
+   */
+  machine: { name: string };
   /** True when *this* request carried a valid bearer token. */
   paired: boolean;
   /** Populated only for an authenticated ping; `[]` otherwise. */
