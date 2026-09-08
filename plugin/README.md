@@ -202,8 +202,42 @@ All of it lives in the Paseo surface; there is no config file to hunt for.
 State is stored at `$PASEO_HOME/plugin-data/send-to-paseo/settings.json`, written
 `0600` inside a `0700` directory. It holds the token, the port, the default
 model, the followed profile id, the default mode, the paired flag, the last 20
-sends, and two optional allowlists — `allowedExtensionIds` and `allowedHosts`
-(see [Security model](#security-model)).
+sends, two optional allowlists — `allowedExtensionIds` and `allowedHosts` (see
+[Security model](#security-model)) — and `daemonPassword`.
+
+### A daemon that requires a password
+
+A daemon whose `listen` is not loopback turns on `daemon.auth.password`, and it
+then refuses an unauthenticated connection outright. Without the password the
+plugin lists no providers and no modes, reports the daemon unreachable, and
+every send fails. Measured against a daemon on `0.0.0.0:6767`:
+
+| Probe | Result |
+| --- | --- |
+| `GET /api/health` | `200` — unauthenticated, so liveness is decided here |
+| `GET /api/status` | `401 Unauthorized` |
+| SDK WebSocket, no password | closed with `Password required` |
+
+`daemon.auth.password` in Paseo's `config.json` is a **bcrypt hash**, so the
+plaintext cannot be derived from it and has to be supplied. Three sources, in
+order:
+
+1. `SEND_TO_PASEO_DAEMON_PASSWORD`
+2. `PASEO_PASSWORD` — the standard Paseo variable, the same one the `paseo` CLI reads
+3. `"daemonPassword": "…"` in the plugin's own `settings.json`
+
+**Prefer the settings file.** The plugin subprocess inherits the daemon's
+environment, which is fixed at daemon start, so a new env var would need a
+daemon restart — and that kills running agents. A settings change is picked up
+by `paseo plugin reload send-to-paseo`.
+
+It gets exactly the same handling as the pairing token: `0600`, file-only with
+no UI, never logged, never echoed into an error, and never part of a status
+payload.
+
+Note that on such a daemon the `paseo` CLI needs the password too, so
+`PASEO_PASSWORD` has to be set in your shell before `paseo plugin reload` will
+work at all.
 
 `defaultProfileId`, `defaultModeId` and `allowedHosts` are read with schema
 defaults, so a `settings.json` written before those fields existed still
@@ -289,10 +323,11 @@ Two precedence rules worth stating outright:
 | Variable | Effect |
 | --- | --- |
 | `SEND_TO_PASEO_DRY_RUN=1` | `POST /v1/send` resolves and validates everything but creates nothing, returning the same `200` shape with `"dryRun": true` and synthetic ids. |
+| `SEND_TO_PASEO_DAEMON_PASSWORD` | Password for a daemon that requires one. Checked before `PASEO_PASSWORD` and before `daemonPassword` in settings.json. See [A daemon that requires a password](#a-daemon-that-requires-a-password). |
 | `SEND_TO_PASEO_GH_PATH` | Absolute path to the `gh` binary, if it is somewhere unusual. Checked before `PATH`. |
 | `SEND_TO_PASEO_GIT_PATH` | Same for `git`. |
 | `SEND_TO_PASEO_BIN_DIRS` | Colon-separated directories that **replace** the built-in well-known-location list (see [Requirements](#where-the-plugin-looks-for-them)). Set it to a nonexistent path to switch the probe off entirely, which is how `check-deps.mjs` simulates a machine with nothing installed. |
-| `PASEO_HOME`, `PASEO_DAEMON_URL` | Standard Paseo variables; both are honoured. |
+| `PASEO_HOME`, `PASEO_DAEMON_URL`, `PASEO_PASSWORD` | Standard Paseo variables; all three are honoured. |
 
 The plugin subprocess inherits the daemon's environment, so `SEND_TO_PASEO_DRY_RUN`
 has to be exported for the daemon, which means it only takes effect at the next
@@ -330,6 +365,7 @@ Keyed on the text you will actually see — in the extension's popover, on the
 | `Pull request acmegizmos/gizmo-poc#942 does not exist on GitHub.` | `gh` read the repository fine and there is no such PR. This is the one `gh` answer that is an error rather than a degradation. | Check the number |
 | `acmegizmos/gizmo-poc is not a project in Paseo.` | Paseo has no project for this repository. | `paseo project add /path/to/repo` |
 | `The Paseo daemon is not reachable from the plugin.` | The plugin is up but the daemon socket is not answering. | Start Paseo, or `paseo daemon start` |
+| `The Paseo daemon requires a password and the plugin does not have it.` | The daemon has `daemon.auth.password` set, which any non-loopback `listen` turns on. | Set `daemonPassword` in the plugin's settings.json, then `paseo plugin reload send-to-paseo`. See [A daemon that requires a password](#a-daemon-that-requires-a-password) |
 | `The GitHub CLI (gh) did not answer in time…` | A `gh` call hit its timeout (15 s for a PR read, 12 s for either stack list, 8 s for `gh repo view`). | Retry; if it persists, check `gh auth status` and the network |
 | `dependency gh: missing (optional)` in the log, but `gh` works in your terminal | The daemon's `PATH` and your shell's `PATH` differ, and `gh` is installed somewhere the well-known list does not cover. | Compare against the `plugin subprocess PATH=` line in the same log, then set `SEND_TO_PASEO_GH_PATH` |
 | `Port 7788 is already in use…` | Something else has the port. | Change the port on the surface |
