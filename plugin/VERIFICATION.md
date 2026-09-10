@@ -1,6 +1,6 @@
 # Verification log — `send-to-paseo` plugin
 
-Every command below was run on the daemon machine on 2026-09-01 against the live
+The numbered historical record below was run on the daemon machine on 2026-09-01 against the live
 Paseo daemon (`0.7.0`, `serverId: srv_Ab3xY9pQ2mNt`) and the live
 `acmegizmos/gizmo-poc` repository. Output is pasted verbatim, with three
 redactions: the pairing token is never printed; prompt bodies are only shown
@@ -9,6 +9,42 @@ private repository, so owner/repo names, branch names, ticket ids, PR titles,
 commit SHAs, Paseo workspace/agent/server ids and home-directory paths have been
 consistently replaced with fictional equivalents. Every number, timing, exit
 code and error string is untouched.
+
+## 2026-09-10 — v1.0.3 VM daemon-password fallback
+
+The password resolver was exercised without reading or writing the operator's
+real secrets. `node check-deps.mjs` created a private temporary home and verified
+all four sources in precedence order: `SEND_TO_PASEO_DAEMON_PASSWORD`,
+`PASEO_PASSWORD`, `~/paseo-hub/secrets/daemon-password`, then the existing
+`daemonPassword` settings value. It also verified that a blank or missing secret
+file falls back, settings are not read when an earlier source succeeds, and a
+settings read failure returns no password without exposing its detail.
+
+```
+$ cd plugin && npm run typecheck
+> send-to-paseo@1.0.3 typecheck
+> tsc --noEmit
+
+$ node check-deps.mjs
+54/54 checks passed
+
+$ cd extension && npm run typecheck && npm run build
+> send-to-paseo-extension@1.0.3 typecheck
+> send-to-paseo-extension@1.0.3 build
+[build] shipping build -> extension/dist
+
+$ node test/e2e.mjs
+=== 61 passed, 0 failed, 0 skipped (of 61) ===
+
+$ paseo plugin reload send-to-paseo
+send-to-paseo  running  yes  directory
+```
+
+The reload log contained `Plugin ready` and `bridge listening on
+http://127.0.0.1:7788`, with no stderr entry or password value. This machine did
+not have the VM convention file at its real home path, so the live process used
+an earlier configured source; the isolated resolver checks are the direct proof
+of file handling.
 
 Contents:
 

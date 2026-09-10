@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { BridgeError } from "../shared/contracts";
+import { resolveDaemonPassword } from "./daemon-password";
 import { settings } from "./settings";
 
 /**
@@ -112,7 +113,7 @@ async function resolveUrl(): Promise<string> {
  * send fails. Measured against a daemon on `0.0.0.0:6767`.
  *
  * It cannot be recovered from `config.json`: what is stored there is a bcrypt
- * hash (`$2b$12$…`), by design. The plaintext has to be supplied. Three sources,
+ * hash (`$2b$12$…`), by design. The plaintext has to be supplied. Four sources,
  * in order:
  *
  *   1. `SEND_TO_PASEO_DAEMON_PASSWORD` — this plugin's own override.
@@ -120,25 +121,19 @@ async function resolveUrl(): Promise<string> {
  *      CLI reads. Honoured for the same reason `PASEO_HOME` and
  *      `PASEO_DAEMON_URL` are: a machine already configured for the CLI should
  *      not need configuring again for this.
- *   3. `daemonPassword` in the plugin's own `settings.json`.
+ *   3. `~/paseo-hub/secrets/daemon-password` — the Paseo VM convention.
+ *   4. `daemonPassword` in the plugin's own `settings.json`.
  *
- * The env vars are checked first, but the settings file is the usable one: the
- * plugin subprocess inherits the daemon's environment, which is fixed at daemon
- * start, and restarting the daemon kills running agents. A settings change is
+ * The env vars are checked first, but the two files are reloadable: the plugin
+ * subprocess inherits the daemon's environment, which is fixed at daemon
+ * start, and restarting the daemon kills running agents. A file change is
  * picked up by `paseo plugin reload`.
  *
- * File-only with no UI, exactly like `allowedExtensionIds` and `allowedHosts`.
- * Never logged, never echoed into an error, and never included in a status
- * payload — the same treatment as the pairing token.
+ * Password values are never logged, echoed into an error, or included in a
+ * status payload — the same treatment as the pairing token.
  */
 async function resolvePassword(): Promise<string | undefined> {
-  for (const key of ["SEND_TO_PASEO_DAEMON_PASSWORD", "PASEO_PASSWORD"] as const) {
-    const fromEnv = process.env[key];
-    if (fromEnv !== undefined && fromEnv !== "") return fromEnv;
-  }
-  const stored = await settings.read().catch(() => null);
-  const password = stored?.daemonPassword ?? null;
-  return password === null || password === "" ? undefined : password;
+  return resolveDaemonPassword(async () => (await settings.read()).daemonPassword);
 }
 
 /** Runs `work` against an SDK connection that is always closed before returning. */
@@ -166,7 +161,7 @@ export async function withPaseo<T>(work: (paseo: PaseoApi) => Promise<T>): Promi
       throw new BridgeError(
         "daemon_unreachable",
         "The Paseo daemon requires a password and the plugin does not have it.",
-        "Set daemonPassword in the plugin's settings.json (or SEND_TO_PASEO_DAEMON_PASSWORD), then run: paseo plugin reload send-to-paseo",
+        "Set SEND_TO_PASEO_DAEMON_PASSWORD, ~/paseo-hub/secrets/daemon-password, or daemonPassword in the plugin settings, then run: paseo plugin reload send-to-paseo",
       );
     }
     throw new BridgeError(

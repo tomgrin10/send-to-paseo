@@ -9,7 +9,7 @@ import { z } from "zod";
 
 /** Advertised in `GET /v1/ping`. Keep in step with `package.json`. */
 export const PLUGIN_NAME = "send-to-paseo";
-export const PLUGIN_VERSION = "1.0.2";
+export const PLUGIN_VERSION = "1.0.3";
 /** Bumped only for an incompatible bridge API; the paths stay `/v1`. */
 export const CONTRACT_VERSION = 1;
 

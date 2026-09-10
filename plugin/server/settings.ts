@@ -63,7 +63,7 @@ const SettingsSchema = z.object({
    * and then it rejects an unauthenticated WebSocket outright — without this the
    * plugin lists no providers or modes and every send fails. What `config.json`
    * holds is a bcrypt hash, so the plaintext cannot be derived and has to be
-   * given here (or in `SEND_TO_PASEO_DAEMON_PASSWORD`).
+   * given here (or through an environment variable or the VM secret file).
    *
    * Treated exactly like `token`: file-only with no UI, 0600, never logged,
    * never echoed into an error, and never part of a status payload. See
