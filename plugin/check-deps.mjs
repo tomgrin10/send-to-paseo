@@ -20,7 +20,7 @@
  */
 
 import { registerHooks } from "node:module";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -29,6 +29,17 @@ import { pathToFileURL } from "node:url";
 
 const here = new URL(".", import.meta.url);
 const stubUrl = new URL("./check-deps.stub.mjs", here).href;
+
+// Paseo's Git installer validates type-only dependencies before esbuild drops
+// them. A literal client-SDK specifier in server source therefore fails even
+// when runtime loading is deliberately dynamic.
+for (const name of await readdir(new URL("./server/", here))) {
+  if (!/\.tsx?$/.test(name)) continue;
+  const source = await readFile(new URL(`./server/${name}`, here), "utf8");
+  if (/["']@getpaseo\/client/.test(source)) {
+    throw new Error(`server/${name} contains a Git-install-breaking @getpaseo/client type dependency`);
+  }
+}
 
 registerHooks({
   resolve(specifier, context, next) {

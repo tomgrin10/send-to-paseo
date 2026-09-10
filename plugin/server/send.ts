@@ -1,10 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type {
-  PaseoAgentConfig,
-  PaseoApi,
-  PaseoWorkspace,
-  PaseoWorkspaceHandle,
-} from "@getpaseo/client";
+import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import {
   BridgeError,
   LABEL_ORIGIN,
@@ -34,6 +29,11 @@ import {
   resolveStackBranches,
 } from "./resolve";
 import { settings } from "./settings";
+
+type PaseoApi = PluginHandlerContext["paseo"];
+type PaseoWorkspace = Awaited<ReturnType<PaseoApi["workspaces"]["list"]>>["entries"][number];
+type PaseoWorkspaceHandle = ReturnType<PaseoApi["workspaces"]["ref"]>;
+type PaseoAgentConfig = Parameters<PaseoWorkspaceHandle["agents"]["create"]>[0]["config"];
 
 /**
  * The one mutating endpoint: ensure a workspace, then start a brand new agent

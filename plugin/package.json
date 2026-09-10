@@ -2,7 +2,7 @@
   "name": "send-to-paseo",
   "private": true,
   "type": "module",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "license": "MIT",
   "description": "Local HTTP bridge that starts a Paseo agent in the workspace belonging to a pull request.",
   "repository": {

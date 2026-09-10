@@ -1,4 +1,4 @@
-import type { PaseoApi, PaseoWorkspace } from "@getpaseo/client";
+import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import {
   BridgeError,
   type AgentProfileOption,
@@ -33,6 +33,9 @@ import {
   readTrunkBranch,
 } from "./git";
 import { settings } from "./settings";
+
+type PaseoApi = PluginHandlerContext["paseo"];
+type PaseoWorkspace = Awaited<ReturnType<PaseoApi["workspaces"]["list"]>>["entries"][number];
 
 /**
  * PR -> project -> workspace resolution, exactly the ladder in CONTRACT.md.
