@@ -65,6 +65,7 @@ await writeFile(
 const deps = await import("./server/deps.ts");
 const gh = await import("./server/gh.ts");
 const git = await import("./server/git.ts");
+const daemonPassword = await import("./server/daemon-password.ts");
 const shared = await import("./shared/contracts.ts");
 
 /* -- tiny harness ---------------------------------------------------------- */
@@ -328,6 +329,73 @@ try {
     console.log(`  parsed   ${parsed.success ? "ok" : JSON.stringify(parsed.error?.issues)}`);
     check("dependencies match DependencyReportSchema", parsed.success);
     check("both dependencies are reported", snapshot.dependencies.length === 2);
+  }
+
+  /* -------------------------------------------------------------------- */
+  console.log("\n10. daemon password sources are ordered and fail closed");
+  {
+    const secretHome = await makeDir("password-home");
+    const secretDirectory = join(secretHome, "paseo-hub", "secrets");
+    const secretFile = join(secretDirectory, "daemon-password");
+    await mkdir(secretDirectory, { recursive: true, mode: 0o700 });
+    await writeFile(secretFile, "file-password\n", { mode: 0o600 });
+
+    let settingsReads = 0;
+    const fromSettings = async () => {
+      settingsReads += 1;
+      return "settings-password";
+    };
+
+    const pluginEnv = await daemonPassword.resolveDaemonPassword(fromSettings, {
+      home: secretHome,
+      env: {
+        SEND_TO_PASEO_DAEMON_PASSWORD: "plugin-env-password",
+        PASEO_PASSWORD: "standard-env-password",
+      },
+    });
+    check("plugin-specific env wins", pluginEnv === "plugin-env-password");
+    check("env resolution does not read settings", settingsReads === 0);
+
+    const standardEnv = await daemonPassword.resolveDaemonPassword(fromSettings, {
+      home: secretHome,
+      env: { PASEO_PASSWORD: "standard-env-password" },
+    });
+    check("standard Paseo env wins over the file", standardEnv === "standard-env-password");
+
+    const fromFile = await daemonPassword.resolveDaemonPassword(fromSettings, {
+      home: secretHome,
+      env: {},
+    });
+    check("VM secret file is trimmed and used", fromFile === "file-password");
+    check("file resolution does not read settings", settingsReads === 0);
+
+    await writeFile(secretFile, " \n");
+    const blankFile = await daemonPassword.resolveDaemonPassword(fromSettings, {
+      home: secretHome,
+      env: {},
+    });
+    check("blank secret file falls back to settings", blankFile === "settings-password");
+
+    await rm(secretFile);
+    const missingFile = await daemonPassword.resolveDaemonPassword(fromSettings, {
+      home: secretHome,
+      env: {},
+    });
+    check("missing secret file falls back to settings", missingFile === "settings-password");
+
+    const absent = await daemonPassword.resolveDaemonPassword(async () => null, {
+      home: secretHome,
+      env: {},
+    });
+    check("no configured source returns undefined", absent === undefined);
+
+    const failedSettings = await daemonPassword.resolveDaemonPassword(
+      async () => {
+        throw new Error("unreadable settings");
+      },
+      { home: secretHome, env: {} },
+    );
+    check("settings read errors do not expose details", failedSettings === undefined);
   }
 } finally {
   clearInterval(keepalive);

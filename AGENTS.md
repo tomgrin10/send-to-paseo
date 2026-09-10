@@ -128,9 +128,11 @@ sync.
   WebSocket is closed with `Password required`, so the bridge lists no providers, no modes, and
   every send fails. What `config.json` stores is a **bcrypt hash**, so the plaintext cannot be
   derived from it — `resolvePassword()` in `server/daemon.ts` reads
-  `SEND_TO_PASEO_DAEMON_PASSWORD`, then `PASEO_PASSWORD`, then `daemonPassword` in the plugin's
-  own `settings.json`. Prefer the settings file: the subprocess's environment is fixed at daemon
-  start and a daemon restart is forbidden, whereas a plugin reload is free.
+  `SEND_TO_PASEO_DAEMON_PASSWORD`, then `PASEO_PASSWORD`, then the VM convention
+  `~/paseo-hub/secrets/daemon-password`, then `daemonPassword` in the plugin's own `settings.json`.
+  The resolver never logs a value or its source. Prefer the VM secret file where that convention is
+  available; settings remain the reloadable fallback elsewhere. The subprocess's environment is
+  fixed at daemon start and a daemon restart is forbidden, whereas a plugin reload is free.
 - **`401` from `/api/status` is not "the daemon is unreachable".** It is behind auth on such a
   daemon, and reporting `daemon.reachable: false` was a false statement — the options page said
   "Paseo daemon unreachable" about a daemon that was running perfectly. Liveness comes from
@@ -280,10 +282,11 @@ export PASEO_PASSWORD='…'                     # the CLI reads this one
 paseo plugin reload send-to-paseo
 ```
 
-For the plugin itself prefer `daemonPassword` in
-`$PASEO_HOME/plugin-data/send-to-paseo/settings.json`: the subprocess inherits the daemon's
+For the plugin itself prefer `~/paseo-hub/secrets/daemon-password` on a VM that follows the shared
+secret convention. Else use `daemonPassword` in
+`$PASEO_HOME/plugin-data/send-to-paseo/settings.json`. The subprocess inherits the daemon's
 environment, which is fixed at **daemon start**, so a new env var would need a daemon restart —
-which is forbidden. A settings change only needs a plugin reload.
+which is forbidden. Either file is picked up by a plugin reload.
 
 Case 13 of the e2e suite is the only test that needs any of this. Every other case runs against
 the mock bridge.
@@ -293,7 +296,7 @@ the mock bridge.
 ```sh
 cd plugin
 npm run typecheck
-node check-deps.mjs                      # 45 checks; doctors PATH, never touches ~/.config/gh
+node check-deps.mjs                      # 54 checks; doctors PATH, tests password precedence, never touches ~/.config/gh
 paseo plugin reload send-to-paseo && paseo plugin ls   # needs PASEO_PASSWORD on an authed daemon
 paseo plugin logs send-to-paseo          # expect the three dependency self-check lines, no stack traces
 time paseo plugin reload send-to-paseo   # must finish in seconds, twice — proves no reload hang
