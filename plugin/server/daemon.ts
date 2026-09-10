@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { PaseoApi } from "@getpaseo/client";
+import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { BridgeError } from "../shared/contracts";
 import { settings } from "./settings";
 
@@ -29,7 +29,21 @@ function timeoutSignal(ms: number): AbortSignal {
   ).timeout(ms);
 }
 
-type ClientModule = typeof import("@getpaseo/client");
+type PaseoApi = PluginHandlerContext["paseo"];
+
+interface ClientModule {
+  createPaseoClient(options: {
+    url: string;
+    clientId: string;
+    reconnect: { enabled: boolean };
+    connectTimeoutMs: number;
+    suppressSendErrors: boolean;
+    password?: string;
+  }): PaseoApi & {
+    connect(): Promise<void>;
+    close(): Promise<void>;
+  };
+}
 
 let clientModule: ClientModule | null = null;
 

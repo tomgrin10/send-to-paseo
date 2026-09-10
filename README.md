@@ -35,7 +35,7 @@ Requires Paseo 0.8.0 or newer with plugins enabled, and `git`.
 **Plugin:**
 
 ```sh
-paseo plugin add tomgrin10/send-to-paseo --path plugin --ref v1.0.0
+paseo plugin add tomgrin10/send-to-paseo --path plugin --ref v1.0.1
 paseo plugin ls        # send-to-paseo must read `running` and `yes`
 ```
 
