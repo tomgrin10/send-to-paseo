@@ -225,7 +225,7 @@ listeners, so bubble containment at the host covers everything we can reach.
 
 GitHub does not render a Graphite stack. `findStackPrNumbers()` returns `[]`, which
 `CONTRACT.md` explicitly supports. Since 2026-09-01 the bridge derives the stack authoritatively
-from `gh pr list` (`plugin/gh.server.ts` → `viewStackGraph`) using only the PR's own head
+from `gh pr list` (`plugin/server/gh.ts` → `viewStackGraph`) using only the PR's own head
 branch, so the field is a supplement for members the graph cannot see — i.e. **closed or merged**
 stack PRs, because `listOpenPrs` only lists open ones. There is no safe, structural place on a
 GitHub PR page to read those from. Graphite's bot comment sometimes lists the stack, but it is

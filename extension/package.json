@@ -1,6 +1,6 @@
 {
   "name": "send-to-paseo-extension",
-  "version": "0.3.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Chrome MV3 extension: send an instruction from a Graphite PR to a new Paseo agent.",
   "type": "module",
@@ -14,7 +14,7 @@
   },
   "devDependencies": {
     "@types/chrome": "^0.1.28",
-    "esbuild": "^0.27.2",
+    "esbuild": "^0.28.2",
     "playwright-core": "1.58.0-alpha-2026-01-16",
     "typescript": "^5.9.3"
   }

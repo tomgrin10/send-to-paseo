@@ -3,7 +3,7 @@ import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { DEFAULT_PORT, RecentSendSchema, type RecentSend } from "./contracts.shared";
+import { DEFAULT_PORT, RecentSendSchema, type RecentSend } from "../shared/contracts";
 
 /**
  * The bridge's own state: the pairing token, the port, the default provider
@@ -53,7 +53,7 @@ const SettingsSchema = z.object({
    *
    * File-only, with no UI, because widening the set of names that can reach an
    * agent-starting endpoint is a security decision — see `hostAllowed` in
-   * bridge.server.ts.
+   * server/bridge.ts.
    */
   allowedHosts: z.array(z.string()).default([]),
   /**
@@ -67,7 +67,7 @@ const SettingsSchema = z.object({
    *
    * Treated exactly like `token`: file-only with no UI, 0600, never logged,
    * never echoed into an error, and never part of a status payload. See
-   * `resolvePassword` in daemon.server.ts.
+   * `resolvePassword` in server/daemon.ts.
    */
   daemonPassword: z.string().nullable().default(null),
 });

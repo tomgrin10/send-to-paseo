@@ -17,18 +17,17 @@ import {
   type ModeOption,
   type PingResponse,
   type ProviderOption,
-} from "./contracts.shared";
-import { readDaemonStatus, withPaseo } from "./daemon.server";
-import { logDependencySelfCheck } from "./deps.server";
-import { lifecycle } from "./lifecycle.shared";
+} from "../shared/contracts";
+import { readDaemonStatus, withPaseo } from "./daemon";
+import { logDependencySelfCheck } from "./deps";
 import {
   handleResolve,
   listEffectiveProviders,
   listModes,
   resolveSelectedProfile,
-} from "./resolve.server";
-import { handleSend, isDryRun, recordFailedSend } from "./send.server";
-import { previewToken, settings, tokenMatches } from "./settings.server";
+} from "./resolve";
+import { handleSend, isDryRun, recordFailedSend } from "./send";
+import { previewToken, settings, tokenMatches } from "./settings";
 
 /**
  * The local HTTP bridge the Chrome extension talks to.
@@ -48,9 +47,7 @@ import { previewToken, settings, tokenMatches } from "./settings.server";
  * It also owns the reload story. A listening HTTP server keeps the plugin
  * subprocess event loop alive, which wedges Paseo's "Stopping plugin" step, so
  * teardown closes the listener *and* every keep-alive socket and waits for the
- * close to complete. That teardown is handed to `index.ts` through
- * `lifecycle.shared`, never by name, because Paseo strips `*.server` imports
- * out of the client bundle.
+ * close to complete. The v0.8 server entry owns that lifecycle directly.
  */
 
 const BIND_HOST = "127.0.0.1";
@@ -621,21 +618,18 @@ export async function getBridgeStatus(): Promise<BridgeStatus> {
   };
 }
 
-/**
- * Starts as an import side effect and registers teardown through the shared
- * lifecycle object. `contribute()` cannot do either: Paseo strips `*.server`
- * imports from the client bundle while keeping the surrounding statements, so
- * naming anything in this module from the cleanup returned by `index.ts` would
- * throw a ReferenceError in the app and break every contribution.
- */
-lifecycle.teardown = async () => {
-  stopping = true;
-  await startPromise?.catch(() => undefined);
-  await stopBridge();
-};
+/** Start the bridge for the v0.8 server entry and return its cleanup. */
+export function runBridge(): () => Promise<void> {
+  stopping = false;
+  startPromise = startBridge().catch((error: unknown) => {
+    status.state = "failed";
+    status.error = error instanceof Error ? error.message : String(error);
+    console.error("[send-to-paseo] bridge failed to start", status.error);
+  });
 
-startPromise = startBridge().catch((error: unknown) => {
-  status.state = "failed";
-  status.error = error instanceof Error ? error.message : String(error);
-  console.error("[send-to-paseo] bridge failed to start", status.error);
-});
+  return async () => {
+    stopping = true;
+    await startPromise?.catch(() => undefined);
+    await stopBridge();
+  };
+}

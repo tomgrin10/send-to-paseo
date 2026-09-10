@@ -277,7 +277,7 @@ current PR filtered out, because Graphite includes it.
 
 **On GitHub `findStackPrNumbers()` returns `[]`, deliberately.** GitHub renders no stack, and
 since 2026-09-01 the bridge derives the stack authoritatively from `gh pr list`
-(`plugin/gh.server.ts` → `viewStackGraph`) using only the PR's own head branch. The field is
+(`plugin/server/gh.ts` → `viewStackGraph`) using only the PR's own head branch. The field is
 now a supplement for members that graph cannot see — i.e. **closed or merged** stack PRs,
 since `listOpenPrs` lists open ones only. There is no structural place on a GitHub PR page to
 read those from, so nothing is invented. `test/fixtures/github-pr-no-anchor.html` deliberately

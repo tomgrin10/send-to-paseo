@@ -3,7 +3,7 @@
  *
  *   cd plugin && node check-deps.mjs
  *
- * Runs the real `deps.server`, `gh.server`, `git.server` and `contracts.shared`
+ * Runs the real `server/deps`, `server/gh`, `server/git` and `shared/contracts`
  * against a doctored `PATH` and against fake `gh` executables, so the answers to
  * "what happens with no gh?" and "what happens with an unauthenticated gh?" are
  * measured rather than reasoned about. It never touches the user's gh config,
@@ -11,7 +11,7 @@
  * removes on the way out.
  *
  * Why .mjs and not part of the plugin: the plugin's own modules import
- * `@getpaseo/plugin/server`, which only exists inside the Paseo host. A resolve
+ * `@getpaseo/plugin`, which only exists inside the Paseo host. A resolve
  * hook below points that one specifier at a two-line stub, which is enough
  * because all this file exercises is `defineRpc`'s call signature.
  *
@@ -32,14 +32,13 @@ const stubUrl = new URL("./check-deps.stub.mjs", here).href;
 
 registerHooks({
   resolve(specifier, context, next) {
-    if (specifier === "@getpaseo/plugin/server") {
+    if (specifier === "@getpaseo/plugin") {
       return { url: stubUrl, shortCircuit: true };
     }
     // The plugin is compiled with `moduleResolution: "Bundler"`, so its own
-    // imports are extensionless ("./contracts.shared"). Node's ESM resolver
+    // imports are extensionless ("../shared/contracts"). Node's ESM resolver
     // needs the extension; the plugin host's bundler supplies it.
-    // NB: the test is for a *known* extension, not for a dot — every module
-    // here is named `something.shared` / `something.server`.
+    // NB: the test is for a known file extension, not for a dot in a path.
     if (specifier.startsWith(".") && !/\.(ts|tsx|mjs|cjs|js|json)$/i.test(specifier)) {
       return next(`${specifier}.ts`, context);
     }
@@ -52,10 +51,10 @@ await writeFile(
   "export const defineRpc = (contract) => contract;\nexport default { defineRpc };\n",
 );
 
-const deps = await import("./deps.server.ts");
-const gh = await import("./gh.server.ts");
-const git = await import("./git.server.ts");
-const shared = await import("./contracts.shared.ts");
+const deps = await import("./server/deps.ts");
+const gh = await import("./server/gh.ts");
+const git = await import("./server/git.ts");
+const shared = await import("./shared/contracts.ts");
 
 /* -- tiny harness ---------------------------------------------------------- */
 
@@ -184,7 +183,7 @@ try {
       pr,
       prompt: "Fix the merge conflicts",
       workspaceBranch: "giz-1132-retire-legacy-cache-flag",
-      // Byte-for-byte what send.server's promptNote() builds.
+      // Byte-for-byte what server/send's promptNote() builds.
       prMetadataNote: `Note: the pull request title and branch names are missing from this header because ${outage.short}. Read them from the PR URL above if you need them.`,
     });
     console.log(`  --- composed prompt ---\n${prompt}\n  -----------------------`);

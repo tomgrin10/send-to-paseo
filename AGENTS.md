@@ -37,7 +37,7 @@ unknown field rather than rejecting the body.
 `PLAN.md` records the design and, more importantly, the research that justifies it. Read it before
 proposing an architectural change; several obvious-looking alternatives were tested and rejected.
 
-Minimum supported Paseo is 0.7.0, which is also what the README badge claims. Keep the two in
+Minimum supported Paseo is 0.8.0, which is also what the README badge claims. Keep the two in
 sync.
 
 ## Hard-won facts — do not re-derive
@@ -65,7 +65,7 @@ sync.
   only while the graph is built from `--state open`. `vercel/turborepo` #13875 is really `MERGED`
   with `headRefName: "main"` **and** `baseRefName: "main"`, so the moment merged PRs were admitted
   to the graph (2026-09-02, for merged-branch stack detection) trunk became a node and fused 13
-  unrelated open PRs into one false stack. Hence `trunkLikeHeads` in `gh.server.ts`: a non-open PR
+  unrelated open PRs into one false stack. Hence `trunkLikeHeads` in `server/gh.ts`: a non-open PR
   whose head is trunk by name, or which has `TRUNK_FANOUT` children, is not a stack node. Do not
   simplify that guard away on the grounds that `main` is never a head.
 - **The `graphite-base/942` ref in Graphite's UI is display-only.** `gh` reports the real base
@@ -127,7 +127,7 @@ sync.
   given it.** `daemon.listen: "0.0.0.0:6767"` turns on `daemon.auth.password`, and then the SDK
   WebSocket is closed with `Password required`, so the bridge lists no providers, no modes, and
   every send fails. What `config.json` stores is a **bcrypt hash**, so the plaintext cannot be
-  derived from it — `resolvePassword()` in `daemon.server.ts` reads
+  derived from it — `resolvePassword()` in `server/daemon.ts` reads
   `SEND_TO_PASEO_DAEMON_PASSWORD`, then `PASEO_PASSWORD`, then `daemonPassword` in the plugin's
   own `settings.json`. Prefer the settings file: the subprocess's environment is fixed at daemon
   start and a daemon restart is forbidden, whereas a plugin reload is free.
@@ -142,8 +142,8 @@ sync.
 - **The daemon's `PATH` is not the user's `PATH`.** `/Applications/Paseo.app` is launched by
   launchd with `PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin` — no `/opt/homebrew/bin`, so a
   Homebrew `gh` would be invisible to the plugin while working perfectly in a terminal. Paseo
-  0.7.0 does enrich the subprocess environment (measured: the plugin subprocess got the full login
-  `PATH`), so this is **latent, not currently biting**. `deps.server.ts` probes well-known install
+  0.7.0 did enrich the subprocess environment (measured: the plugin subprocess got the full login
+  `PATH`), so this is **latent, not currently biting**. `server/deps.ts` probes well-known install
   locations after `PATH` anyway, because that enrichment is a host behaviour and not a contract.
 - **The extension is paired with a LIST of bridges, not one.** Two Paseo machines is the normal
   case, the remote one reached by forwarding its loopback port here (`ssh -L 7789:127.0.0.1:7788`).
@@ -188,12 +188,13 @@ sync.
 
 Paseo bundles these differently — the suffixes are load-bearing, not style:
 
-- `*.client.tsx` — React Native UI. Colour every `Text` from `theme.colors`
+- `index.client.tsx` and `client/` — React Native UI. Colour every `Text` from `theme.colors`
   (`foreground` / `foregroundMuted`), root view from `theme.colors.surface0`, spacing from
   `layout.compact`. Unstyled text is black and unreadable in dark themes.
-- `*.server.ts` — Node APIs, filesystem, subprocesses, the daemon connection, credentials.
-- `*.shared.ts` — Zod contracts and plain values safe in both runtimes.
-- `index.ts` — contribution wiring only.
+- `index.server.ts` and `server/` — Node APIs, filesystem, subprocesses, the daemon connection,
+  credentials and RPC handlers.
+- `shared/` — Zod contracts and plain values safe in both runtimes.
+- Plugin-root code modules are forbidden except the two exact runtime entries.
 
 Add nothing to `dependencies`. Every external module the plugin imports is host-provided, and
 `@getpaseo/client` is deliberately borrowed at runtime through an assembled specifier so the
@@ -201,18 +202,14 @@ compiler cannot resolve it — that is what keeps the plugin installable with no
 step and its protocol version identical to the daemon's. `npm install` exists for `npm run
 typecheck` and nothing else.
 
-Two failure modes that have already cost time elsewhere in this codebase's lineage:
+One failure mode that has already cost time elsewhere in this codebase's lineage:
 
 1. **A listening HTTP server wedges plugin reload.** It keeps the subprocess event loop alive and
    hangs Paseo's "Stopping plugin" step. Cleanup must await `server.close()` *and*
    `server.closeAllConnections()`.
-2. **Naming a `*.server.ts` identifier in the cleanup returned from `index.ts` breaks every
-   contribution.** Paseo strips server imports from the client bundle but keeps the surrounding
-   code. Hand teardown off through `lifecycle.shared.ts`.
-
 There are no `setInterval`s anywhere in the plugin, and there must not be: the rate-limit window
 is pruned lazily on each request precisely because a live timer in this subprocess is what hangs
-teardown. Every external command goes through `deps.server.ts`, which resolves a real executable
+teardown. Every external command goes through `server/deps.ts`, which resolves a real executable
 and `execFile`s it with an argv array; a lookup that bypasses it also bypasses the well-known-path
 probe and the self-check.
 
@@ -391,7 +388,7 @@ Exercised: `v0.1.0`, `v0.2.0` and `v0.3.0` are published. `origin` is
   breaking behaviour or compatibility changes. `contract` in `CONTRACT.md` is versioned separately
   and only increments on a breaking wire change — an additive optional field does not touch it.
 - The version lives in four places and they must agree: `plugin/package.json`,
-  `PLUGIN_VERSION` in `plugin/contracts.shared.ts`, `extension/package.json`, and `version` in
+  `PLUGIN_VERSION` in `plugin/shared/contracts.ts`, `extension/package.json`, and `version` in
   `extension/public/manifest.json`. Update the Paseo minimum in the README badge only when
   compatibility actually changes.
 - Before publishing, require a clean tree, passing typechecks on both halves, `node

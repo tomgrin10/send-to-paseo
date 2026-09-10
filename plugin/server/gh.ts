@@ -4,14 +4,14 @@ import {
   type PrPayload,
   type PrRef,
   type StackPrState,
-} from "./contracts.shared";
-import { INSTALL_HINT, findGh, ghEnv, runProcess } from "./deps.server";
+} from "../shared/contracts";
+import { INSTALL_HINT, findGh, ghEnv, runProcess } from "./deps";
 
 /**
  * Pull-request lookups through the real `gh` binary.
  *
  * `gh` is a shell *function* in some users' zsh, so this module resolves the
- * executable itself (see `deps.server`) and calls it with `execFile` and an
+ * executable itself (see `server/deps`) and calls it with `execFile` and an
  * argv array. Nothing here ever goes through a shell, which means the function
  * is bypassed and no part of an HTTP request can become shell syntax.
  *

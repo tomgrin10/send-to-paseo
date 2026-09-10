@@ -20,10 +20,10 @@ import {
   type SendRequest,
   type SendResponse,
   type StackPrState,
-} from "./contracts.shared";
-import { requireServerId, withPaseo } from "./daemon.server";
-import { lookupPr, type GhOutage } from "./gh.server";
-import { readBranch, requireGit } from "./git.server";
+} from "../shared/contracts";
+import { requireServerId, withPaseo } from "./daemon";
+import { lookupPr, type GhOutage } from "./gh";
+import { readBranch, requireGit } from "./git";
 import {
   listProjectWorkspaces,
   profileProviderId,
@@ -32,8 +32,8 @@ import {
   resolveProject,
   resolveSelectedProfile,
   resolveStackBranches,
-} from "./resolve.server";
-import { settings } from "./settings.server";
+} from "./resolve";
+import { settings } from "./settings";
 
 /**
  * The one mutating endpoint: ensure a workspace, then start a brand new agent
@@ -57,7 +57,7 @@ function syntheticId(prefix: string): string {
  * CONTRACT.md: required, 1..16000 Unicode code points after trim.
  *
  * Code points, not UTF-16 code units, so an emoji counts once. The 64 KiB byte
- * cap on the body is independent and is applied earlier in `bridge.server`, so a
+ * cap on the body is independent and is applied earlier in `server/bridge`, so a
  * prompt inside this limit that is too large as UTF-8 gets `payload_too_large`
  * rather than `bad_request`.
  */

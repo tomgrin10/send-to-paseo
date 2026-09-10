@@ -1,4 +1,4 @@
-import { defineRpc } from "@getpaseo/plugin/server";
+import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 
 /**
@@ -9,7 +9,7 @@ import { z } from "zod";
 
 /** Advertised in `GET /v1/ping`. Keep in step with `package.json`. */
 export const PLUGIN_NAME = "send-to-paseo";
-export const PLUGIN_VERSION = "0.3.0";
+export const PLUGIN_VERSION = "1.0.0";
 /** Bumped only for an incompatible bridge API; the paths stay `/v1`. */
 export const CONTRACT_VERSION = 1;
 
@@ -454,14 +454,14 @@ export const clearRecentSends = defineRpc({
  *
  * A local reimplementation of `buildAgentDeepLink` from
  * `@getpaseo/protocol/agent-deep-link`, transcribed from
- * `packages/protocol/src/agent-deep-link.ts` in Paseo 0.7.0 (verified against
- * the published `@getpaseo/protocol@0.7.0` `dist/agent-deep-link.js`, which is
+ * `packages/protocol/src/agent-deep-link.ts` in Paseo 0.7.0 and rechecked for
+ * the v0.8 migration (verified against the published package implementation, which is
  * byte-identical in behaviour).
  *
  * It is copied rather than imported because `paseo plugin add` compiles a plugin
  * with *no installed packages*: the only specifiers the host makes resolvable are
  * its own SDK (`@getpaseo/plugin`, `@getpaseo/plugin/server`,
- * `@getpaseo/plugin/react-native`), `zod`, `react`, `react/jsx-runtime`,
+ * `@getpaseo/plugin/client`, `@getpaseo/plugin/client/react-native`), `zod`, `react`, `react/jsx-runtime`,
  * `react-native` and `@tanstack/react-query`. `@getpaseo/protocol` is not one of
  * them, so a value import from it fails the install with
  * `Could not resolve "@getpaseo/protocol/agent-deep-link"`. See

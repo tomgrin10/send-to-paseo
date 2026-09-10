@@ -462,7 +462,7 @@ paseo://h/<encodeURIComponent(serverId)>/agent/<encodeURIComponent(agentId)>
 ```
 
 Both segments are trimmed first; an empty `serverId` or `agentId` is an error, not a
-link. The plugin implements this itself (`buildAgentDeepLink` in `contracts.shared.ts`)
+link. The plugin implements this itself (`buildAgentDeepLink` in `plugin/shared/contracts.ts`)
 rather than importing `@getpaseo/protocol/agent-deep-link`, because `@getpaseo/protocol`
 is not a host-provided module and importing it breaks `paseo plugin add` — see
 `plugin/VERIFICATION.md` §18. The two were proved byte-identical across 14 cases,
