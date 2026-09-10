@@ -274,7 +274,7 @@ try {
   const repoDir = await makeDir("repo");
   await fakeGh(
     repoDir,
-    "echo 'GraphQL: Could not resolve to a Repository with the name \\'acmegizmos/gizmo-poc\\'. (repository)' >&2\nexit 1",
+    `echo "GraphQL: Could not resolve to a Repository with the name 'acmegizmos/gizmo-poc'. (repository)" >&2\nexit 1`,
   );
   await withPath(repoDir, async () => {
     const { outage } = await gh.lookupPr(REF);
