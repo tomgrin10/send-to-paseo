@@ -26,7 +26,7 @@ through its own forge credentials. `gh` only supplies metadata.
 
 | | Required? | Minimum verified | What it is used for | What breaks without it |
 | --- | --- | --- | --- | --- |
-| **Paseo** | yes | `0.7.0` | Everything. The plugin borrows the host's `@getpaseo/client` at runtime. | The plugin does not load. |
+| **Paseo** | yes | `0.8.0` | Everything. The plugin uses Paseo 0.8's split client/server runtime entries. | The plugin does not load. |
 | **`git`** | yes | `2.51.2` | Reading the branch a workspace is on, and the repository's `origin`. Paseo itself needs it to create a worktree. | Creating a worktree fails with a message naming `git`. Workspace branches read as unknown, so nothing is ranked as an exact or stack match — everything falls back to "create". |
 | **`gh`** | **no** | `2.98.0` | PR title, head and base branch names, and stack discovery (`gh pr list` rebuilds the whole Graphite stack, including its merged and closed members). | Sending still works. You lose the PR title, the branch names, exact/stack candidate ranking, and the `Title:`/`Branch:` lines in the agent's prompt. Stack detection is lost **entirely**, local git ancestry included: that check proves "this branch is an ancestor of a branch in the stack", and without `gh` there is no stack and no PR head branch to compare against. The bridge says so in the target picker, in the agent's prompt and in the log. |
 
@@ -66,8 +66,8 @@ and the daemon is normally started by the desktop app rather than by your shell.
 PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin
 ```
 
-— no `/opt/homebrew/bin`. Paseo does enrich `PATH` for plugin subprocesses in
-`0.7.0` (measured: the subprocess got the full login `PATH`), but the plugin does
+— no `/opt/homebrew/bin`. Paseo enriched `PATH` for plugin subprocesses in the
+original `0.7.0` measurement, but the plugin does
 not rely on that. Every lookup searches, in order:
 
 1. `SEND_TO_PASEO_GH_PATH` / `SEND_TO_PASEO_GIT_PATH`, if set;
@@ -112,7 +112,7 @@ One command, straight from the public repository. No clone, no `npm install`, no
 build step:
 
 ```sh
-paseo plugin add tomgrin10/send-to-paseo --path plugin
+paseo plugin add tomgrin10/send-to-paseo --path plugin --ref v1.0.0
 paseo plugin ls          # expect: send-to-paseo  running  yes
 paseo plugin logs send-to-paseo
 ```
@@ -124,8 +124,9 @@ be `true` in the daemon's `config.json`.
 
 There is nothing to install because the plugin imports nothing at runtime that
 the Paseo host does not already provide — see
-[No runtime dependencies, ever](#no-runtime-dependencies-ever). To upgrade later,
-re-run `paseo plugin add` (or `paseo plugin reload send-to-paseo` for a checkout).
+[No runtime dependencies, ever](#no-runtime-dependencies-ever). To upgrade a
+Git-managed install, run `paseo plugin update send-to-paseo`; for a checkout,
+run `paseo plugin reload send-to-paseo`.
 
 ### From a checkout (contributors)
 
@@ -157,7 +158,8 @@ no `npm install` step in that path, and the daemon's bundler can only resolve th
 specifiers the host provides at runtime:
 
 ```
-@getpaseo/plugin   @getpaseo/plugin/server   @getpaseo/plugin/react-native
+@getpaseo/plugin   @getpaseo/plugin/client   @getpaseo/plugin/server
+@getpaseo/plugin/client/react-native
 zod   react   react/jsx-runtime   react-native   @tanstack/react-query
 node:*  (built-ins, in the server bundle)
 ```
@@ -171,7 +173,7 @@ so `npm run typecheck` works for contributors.
 > machine that has run `npm install` — so it will not be caught locally. Imports
 > from `@getpaseo/client` and `@getpaseo/protocol` must stay `import type` (erased
 > at build time) or be reimplemented locally; the one runtime use of the Paseo SDK
-> goes through the assembled-specifier `require` in `daemon.server.ts`, precisely
+> goes through the assembled-specifier `require` in `server/daemon.ts`, precisely
 > so the bundler cannot see it. Before changing an import, read
 > [`VERIFICATION.md`](VERIFICATION.md) §18, which includes the exact
 > no-`node_modules` build command that proves an install still works.
@@ -755,24 +757,24 @@ endpoint and a wrong method on a known endpoint both return
 
 ## Layout
 
-`*.client.tsx` / `*.server.ts` / `*.shared.ts` matter: Paseo bundles the three
-runtimes differently and strips `*.server` imports out of the client bundle.
+Paseo 0.8 uses separate runtime entries and directory boundaries. Client code,
+server code and shared contracts compile into their matching bundles.
 
 ```
-paseo-plugin.json      { "id": "send-to-paseo" }
-index.ts               contribution wiring only
-bridge.server.ts       the HTTP server, security checks, routing, lifecycle
-resolve.server.ts      PR -> project -> workspace resolution and ranking
-send.server.ts         workspace ensure + agent create + prompt composition
-deps.server.ts         binary lookup, spawn wrapper, dependency self-check
-gh.server.ts           the gh calls and their graceful degradation, cached
-git.server.ts          read-only branch, remote, trunk and ancestry reads
-daemon.server.ts       short-lived Paseo SDK connections, daemon identity
-settings.server.ts     token, port, default model, recent sends
-contracts.shared.ts    Zod schemas, error taxonomy, pure formatting, RPC contracts
-lifecycle.shared.ts    teardown handoff (see below)
-settings.client.tsx    the Paseo surface
-check-deps.mjs         standalone dependency-degradation checks (not bundled)
+paseo-plugin.json          id and Paseo >=0.8.0 requirement
+index.client.tsx           client contribution wiring
+index.server.ts            RPC handlers and bridge lifecycle
+client/settings.tsx        the Paseo surface
+server/bridge.ts           HTTP server, security checks and routing
+server/resolve.ts          PR -> project -> workspace resolution and ranking
+server/send.ts             workspace ensure + agent create + prompt composition
+server/deps.ts             binary lookup, spawn wrapper, dependency self-check
+server/gh.ts               gh calls and their graceful degradation, cached
+server/git.ts              read-only branch, remote, trunk and ancestry reads
+server/daemon.ts           short-lived Paseo SDK connections, daemon identity
+server/settings.ts         token, port, default model, recent sends
+shared/contracts.ts        Zod schemas, error taxonomy, formatting, RPC contracts
+check-deps.mjs             standalone dependency-degradation checks (not bundled)
 ```
 
 ### Three traps this plugin is built around
@@ -784,23 +786,19 @@ event loop alive, Paseo's "Stopping plugin" step never returns, and
 keep-alive sockets otherwise hold the listener open), and awaits the close with a
 grace timeout. There are no `setInterval`s anywhere in the plugin.
 
-**Naming a server module from the cleanup function breaks every contribution.**
-Paseo deletes `*.server` imports from the client bundle but keeps the surrounding
-statements, and the cleanup returned by `contribute()` runs in the client too — so
-a server identifier there is a `ReferenceError` that aborts all registrations.
-`bridge.server.ts` therefore starts as an import side effect and publishes its
-teardown through `lifecycle.shared.ts`; `index.ts` only ever touches that shared
-object.
+**Crossing a runtime directory is a compile error.** `index.client.tsx` imports
+only `client/` and `shared/`; `index.server.ts` imports only `server/` and
+`shared/`. The server entry can therefore own bridge startup and return its
+cleanup directly, without the old mixed-entry teardown handoff.
 
 **A runtime import the host does not provide breaks the install, not the build.**
 `npm run typecheck` passes, `paseo plugin reload` from a checkout passes, and
 `paseo plugin add tomgrin10/send-to-paseo` fails for everyone — because only the
 git path compiles with no `node_modules`. See
 [No runtime dependencies, ever](#no-runtime-dependencies-ever); this is why
-`buildAgentDeepLink` lives in `contracts.shared.ts` rather than being imported
-from `@getpaseo/protocol`, and why `daemon.server.ts` reaches the SDK through an
+`buildAgentDeepLink` lives in `shared/contracts.ts` rather than being imported
+from `@getpaseo/protocol`, and why `server/daemon.ts` reaches the SDK through an
 assembled specifier.
 
-The first two are demonstrated in [`VERIFICATION.md`](VERIFICATION.md) §3 and
-§10: five consecutive reloads under a second each, and a harness process that
-exits on its own once cleanup runs. The third is §18.
+The listener cleanup and no-runtime-dependency rules are demonstrated in
+[`VERIFICATION.md`](VERIFICATION.md) §3, §10 and §18.

@@ -71,7 +71,7 @@ export function createGithubAdapter(
      * `CONTRACT.md` states `stackPrNumbers` is optional and may be `[]`.
      *
      * More to the point: since 2026-09-01 the bridge resolves the stack
-     * authoritatively server-side. `plugin/gh.server.ts`'s `viewStackGraph`
+     * authoritatively server-side. `plugin/server/gh.ts`'s `viewStackGraph`
      * rebuilds the whole base->head chain from one `gh pr list` using only this
      * PR's own head branch, so it needs nothing from us. The field survives
      * only as a *supplement* for stack members that graph cannot see — which,

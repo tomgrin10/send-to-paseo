@@ -111,23 +111,22 @@ into the new agent in the desktop app.
 
 ## 3. Component A — the Paseo plugin
 
-Following the file-suffix convention already established in an earlier Paseo plugin of ours
-(`*.client.tsx` / `*.server.ts` / `*.shared.ts`), because Paseo bundles those runtimes
-differently.
+Following Paseo 0.8's runtime-entry and directory boundaries, because Paseo bundles the client and
+server runtimes separately.
 
 ```
 send-to-paseo-plugin/
   paseo-plugin.json          { "id": "send-to-paseo" }
-  index.ts                   contribution wiring only
-  bridge.server.ts           the HTTP server
-  resolve.server.ts          PR → project → workspace resolution
-  send.server.ts             workspace ensure + agent create
-  gh.server.ts               execFile wrapper around the gh binary
-  git.server.ts              branch reads, cached
-  settings.server.ts         token + config at $PASEO_HOME/plugin-data/send-to-paseo/
-  contracts.shared.ts        Zod contracts (RPC + HTTP payloads share them)
-  lifecycle.shared.ts        teardown handoff (see the bundling trap below)
-  settings.client.tsx        the Paseo surface: status, token, defaults, recent sends
+  index.client.tsx           client contribution wiring
+  index.server.ts            RPC handlers + bridge lifecycle
+  client/settings.tsx        status, token, defaults and recent sends surface
+  server/bridge.ts           the HTTP server
+  server/resolve.ts          PR → project → workspace resolution
+  server/send.ts             workspace ensure + agent create
+  server/gh.ts               execFile wrapper around the gh binary
+  server/git.ts              branch reads, cached
+  server/settings.ts         token + config at $PASEO_HOME/plugin-data/send-to-paseo/
+  shared/contracts.ts        Zod contracts (RPC + HTTP payloads share them)
 ```
 
 ### The HTTP bridge
@@ -143,7 +142,7 @@ Bound to `127.0.0.1` only, default port `7788` (configurable). Endpoints, all ve
 `/v1/resolve` existing as a separate call is what makes the confirm-picker UX feel instant: the
 popover fetches candidates the moment it opens, while you're still typing.
 
-### The resolution ladder (`resolve.server.ts`)
+### The resolution ladder (`server/resolve.ts`)
 
 1. `owner/repo` → `remote:github.com/{owner}/{repo}`. Verify against `paseo.projects.list()`;
    fall back to matching a project whose `origin` remote URL parses to the same `owner/repo`
@@ -162,7 +161,7 @@ popover fetches candidates the moment it opens, while you're still typing.
 6. The default selection is rank 1 if present, otherwise the synthetic create option. The
    popover shows that default and every alternative.
 
-### Sending (`send.server.ts`)
+### Sending (`server/send.ts`)
 
 Ensure the workspace (existing, or create via `checkout-pr`), then
 `paseo.agents.create({ cwd, prompt, title, config: { provider }, labels })` with:
@@ -177,7 +176,7 @@ The prompt sent to the agent is your text plus a short header giving the agent t
 branch and title — so "Fix merge conflicts" is actionable without the agent having to guess what
 it's working on.
 
-### The Paseo surface (`settings.client.tsx`)
+### The Paseo surface (`client/settings.tsx`)
 
 A sidebar item, so all configuration lives in Paseo rather than a JSON file you have to find:
 
@@ -288,10 +287,9 @@ privilege boundary, not a convenience:
   server does the same, harder. Cleanup must `server.close()` **and**
   `server.closeAllConnections()` (keep-alive sockets will otherwise hold it open), then await
   the close.
-- **The client-bundle import trap.** Paseo strips `*.server.ts` imports from the client bundle but
-  keeps the surrounding code — so naming a server identifier inside the cleanup returned from
-  `index.ts` breaks *every* contribution. The earlier plugin solves this with a `lifecycle.shared.ts`
-  handoff object; I'll use the same pattern rather than rediscovering it.
+- **Runtime crossing.** Paseo 0.8 compiles `client/`, `server/`, and `shared/` as strict boundaries.
+  The client entry never imports `server/`; the server entry owns the HTTP listener and returns its
+  cleanup directly.
 - **Port already in use.** Fail loudly into the surface's status line and `paseo plugin logs`,
   not silently.
 - **Graphite deploy rotates class hashes.** Anchor ladder + floating fallback; no data ever comes

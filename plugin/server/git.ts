@@ -1,16 +1,16 @@
 import { readFile, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve as resolvePath } from "node:path";
-import { INSTALL_HINT, findGit, runProcess } from "./deps.server";
-import { BridgeError } from "./contracts.shared";
+import { INSTALL_HINT, findGit, runProcess } from "./deps";
+import { BridgeError } from "../shared/contracts";
 
 /**
  * Branch and remote reads for workspace directories.
  *
  * Every call goes through `execFile` with an argv array and no shell (see
- * `deps.server`), so nothing here can be influenced by the user's shell
+ * `server/deps`), so nothing here can be influenced by the user's shell
  * functions, aliases or `$PATH` ordering surprises.
  *
- * Most reads never spawn anything: `resolve.server` prefers the branch the
+ * Most reads never spawn anything: `server/resolve` prefers the branch the
  * daemon already reports on each workspace descriptor and only falls back to
  * this module when that field is missing. When it does spawn, results are
  * cached against the mtime of the worktree's `HEAD`, so repeated popover opens
@@ -218,7 +218,7 @@ function looksLikeRefName(name: string): boolean {
  * single local ref read. Measured across this machine's Paseo projects on
  * 2026-09-02: 2 of 3 git projects had it, the third did not (the ref can be
  * missing after a `git init` + `git remote add`, or after some mirror/partial
- * clone flows). So callers must handle `null`, and `gh.server` has a
+ * clone flows). So callers must handle `null`, and `server/gh` has a
  * `gh repo view` fallback for exactly that case.
  *
  * Trunk matters because widening stack discovery to merged pull requests makes

@@ -16,7 +16,7 @@ import { delimiter, isAbsolute, join } from "node:path";
  * shell, so it inherits a *login-less* PATH.
  *
  * Be precise about what was actually measured (VERIFICATION.md 16.2), because
- * this is latent rather than currently biting: on macOS 26.6 with Paseo 0.7.0
+ * this was latent rather than biting during the original macOS 26.6 / Paseo 0.7.0 measurement:
  * the plugin subprocess got the user's FULL interactive PATH — the host enriches
  * it. One process up, `Paseo.app` itself had
  *

@@ -1,7 +1,8 @@
 # send-to-paseo
 
-[![Paseo](https://img.shields.io/badge/Paseo-%E2%89%A5%200.7.0-8A63D2?style=for-the-badge)](https://paseo.sh)
-[![License](https://img.shields.io/badge/license-MIT-2563eb?style=for-the-badge)](LICENSE)
+[![Paseo](https://img.shields.io/badge/Paseo-%E2%89%A5%200.8.0-8A63D2?style=for-the-badge)](https://paseo.sh)
+[![Release](https://img.shields.io/github/v/release/tomgrin10/send-to-paseo?display_name=tag&sort=semver&style=for-the-badge&label=release&color=6366f1)](https://github.com/tomgrin10/send-to-paseo/releases/latest)
+[![License](https://img.shields.io/github/license/tomgrin10/send-to-paseo?style=for-the-badge&color=2563eb)](LICENSE)
 
 Start a [Paseo](https://paseo.sh) agent on the pull request you are already looking at.
 
@@ -29,12 +30,12 @@ on github.com and on Graphite.
 
 ## Install
 
-Requires Paseo 0.7.0 or newer with plugins enabled, and `git`.
+Requires Paseo 0.8.0 or newer with plugins enabled, and `git`.
 
 **Plugin:**
 
 ```sh
-paseo plugin add tomgrin10/send-to-paseo --path plugin
+paseo plugin add tomgrin10/send-to-paseo --path plugin --ref v1.0.0
 paseo plugin ls        # send-to-paseo must read `running` and `yes`
 ```
 

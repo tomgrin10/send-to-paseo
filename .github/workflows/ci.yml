@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            plugin/package-lock.json
+            extension/package-lock.json
+      - name: Install plugin dependencies
+        working-directory: plugin
+        run: npm ci
+      - name: Verify plugin
+        working-directory: plugin
+        run: npm run typecheck && node check-deps.mjs
+      - name: Install extension dependencies
+        working-directory: extension
+        run: npm ci
+      - name: Install Chromium
+        working-directory: extension
+        run: npx playwright-core install --with-deps chromium
+      - name: Verify extension
+        working-directory: extension
+        run: STP_CHROMIUM="$(node -e 'console.log(require("playwright-core").chromium.executablePath())')" npm run verify

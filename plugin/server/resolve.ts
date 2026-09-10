@@ -12,8 +12,8 @@ import {
   type ResolveRequest,
   type ResolveResponse,
   type StackPrState,
-} from "./contracts.shared";
-import { withPaseo } from "./daemon.server";
+} from "../shared/contracts";
+import { withPaseo } from "./daemon";
 import {
   ANCESTRY_STACK_DISTANCE,
   UNKNOWN_STACK_DISTANCE,
@@ -24,15 +24,15 @@ import {
   type GhOutage,
   type StackGraph,
   type StackMember,
-} from "./gh.server";
+} from "./gh";
 import {
   branchesContaining,
   parseGithubRemote,
   readBranch,
   readOriginOwnerRepo,
   readTrunkBranch,
-} from "./git.server";
-import { settings } from "./settings.server";
+} from "./git";
+import { settings } from "./settings";
 
 /**
  * PR -> project -> workspace resolution, exactly the ladder in CONTRACT.md.

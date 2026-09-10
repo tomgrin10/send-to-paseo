@@ -3,8 +3,8 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { PaseoApi } from "@getpaseo/client";
-import { BridgeError } from "./contracts.shared";
-import { settings } from "./settings.server";
+import { BridgeError } from "../shared/contracts";
+import { settings } from "./settings";
 
 /**
  * Short-lived Paseo SDK connections for the HTTP bridge.
@@ -20,6 +20,14 @@ import { settings } from "./settings.server";
 const CONNECT_TIMEOUT_MS = 10_000;
 const STATUS_TIMEOUT_MS = 2_000;
 const STATUS_TTL_MS = 15_000;
+
+function timeoutSignal(ms: number): AbortSignal {
+  return (
+    AbortSignal as typeof AbortSignal & {
+      timeout(milliseconds: number): AbortSignal;
+    }
+  ).timeout(ms);
+}
 
 type ClientModule = typeof import("@getpaseo/client");
 
@@ -215,7 +223,7 @@ export async function readDaemonStatus(): Promise<DaemonStatus> {
   let status: DaemonStatus = { reachable: false, version: null, serverId: null };
   try {
     const response = await fetch(`${base}/api/status`, {
-      signal: AbortSignal.timeout(STATUS_TIMEOUT_MS),
+      signal: timeoutSignal(STATUS_TIMEOUT_MS),
     });
     if (response.ok) {
       const body = (await response.json()) as { version?: unknown; serverId?: unknown };
@@ -228,7 +236,7 @@ export async function readDaemonStatus(): Promise<DaemonStatus> {
       // It answered. It just would not tell us. Liveness comes from the
       // unauthenticated endpoint, and the id from disk.
       const health = await fetch(`${base}/api/health`, {
-        signal: AbortSignal.timeout(STATUS_TIMEOUT_MS),
+        signal: timeoutSignal(STATUS_TIMEOUT_MS),
       }).catch(() => null);
       status = {
         reachable: health?.ok === true,

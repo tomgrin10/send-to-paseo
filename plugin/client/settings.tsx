@@ -1,5 +1,6 @@
-import { type PluginSurfaceProps, type PluginTheme, useRpc } from "@getpaseo/plugin";
-import { useToast } from "@getpaseo/plugin/react-native";
+import type { PluginTheme } from "@getpaseo/plugin";
+import { type PluginSurfaceProps, useRpc } from "@getpaseo/plugin/client";
+import { copyText, useToast } from "@getpaseo/plugin/client/react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
@@ -15,7 +16,7 @@ import {
   type ModeOption,
   type ProviderOption,
   type RecentSend,
-} from "./contracts.shared";
+} from "../shared/contracts";
 
 /**
  * The Send to Paseo sidebar surface: bridge status, the pairing token, the
@@ -63,31 +64,13 @@ function formatWhen(iso: string | null): string {
   return new Date(at).toLocaleDateString();
 }
 
-/**
- * Copies through whichever clipboard the host actually provides. Paseo runs the
- * same bundle on desktop, browser and mobile, so neither path can be assumed.
- */
 async function copyToClipboard(value: string): Promise<boolean> {
-  const nav = (globalThis as { navigator?: { clipboard?: { writeText(v: string): Promise<void> } } })
-    .navigator;
-  if (nav?.clipboard !== undefined) {
-    try {
-      await nav.clipboard.writeText(value);
-      return true;
-    } catch {
-      // Fall through to the React Native clipboard.
-    }
-  }
   try {
-    const rn = (await import("react-native")) as { Clipboard?: { setString(v: string): void } };
-    if (rn.Clipboard !== undefined) {
-      rn.Clipboard.setString(value);
-      return true;
-    }
+    await copyText(value);
+    return true;
   } catch {
-    // No clipboard available; the caller tells the user to copy by hand.
+    return false;
   }
-  return false;
 }
 
 function useStyles(theme: PluginTheme, compact: boolean) {

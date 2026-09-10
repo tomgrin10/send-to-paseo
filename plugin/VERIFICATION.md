@@ -3065,3 +3065,30 @@ count referenced from `AGENTS.md`, and none of them touches stack discovery.
 - **The true-merge-commit + deleted-branch + retargeted combination is not
   covered by the implementation**, not merely unverified. §19.6 measures it
   failing, and it degrades to the pre-existing behaviour.
+
+---
+
+## 20. Paseo v0.8 migration and v1.0.0 release verification (2026-09-10)
+
+The plugin now uses Paseo v0.8's separate `index.client.tsx` and
+`index.server.ts` entries. Client code lives under `client/`, daemon code under
+`server/`, and the Zod contracts and pure helpers shared by both live under
+`shared/`. The manifest requires Paseo 0.8.0 or newer.
+
+Verification on the release checkout:
+
+- plugin TypeScript and dependency/runtime-boundary suite: **45/45 passed**;
+- extension TypeScript, production build, mock/live bridge, multi-host, compact
+  window, keyboard-containment, and Chromium UI suite: **61 passed, 0 failed,
+  0 skipped**;
+- npm audit: **0 vulnerabilities** in both package trees;
+- local `paseo plugin reload send-to-paseo`: status **running**, with the bridge
+  listening on loopback and reporting plugin version **1.0.0** / contract **1**;
+- the real Paseo web client rendered the sidebar item and settings surface at
+  wide and compact viewports with no browser console errors.
+
+The bridge contract remains version 1, so existing extension host/token records
+remain compatible. Multi-host discovery is still owned by the extension's
+paired-host list: v0.8's public client plugin context exposes the selected
+host's API, not the local client's host registry, and a client-only plugin
+cannot host the loopback HTTP endpoint used by a browser extension.
