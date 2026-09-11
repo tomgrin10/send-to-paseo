@@ -5,6 +5,8 @@ say "start an agent on this pull request" and have it happen in the workspace
 that actually belongs to that PR — creating a worktree checked out to the PR if
 none exists.
 
+![The Send to Paseo composer open on a live github.com pull request — rails/rails #58627, state Open, merging Shopify:actionpack-singleton-class-attrs into rails:main — with the button anchored in GitHub's own PR header action row beside Code, and the popover below it showing the resolved target workspace, the target picker, the typed instruction "Fix the flaky test in this PR", the Provider and Mode selects, and the Cmd-Enter / Esc footer with Send enabled](../docs/screenshots/hero-github-pr-popover.png)
+
 The extension never talks to the Paseo daemon. It talks only to this bridge,
 which speaks the frozen API in [`../CONTRACT.md`](../CONTRACT.md) and reaches
 Paseo through the supported SDK.
