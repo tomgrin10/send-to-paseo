@@ -295,8 +295,7 @@ the mock bridge.
 
 ```sh
 cd plugin
-npm run typecheck
-node check-deps.mjs                      # 54 checks; doctors PATH, tests password precedence, never touches ~/.config/gh
+npm run verify                           # typecheck + 54 tests; doctors PATH, tests password precedence, never touches ~/.config/gh
 paseo plugin reload send-to-paseo && paseo plugin ls   # needs PASEO_PASSWORD on an authed daemon
 paseo plugin logs send-to-paseo          # expect the three dependency self-check lines, no stack traces
 time paseo plugin reload send-to-paseo   # must finish in seconds, twice — proves no reload hang

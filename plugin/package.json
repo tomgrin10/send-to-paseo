@@ -11,7 +11,9 @@
     "directory": "plugin"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node check-deps.mjs",
+    "verify": "npm run typecheck && npm test"
   },
   "devDependencies": {
     "@getpaseo/client": "0.8.0-beta.1",
