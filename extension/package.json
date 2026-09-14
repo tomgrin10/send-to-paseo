@@ -9,8 +9,9 @@
     "build:test": "node build.mjs --test",
     "watch": "node build.mjs --watch",
     "typecheck": "tsc -p tsconfig.json",
+    "test:unit": "node --test --experimental-strip-types ../test/merge.test.mjs",
     "test:e2e": "node ../test/e2e.mjs",
-    "verify": "npm run typecheck && npm run build && npm run test:e2e"
+    "verify": "npm run typecheck && npm run test:unit && npm run build && npm run test:e2e"
   },
   "devDependencies": {
     "@types/chrome": "^0.1.28",

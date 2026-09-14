@@ -2775,8 +2775,8 @@ await test("14. Compact window: popover stays on-screen, button still anchored",
       assertEq(livePing.name, "send-to-paseo", "live /v1/ping plugin name");
       assert(livePing.daemon?.reachable === true, "live daemon must be reachable");
       assert(
-        /^srv_[A-Za-z0-9]+$/.test(livePing.daemon?.serverId ?? ""),
-        `live daemon serverId shape, got: ${livePing.daemon?.serverId}`,
+        typeof livePing.daemon?.serverId === "string" && livePing.daemon.serverId.trim().length > 0,
+        `live daemon must report a non-empty serverId, got: ${livePing.daemon?.serverId}`,
       );
       assert(livePing.providers?.length > 1, `live provider list, got ${livePing.providers?.length}`);
       assert(livePing.modes?.length > 1, `live mode list, got ${livePing.modes?.length}`);

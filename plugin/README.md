@@ -139,7 +139,7 @@ Installing from a directory is the loop to use while editing, because
 git clone https://github.com/tomgrin10/send-to-paseo.git
 cd send-to-paseo/plugin
 npm install              # devDependencies only — for `npm run typecheck`
-npm run typecheck
+npm run verify
 paseo plugin add /absolute/path/to/send-to-paseo/plugin
 paseo plugin ls          # expect: send-to-paseo  running  yes
 ```
@@ -147,7 +147,7 @@ paseo plugin ls          # expect: send-to-paseo  running  yes
 After editing the source:
 
 ```sh
-npm run typecheck
+npm run verify
 paseo plugin reload send-to-paseo
 ```
 
