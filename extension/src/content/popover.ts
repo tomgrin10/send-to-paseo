@@ -292,8 +292,12 @@ class Popover {
 
     const target: SendTarget =
       candidate.kind === "existing" && candidate.workspaceId
-        ? { kind: "existing", workspaceId: candidate.workspaceId }
-        : { kind: "create" };
+        ? {
+            kind: "existing",
+            workspaceId: candidate.workspaceId,
+            ...(slice.routeId === undefined ? {} : { routeId: slice.routeId }),
+          }
+        : { kind: "create", ...(slice.routeId === undefined ? {} : { routeId: slice.routeId }) };
 
     this.phase = "sending";
     this.failure = null;
@@ -302,6 +306,8 @@ class Popover {
     const res = await sendIntent({
       type: "send",
       hostId: slice.hostId,
+      bridgeHostId: slice.bridgeHostId,
+      routeId: slice.routeId,
       pr: this.ctx.pr,
       prompt,
       target,

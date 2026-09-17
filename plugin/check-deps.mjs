@@ -21,6 +21,7 @@
 
 import { registerHooks } from "node:module";
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -66,6 +67,7 @@ const deps = await import("./server/deps.ts");
 const gh = await import("./server/gh.ts");
 const git = await import("./server/git.ts");
 const daemonPassword = await import("./server/daemon-password.ts");
+const peers = await import("./server/peers.ts");
 const shared = await import("./shared/contracts.ts");
 
 /* -- tiny harness ---------------------------------------------------------- */
@@ -396,6 +398,173 @@ try {
       { home: secretHome, env: {} },
     );
     check("settings read errors do not expose details", failedSettings === undefined);
+  }
+
+  /* -------------------------------------------------------------------- */
+  console.log("\n11. external bridge URL is a single safe HTTPS origin");
+  {
+    check(
+      "a Tailscale-style HTTPS URL is accepted and normalized",
+      shared.normalizeExternalBridgeUrl(" https://devbox.example.ts.net/ ") ===
+        "https://devbox.example.ts.net",
+    );
+    check(
+      "an explicit HTTPS port is preserved",
+      shared.normalizeExternalBridgeUrl("https://proxy.example.test:8443") ===
+        "https://proxy.example.test:8443",
+    );
+    check(
+      "default HTTPS Host forms are both exact matches",
+      JSON.stringify(shared.externalBridgeHostAuthorities("https://devbox.example.ts.net")) ===
+        JSON.stringify(["devbox.example.ts.net", "devbox.example.ts.net:443"]),
+    );
+    check(
+      "a non-default port does not authorize the hostname without it",
+      JSON.stringify(shared.externalBridgeHostAuthorities("https://proxy.example.test:8443")) ===
+        JSON.stringify(["proxy.example.test:8443"]),
+    );
+    check(
+      "remote plain HTTP is rejected",
+      shared.ExternalBridgeUrlSchema.safeParse("http://100.64.0.42:7788").success === false,
+    );
+    check(
+      "paths are rejected",
+      shared.ExternalBridgeUrlSchema.safeParse("https://devbox.example.ts.net/bridge").success === false,
+    );
+    check(
+      "embedded credentials are rejected",
+      shared.ExternalBridgeUrlSchema.safeParse("https://user:pass@devbox.example.ts.net").success === false,
+    );
+  }
+
+  /* -------------------------------------------------------------------- */
+  console.log("\n12. connection codes are versioned, secret, and HTTPS-only");
+  {
+    const code = peers.encodeConnectionCode({
+      v: 1,
+      url: "https://devbox.example.ts.net",
+      token: "test-token-not-a-real-secret",
+      label: "devbox",
+    });
+    const decoded = peers.decodeConnectionCode(code);
+    check("code has an identifiable version prefix", code.startsWith("stp1_"));
+    check("private bridge address round-trips", decoded.url === "https://devbox.example.ts.net");
+    check("pairing token round-trips", decoded.token === "test-token-not-a-real-secret");
+    check("machine label round-trips", decoded.label === "devbox");
+    let rejectedHttp = false;
+    try {
+      peers.decodeConnectionCode(
+        peers.encodeConnectionCode({
+          v: 1,
+          url: "http://100.64.0.42:7788",
+          token: "test-token-not-a-real-secret",
+          label: "devbox",
+        }),
+      );
+    } catch {
+      rejectedHttp = true;
+    }
+    check("a connection code cannot smuggle remote plain HTTP", rejectedHttp);
+    let rejectedDamage = false;
+    try {
+      peers.decodeConnectionCode("stp1_not-json");
+    } catch {
+      rejectedDamage = true;
+    }
+    check("damaged codes fail with no partial configuration", rejectedDamage);
+  }
+
+  /* -------------------------------------------------------------------- */
+  console.log("\n13. routed operations share one browser-sized timeout budget");
+  {
+    const peerServer = createServer((req, res) => {
+      const reply = (body) => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(body));
+      };
+      if (req.url === "/v1/ping") {
+        setTimeout(
+          () =>
+            reply({
+              ok: true,
+              name: "send-to-paseo",
+              version: "test",
+              contract: 1,
+              daemon: { reachable: true, version: "test", serverId: "srv_test" },
+              machine: { name: "test-vm" },
+              paired: true,
+              providers: [],
+              modes: [],
+            }),
+          70,
+        );
+        return;
+      }
+      if (req.url === "/v1/send?local=1") {
+        req.resume();
+        setTimeout(
+          () =>
+            reply({
+              ok: true,
+              agentId: "agt_test",
+              workspaceId: "wks_test",
+              workspaceCreated: true,
+              workspaceLabel: "test-workspace",
+              branch: "test-branch",
+              deepLink: "paseo://h/srv_test/agent/agt_test",
+              title: "test",
+              dryRun: true,
+            }),
+          100,
+        );
+        return;
+      }
+      res.writeHead(404).end();
+    });
+    await new Promise((resolve, reject) => {
+      peerServer.once("error", reject);
+      peerServer.listen(0, "127.0.0.1", resolve);
+    });
+    try {
+      const address = peerServer.address();
+      if (address === null || typeof address === "string") throw new Error("test peer did not bind");
+      const machine = {
+        id: "test-vm",
+        label: "test VM",
+        bridgeUrl: `http://127.0.0.1:${address.port}`,
+        token: "test-token",
+        enabled: true,
+        machineName: "test-vm",
+      };
+      const request = {
+        forge: "github",
+        owner: "acmegizmos",
+        repo: "gizmo-poc",
+        number: 942,
+        prompt: "test",
+        target: { kind: "create", routeId: "test-vm" },
+      };
+
+      const started = Date.now();
+      let timedOut = null;
+      try {
+        await peers.sendToMachine(machine, request, 120);
+      } catch (error) {
+        timedOut = error;
+      }
+      const elapsed = Date.now() - started;
+      check("ping and send share one deadline", timedOut !== null && elapsed < 300, `${elapsed}ms`);
+      check(
+        "a routed timeout names the private bridge",
+        timedOut?.message?.includes("private bridge address") === true,
+        timedOut?.message,
+      );
+
+      const sent = await peers.sendToMachine(machine, request, 600);
+      check("a send within the larger route budget succeeds", sent.ok === true);
+    } finally {
+      await new Promise((resolve) => peerServer.close(resolve));
+    }
   }
 } finally {
   clearInterval(keepalive);

@@ -1,5 +1,79 @@
 # Verification log — `send-to-paseo` plugin
 
+## 2026-09-17 — routed send timeout false failure
+
+The VM successfully created a worktree at `12:00:10` and recorded the new agent at `12:00:17`,
+while the Primary returned `daemon_unreachable · HTTP 503`. The VM daemon password was valid and
+a live routed resolve returned both machines, so this was not an authentication outage. The
+Primary used the same 12-second timeout for every peer fetch; a slow `/v1/send` could therefore
+complete after the proxy had aborted it.
+
+Peer ping plus operation now share one total deadline: 9 seconds for resolve (inside the browser's
+10-second resolve timeout) and 55 seconds for send (inside its 60-second send timeout). Remote
+contract errors keep their original code/message/hint instead of being flattened into a generic
+peer failure. `check-deps.mjs` includes a delayed peer whose ping and send only fail correctly when
+they share one budget, plus a successful send inside a larger budget.
+
+```text
+plugin npm run typecheck       passed
+extension npm run typecheck    passed
+node plugin/check-deps.mjs     70/70 passed
+node test/e2e.mjs              63/63 passed
+```
+
+The updated plugin was reloaded on the local Primary and on `paseo-1`; both report `running` with
+no load error. The deployed VM source matches the typechecked local source. A final read-only
+routed resolve returned HTTP 200 in 3 seconds with 47 local candidates and 28 VM candidates, and
+no route error. No verification send or agent was created.
+
+## 2026-09-15 — Primary-plugin router and connection codes
+
+The plugin and extension typecheck cleanly after adding the Additional-machine registry,
+`stp1_…` connection codes, one-click Tailscale Serve setup, local-only peer requests, routed
+resolve slices, and routed sends. The dependency/security helper suite is 67/67, including
+connection-code round trips, remote-HTTP rejection, and damaged-code rejection. The real
+unpacked extension suite is 63/63; new case 18b2 proves one browser connection expands two machine
+slices and carries the selected opaque route back to the Primary bridge on send.
+
+The previous browser-direct configuration remains available under Advanced and all of its
+multi-host cases remain green.
+
+The plugin was reloaded on the local Primary Paseo machine and on the existing dev VM. The VM's
+existing Tailscale Serve address was imported into the Primary plugin without printing either
+token. A real, read-only resolve through `http://127.0.0.1:7788` then returned HTTP 200 in 1.81 s
+with two reachable routes: 46 local candidates and 18 VM candidates. No `/v1/send` call was made
+and no agent was started.
+
+```text
+$ cd plugin && npm run typecheck && node check-deps.mjs
+67/67 checks passed
+
+$ cd extension && npm run typecheck && npm run build && npm run test:e2e
+=== 63 passed, 0 failed, 0 skipped (of 63) ===
+```
+
+## 2026-09-15 — declared HTTPS remote bridge
+
+The new **External bridge URL** setting was verified as an HTTPS-origin-only allowlist. The helper
+suite covers normalization, explicit ports, default-port Host forms, and rejection of remote HTTP,
+paths, credentials, and over-broad Host matches. The browser suite includes the original failure:
+`http://100.64.0.42:7789` is rejected locally rather than passed to
+`chrome.permissions.request`, while an HTTPS hostname can request its exact origin.
+
+```text
+$ cd plugin && npm run typecheck && node check-deps.mjs
+61/61 checks passed
+
+$ cd extension && npm run typecheck && npm run build
+[build] shipping build -> extension/dist
+
+$ node test/e2e.mjs
+=== 62 passed, 0 failed, 0 skipped (of 62) ===
+```
+
+Case 13 also passed against the installed loopback bridge. This run did not create a real
+Tailscale Serve proxy, so the tailnet's one-time HTTPS enablement remains an operator setup step.
+
 The numbered historical record below was run on the daemon machine on 2026-09-01 against the live
 Paseo daemon (`0.7.0`, `serverId: srv_Ab3xY9pQ2mNt`) and the live
 `acmegizmos/gizmo-poc` repository. Output is pasted verbatim, with three

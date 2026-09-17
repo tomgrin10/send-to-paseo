@@ -32,7 +32,8 @@ The bridge MUST:
    otherwise still fire and cause the side effect. Requiring `Authorization` forces a preflight,
    and failing that preflight means the request never executes.)
 2. Reject any request whose `Host` header does not have a **loopback hostname** — `127.0.0.1`,
-   `localhost`, `::1` — → `403 forbidden_host`. Closes DNS rebinding.
+   `localhost`, `::1` — or match an explicitly declared reverse-proxy authority → `403
+   forbidden_host`. Closes DNS rebinding.
 
    The **port is a don't-care**, and that is deliberate. It was originally pinned to the port the
    listener bound, which broke the supported way to reach a bridge on a second machine: an
@@ -42,10 +43,13 @@ The bridge MUST:
    resolve to 127.0.0.1, so the request arrives as `Host: evil.com` with `Origin:
    https://evil.com`, and rule 1 and the hostname test both already refuse it.
 
-   A bridge MAY additionally accept an explicit allowlist of non-loopback `host:port` values, for
-   a reverse proxy that presents a real name. That list MUST be empty by default and MUST NOT be
-   settable from the extension. (In this implementation it is `allowedHosts` in the plugin's
-   `settings.json`, with no UI.) The listener still binds `127.0.0.1` only.
+   A bridge MAY additionally accept a non-loopback HTTPS origin for a reverse proxy that presents
+   a real name. It MUST be empty by default, explicitly configured on the bridge machine, and MUST
+   NOT be settable by the extension. (In this implementation it is `externalBridgeUrl` in the
+   plugin's Paseo surface and settings file.) The authority match is exact; an HTTPS origin with
+   no non-default port may appear in `Host` as either `name` or `name:443`. `allowedHosts` remains
+   a file-only compatibility allowlist for additional exact `host:port` values. The listener still
+   binds `127.0.0.1` only.
 3. On success, echo CORS headers:
    ```
    Access-Control-Allow-Origin: <the request's chrome-extension:// origin>
@@ -174,10 +178,9 @@ decide whether to render the button at all.
 MUST fall back to naming that host some other way (its URL authority) rather than treating the
 absence as an error. No `contract` bump — see "Additive fields".
 
-It exists because a client can be paired with several Paseo machines at once, and when the remote
-ones are reached through loopback tunnels every bridge URL is an interchangeable
-`127.0.0.1:<port>`. `machine.name` is what lets a host list read "devbox" instead of
-"127.0.0.1:7789" without the user typing anything.
+It exists because a client can be paired with several Paseo machines at once. It keeps loopback
+tunnel URLs readable and provides a useful default label even when a remote HTTPS origin is not
+the machine name the user recognizes.
 
 Sent **unauthenticated** as well, because a host has to be nameable while it is still being
 paired. It is not a secret: it already appears in `serverId`-keyed deep links and on the daemon's
@@ -300,6 +303,31 @@ that cannot answer returns fewer rank-2 entries, never an error.
 }
 ```
 
+### `routes` (additive, optional)
+
+A Primary Paseo plugin with connected Additional Paseo machines adds `routes` to the response.
+Each route keeps one machine's PR, project, candidates, providers, modes and default together:
+
+```ts
+routes: Array<{
+  routeId: string;
+  routeLabel: string;
+  bridgeAuthority: string;
+  resolved: Omit<ResolveResponse, "routes"> | null;
+  error: { code: string; message: string; hint?: string } | null;
+}>
+```
+
+Exactly one of `resolved` and `error` is non-null. The local route uses `routeId: "local"`.
+Additional-machine ids are opaque and belong to the Primary plugin. A newer extension expands the
+routes into its per-machine picker; an older extension ignores `routes` and uses the top-level
+answer. The top-level fields therefore remain required and describe one successfully resolved
+machine.
+
+Primary-to-Additional requests append `?local=1`. A bridge receiving that query MUST resolve only
+its own daemon and MUST NOT fan out again. This prevents cycles when two plugins happen to have
+each other configured.
+
 `pr.headBranch` / `pr.baseBranch` come from `gh`, so `baseBranch` is the real GitHub base — the
 parent PR's head branch inside a stack, or trunk at the bottom. The `graphite-base/942` ref that
 Graphite's own UI displays is display-only and never appears here.
@@ -391,9 +419,14 @@ Creates the agent. This is the only mutating endpoint.
 
 `target` is one of:
 ```ts
-{ kind: "existing", workspaceId: string }
-{ kind: "create" }                          // create a worktree via checkout-pr
+{ kind: "existing", workspaceId: string, routeId?: string }
+{ kind: "create", routeId?: string }        // create a worktree via checkout-pr
 ```
+
+`routeId` is additive and optional. Missing or `"local"` means the bridge's own daemon. Any other
+value names an Additional Paseo machine configured on the Primary plugin; the Primary strips it
+and proxies the send to that machine with `?local=1`. Unknown or disabled ids are rejected rather
+than silently falling back to the local machine.
 
 `prompt` is required, 1..16000 chars after trim. `provider` optional — falls back to the plugin's
 configured default. `modeId` optional, bounded exactly like `provider` (1..200 chars).
@@ -590,7 +623,9 @@ Resolved after the first round of implementation, when both sides found these un
   licence to change the meaning of an existing field, to make a new field required, or to
   narrow an existing field's accepted values — any of those is a breaking change and bumps
   `contract`. `modeId` on `/v1/send` and `modes`/`resolvedModeId` on `/v1/ping` and
-  `/v1/resolve` were added under this clause, with `contract` staying at **1**.
+  `/v1/resolve` were added under this clause, with `contract` staying at **1**. The optional
+  `routes` response and optional `target.routeId` request use the same rule: old clients keep the
+  top-level answer, and old bridges strip the unknown route id and perform their former local send.
 
   `stackPrState` on a `/v1/resolve` candidate was added the same way, and `contract` stays at
   **1** for it too. It is purely additive: the reason and rank vocabularies are unchanged, a

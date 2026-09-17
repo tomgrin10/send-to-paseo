@@ -86,6 +86,8 @@ const CONFIG = {
    * sibling.
    */
   mergedStack: flag("merged-stack"),
+  /** Return additive routed machine slices from one primary bridge. */
+  routed: flag("routed"),
 };
 
 const MAX_BODY = 64 * 1024; // CONTRACT.md: 64 KiB
@@ -466,10 +468,7 @@ function handleResolve(res, origin, body) {
   const stackIndex = candidates.findIndex((c) => c.reason === "stack");
   const createIndex = candidates.findIndex((c) => c.reason === "create");
 
-  sendJson(
-    res,
-    200,
-    {
+  const payload = {
       pr: {
         ...pr,
         url: `https://github.com/${body.owner}/${body.repo}/pull/${body.number}`,
@@ -489,9 +488,34 @@ function handleResolve(res, origin, body) {
       // The mode a send would actually use for the isDefault provider, after
       // the bridge's own chain. Null when it would omit the field entirely.
       resolvedModeId: RESOLVED_MODE_ID,
-    },
-    origin,
-  );
+    };
+  if (CONFIG.routed) {
+    const additional = {
+      ...payload,
+      candidates: payload.candidates.map((candidate) =>
+        candidate.kind === "existing"
+          ? { ...candidate, workspaceId: `additional-${candidate.workspaceId}` }
+          : { ...candidate },
+      ),
+    };
+    payload.routes = [
+      {
+        routeId: "local",
+        routeLabel: CONFIG.machineName || "Primary Paseo machine",
+        bridgeAuthority: `127.0.0.1:${CONFIG.port}`,
+        resolved: { ...payload },
+        error: null,
+      },
+      {
+        routeId: "additional-devbox",
+        routeLabel: "devbox",
+        bridgeAuthority: "devbox.example.ts.net",
+        resolved: additional,
+        error: null,
+      },
+    ];
+  }
+  sendJson(res, 200, payload, origin);
 }
 
 function handleSend(res, origin, body) {
@@ -586,6 +610,7 @@ async function handleControl(req, res, url, origin) {
     if (body.noGh !== undefined) CONFIG.noGh = Boolean(body.noGh);
     if (body.mergedStack !== undefined) CONFIG.mergedStack = Boolean(body.mergedStack);
     if (body.machineName !== undefined) CONFIG.machineName = String(body.machineName);
+    if (body.routed !== undefined) CONFIG.routed = Boolean(body.routed);
     return sendJson(
       res,
       200,
@@ -596,6 +621,7 @@ async function handleControl(req, res, url, origin) {
         noGh: CONFIG.noGh,
         mergedStack: CONFIG.mergedStack,
         machineName: CONFIG.machineName,
+        routed: CONFIG.routed,
       },
       null,
     );
@@ -613,6 +639,7 @@ async function handleControl(req, res, url, origin) {
     CONFIG.noGh = false;
     CONFIG.mergedStack = false;
     CONFIG.machineName = "mock-machine";
+    CONFIG.routed = false;
     return sendJson(res, 200, { ok: true }, null);
   }
   res.writeHead(404).end();

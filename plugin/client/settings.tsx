@@ -5,11 +5,20 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import {
+  addAdditionalMachine,
   clearRecentSends,
+  DEFAULT_PORT,
+  enablePrivateAccess,
+  externalBridgeUrlProblem,
+  getConnectionCode,
   getStatus,
+  removeAdditionalMachine,
   regenerateToken,
   revealToken,
+  testAdditionalMachine,
+  updateAdditionalMachine,
   updateConfig,
+  type AdditionalMachine,
   type AgentProfileOption,
   type BridgeStatus,
   type DependencyReportPayload,
@@ -505,9 +514,20 @@ export function SendToPaseoSettings({ theme, layout, navigation }: PluginSurface
   const regenerate = useRpc(regenerateToken);
   const update = useRpc(updateConfig);
   const clearRecent = useRpc(clearRecentSends);
+  const addMachine = useRpc(addAdditionalMachine);
+  const updateMachine = useRpc(updateAdditionalMachine);
+  const removeMachine = useRpc(removeAdditionalMachine);
+  const testMachine = useRpc(testAdditionalMachine);
+  const connectionCode = useRpc(getConnectionCode);
+  const enableAccess = useRpc(enablePrivateAccess);
 
   const [revealed, setRevealed] = useState<string | null>(null);
   const [portDraft, setPortDraft] = useState<string | null>(null);
+  const [externalUrlDraft, setExternalUrlDraft] = useState<string | null>(null);
+  const [connectionCodeDraft, setConnectionCodeDraft] = useState("");
+  const [sharedCode, setSharedCode] = useState<string | null>(null);
+  const [showAdvancedAccess, setShowAdvancedAccess] = useState(false);
+  const [machineTests, setMachineTests] = useState<Record<string, string>>({});
 
   const query = useQuery({
     queryKey: QUERY_KEY,
@@ -533,6 +553,21 @@ export function SendToPaseoSettings({ theme, layout, navigation }: PluginSurface
     onSuccess: () => {
       invalidate();
       toast.show("Default model saved", { variant: "success" });
+    },
+    onError: (error: unknown) => toast.error(error instanceof Error ? error.message : String(error)),
+  });
+
+  const saveExternalUrl = useMutation({
+    mutationFn: async (externalBridgeUrl: string | null) => update({ externalBridgeUrl }),
+    onSuccess: (result) => {
+      setExternalUrlDraft(null);
+      invalidate();
+      toast.show(
+        result.status.externalBridgeUrl === null
+          ? "Private bridge access disabled"
+          : "Private bridge address saved",
+        { variant: "success" },
+      );
     },
     onError: (error: unknown) => toast.error(error instanceof Error ? error.message : String(error)),
   });
@@ -567,6 +602,33 @@ export function SendToPaseoSettings({ theme, layout, navigation }: PluginSurface
     onError: (error: unknown) => toast.error(error instanceof Error ? error.message : String(error)),
   });
 
+  const connectMachine = useMutation({
+    mutationFn: async (code: string) => addMachine({ connectionCode: code }),
+    onSuccess: (result) => {
+      setConnectionCodeDraft("");
+      invalidate();
+      toast.show(
+        `Connected ${result.machine.label || result.machine.machineName || "additional Paseo machine"}`,
+        { variant: "success" },
+      );
+    },
+    onError: (error: unknown) => toast.error(error instanceof Error ? error.message : String(error)),
+  });
+
+  const enableAccessMutation = useMutation({
+    mutationFn: async () => enableAccess({}),
+    onSuccess: (result) => {
+      if (!result.ready || result.code === null) {
+        toast.error(result.error ?? "Private access could not be enabled.");
+        return;
+      }
+      setSharedCode(result.code);
+      invalidate();
+      toast.show("Private access enabled. Connection code is ready.", { variant: "success" });
+    },
+    onError: (error: unknown) => toast.error(error instanceof Error ? error.message : String(error)),
+  });
+
   const status = query.data?.status ?? null;
   const providers = query.data?.providers ?? [];
   const providersError = query.data?.providersError ?? null;
@@ -575,6 +637,7 @@ export function SendToPaseoSettings({ theme, layout, navigation }: PluginSurface
   const profilesError = query.data?.profilesError ?? null;
   const recent = query.data?.recentSends ?? [];
   const dependencies = query.data?.dependencies ?? [];
+  const additionalMachines = query.data?.additionalMachines ?? [];
   const selectedProvider =
     status?.defaultProvider ?? providers.find((provider) => provider.isDefault)?.id ?? null;
   const selectedProfileId = status?.defaultProfileId ?? null;
@@ -607,6 +670,40 @@ export function SendToPaseoSettings({ theme, layout, navigation }: PluginSurface
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function onCopyValue(value: string, label: string) {
+    if (await copyToClipboard(value)) toast.show(`${label} copied`, { variant: "success" });
+    else toast.error("Copy is unavailable here.");
+  }
+
+  async function onCopyConnectionCode() {
+    try {
+      const result = await connectionCode({});
+      if (!result.ready || result.code === null) {
+        toast.error(result.error ?? "Enable private access first.");
+        return;
+      }
+      setSharedCode(result.code);
+      await onCopyValue(result.code, "Connection code");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function onTestMachine(machine: AdditionalMachine) {
+    setMachineTests((current) => ({ ...current, [machine.id]: "Testing…" }));
+    try {
+      const result = await testMachine({ id: machine.id });
+      setMachineTests((current) => ({ ...current, [machine.id]: result.detail }));
+      invalidate();
+      if (result.ok) toast.show("Additional machine connected", { variant: "success" });
+      else toast.error(result.detail);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      setMachineTests((current) => ({ ...current, [machine.id]: detail }));
+      toast.error(detail);
     }
   }
 
@@ -666,6 +763,150 @@ export function SendToPaseoSettings({ theme, layout, navigation }: PluginSurface
             </View>
           </>
         )}
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.heading}>Paseo machines</Text>
+        <Text style={styles.body}>This is the Primary Paseo machine.</Text>
+        <Text style={styles.muted}>
+          The browser extension connects only here. To add a dev VM or another computer, copy a
+          connection code on that Additional Paseo machine and paste it below on this Primary
+          Paseo machine.
+        </Text>
+        <TextInput
+          value={connectionCodeDraft}
+          onChangeText={setConnectionCodeDraft}
+          placeholder="Paste stp1_… connection code"
+          style={styles.input}
+          autoCapitalize="none"
+          autoCorrect={false}
+          accessibilityLabel="Additional Paseo machine connection code"
+        />
+        <Button
+          label={connectMachine.isPending ? "Connecting…" : "Connect additional machine"}
+          styles={styles}
+          primary
+          disabled={connectionCodeDraft.trim() === "" || connectMachine.isPending}
+          onPress={() => connectMachine.mutate(connectionCodeDraft)}
+        />
+        {additionalMachines.length === 0 ? (
+          <Text style={styles.muted}>No additional Paseo machines connected yet.</Text>
+        ) : (
+          additionalMachines.map((machine) => (
+            <View key={machine.id} style={styles.listRow}>
+              <Text style={styles.body}>
+                {machine.label || machine.machineName || new URL(machine.bridgeUrl).host}
+                {machine.enabled ? "" : " — disabled"}
+              </Text>
+              <Text style={styles.muted}>{machine.bridgeUrl}</Text>
+              <Text style={styles.muted}>Token {machine.tokenPreview}</Text>
+              {machineTests[machine.id] === undefined ? null : (
+                <Text style={styles.muted}>{machineTests[machine.id]}</Text>
+              )}
+              <View style={styles.wrapRow}>
+                <Button
+                  label="Test"
+                  styles={styles}
+                  onPress={() => void onTestMachine(machine)}
+                />
+                <Button
+                  label={machine.enabled ? "Disable" : "Enable"}
+                  styles={styles}
+                  onPress={() =>
+                    void updateMachine({ id: machine.id, enabled: !machine.enabled })
+                      .then(invalidate)
+                      .catch((error: unknown) =>
+                        toast.error(error instanceof Error ? error.message : String(error)),
+                      )
+                  }
+                />
+                <Button
+                  label="Remove"
+                  styles={styles}
+                  onPress={() =>
+                    void removeMachine({ id: machine.id })
+                      .then(invalidate)
+                      .catch((error: unknown) =>
+                        toast.error(error instanceof Error ? error.message : String(error)),
+                      )
+                  }
+                />
+              </View>
+            </View>
+          ))
+        )}
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.heading}>Share this Paseo machine</Text>
+        <Text style={styles.muted}>
+          Use this on the Additional Paseo machine you want to connect. “Enable private access”
+          runs Tailscale Serve on this machine, then creates one connection code containing its
+          private bridge address and pairing token. Paste that code into the Primary Paseo machine.
+        </Text>
+        <View style={styles.wrapRow}>
+          <Button
+            label={enableAccessMutation.isPending ? "Enabling…" : "Enable private access"}
+            styles={styles}
+            primary
+            disabled={enableAccessMutation.isPending}
+            onPress={() => enableAccessMutation.mutate()}
+          />
+          <Button label="Copy connection code" styles={styles} onPress={() => void onCopyConnectionCode()} />
+        </View>
+        {sharedCode === null ? null : (
+          <View style={styles.tokenBox}>
+            <Text style={styles.mono} selectable>{sharedCode}</Text>
+          </View>
+        )}
+        <Text style={styles.muted}>
+          The code is a secret: anyone who has it can start Paseo agents on this machine.
+        </Text>
+        <Button
+          label={showAdvancedAccess ? "Hide advanced setup" : "Advanced: configure private access manually"}
+          styles={styles}
+          onPress={() => setShowAdvancedAccess(!showAdvancedAccess)}
+        />
+        {showAdvancedAccess ? (
+          <View style={{ gap: 8 }}>
+            <Text style={styles.muted}>
+              Run this command in a terminal on this Paseo machine, then paste the HTTPS .ts.net
+              address it prints below. Do not use a cloud .internal name or a 100.x IP over HTTP.
+            </Text>
+            <View style={styles.tokenBox}>
+              <Text style={styles.mono} selectable>
+                {`tailscale serve --bg ${status?.configuredPort ?? DEFAULT_PORT}`}
+              </Text>
+            </View>
+            <Button
+              label="Copy command"
+              styles={styles}
+              onPress={() => void onCopyValue(`tailscale serve --bg ${status?.configuredPort ?? DEFAULT_PORT}`, "Command")}
+            />
+            <TextInput
+              value={externalUrlDraft ?? status?.externalBridgeUrl ?? ""}
+              onChangeText={setExternalUrlDraft}
+              placeholder="https://devbox.example.ts.net"
+              style={styles.input}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+              accessibilityLabel="Private bridge address"
+            />
+            <Button
+              label={saveExternalUrl.isPending ? "Saving…" : "Save private bridge address"}
+              styles={styles}
+              disabled={externalUrlDraft === null || saveExternalUrl.isPending}
+              onPress={() => {
+                const value = externalUrlDraft?.trim() ?? "";
+                if (value === "") return saveExternalUrl.mutate(null);
+                const problem = externalBridgeUrlProblem(value);
+                if (problem !== null) return toast.error(problem);
+                saveExternalUrl.mutate(value);
+              }}
+            />
+          </View>
+        ) : null}
       </View>
 
       {/*

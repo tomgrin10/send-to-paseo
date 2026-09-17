@@ -147,14 +147,18 @@ sync.
   0.7.0 did enrich the subprocess environment (measured: the plugin subprocess got the full login
   `PATH`), so this is **latent, not currently biting**. `server/deps.ts` probes well-known install
   locations after `PATH` anyway, because that enrichment is a host behaviour and not a contract.
-- **The extension is paired with a LIST of bridges, not one.** Two Paseo machines is the normal
-  case, the remote one reached by forwarding its loopback port here (`ssh -L 7789:127.0.0.1:7788`).
+- **Simple mode pairs the extension with ONE Primary bridge.** Additional Paseo machines live in
+  the Primary plugin's `additionalMachines` registry and are imported with a secret `stp1_…`
+  connection code. The Primary fans out resolves and proxies the selected send. Advanced direct
+  mode retains the old browser-to-list-of-bridges path for compatibility. The durable private path
+  between plugins is HTTPS (normally Tailscale Serve); SSH tunnels are an Advanced fallback.
   Consequences that are easy to get wrong:
-  - **A token, a provider list, a mode list, a PR and a project all belong to ONE host.** The
+  - **A token, a provider list, a mode list, a PR and a project all belong to ONE machine route.** The
     composer reads them through `selectedSlice()`, never off another slice. Offering the laptop's
     models for a workspace on the dev box sends a provider that machine has never heard of.
-  - **A send names its `hostId` and the worker never re-derives it.** Guessing which machine to
-    start an agent on is worse than refusing to.
+  - **A send names both its browser bridge and optional plugin route.** `bridgeHostId` selects the
+    stored browser connection; `target.routeId` selects the Additional machine at the Primary.
+    Guessing or silently falling back is forbidden.
   - **Failure is per host and is data, not an exception.** One bridge asleep, or on a stale
     contract, must not stop the other from being used; `handleResolve` only errors when *nothing*
     resolved. The contract gate therefore runs per host too.
@@ -163,18 +167,29 @@ sync.
     differ between two reads — `writeHost` would silently no-op, and a send would look up the
     `hostId` its own resolve had just returned, miss, and refuse. That bug was real and is what
     `LEGACY_HOST_ID` and `derivedId()` exist to prevent. Only `addHost` (a write) may mint a UUID.
-  - **`chrome.permissions` is checked before the fetch.** Only `127.0.0.1:7788` is granted by the
+  - **Plugin fan-out uses `?local=1`.** An Additional plugin must resolve/send only against its own
+    daemon for such a request. This prevents cycles and accidental transitive routing.
+  - **Primary-to-Additional timeouts are total route budgets, not per-hop timers.** The authenticated
+    ping and the following resolve/send share one deadline. Resolve gets 9 seconds so the Primary
+    answers inside the extension's 10-second budget; send gets 55 seconds inside the extension's
+    60-second budget. The old 12-second per-request timer could report HTTP 503 after a slow VM had
+    already created the workspace and agent, making a successful send look failed and inviting a
+    duplicate retry.
+  - **`chrome.permissions` is checked before the fetch in Advanced direct mode.** Simple mode uses
+    only `127.0.0.1:7788`, which is granted by the
     manifest; a fetch to an unpermitted origin fails as a bare network error that reads as "bridge
     down" and sends the user hunting a healthy daemon. Hence `permission_required`.
   - **A Chrome match pattern's host makes the port a don't-care**, so the existing
     `http://127.0.0.1/*` optional permission already covers every tunnel port. Multi-host support
-    needed no new permission. Do not widen this to `http://*/*`.
+    needed no remote HTTP permission. Do not widen this to `http://*/*`. The declared
+    `https://*/*` optional permission only makes exact-origin runtime grants possible; it is not a
+    required permission and the extension still asks per direct connection.
 - **The bridge's `Host` check is loopback-hostname, ANY port.** It used to pin the listener's own
   port, which refused every `ssh -L` tunnel whose local port differed. The port was never the
   guard: rebinding arrives as `Host: evil.com` with a page `Origin`, and both are refused already.
-  Do not "restore" the port pin. `allowedHosts` in `settings.json` is the file-only escape hatch
-  for a named reverse proxy; it stays out of the UI because widening the set of names that can
-  reach an agent-starting endpoint is a security decision.
+  Do not "restore" the port pin. `externalBridgeUrl` is a single HTTPS origin explicitly saved in
+  the Paseo surface and converted to exact Host authorities. `allowedHosts` remains the file-only
+  escape hatch for additional advanced proxy names. Neither changes the loopback bind.
 - **`machine.name` on `/v1/ping` is how a host gets a readable name.** Additive optional field, so
   no `contract` bump, and unauthenticated so a host is nameable while being paired. Without it
   every tunnelled bridge is an indistinguishable `127.0.0.1:<port>`.
@@ -295,7 +310,7 @@ the mock bridge.
 
 ```sh
 cd plugin
-npm run verify                           # typecheck + 54 tests; doctors PATH, tests password precedence, never touches ~/.config/gh
+npm run verify                           # typecheck + 70 tests; doctors PATH, tests password/remote-URL/route-timeout rules, never touches ~/.config/gh
 paseo plugin reload send-to-paseo && paseo plugin ls   # needs PASEO_PASSWORD on an authed daemon
 paseo plugin logs send-to-paseo          # expect the three dependency self-check lines, no stack traces
 time paseo plugin reload send-to-paseo   # must finish in seconds, twice — proves no reload hang
@@ -309,7 +324,7 @@ Require `running`, an empty `ERROR` column, and `bridge listening on http://127.
 cd extension
 npm run typecheck
 npm run build
-node ../test/e2e.mjs                     # 61 cases; builds dist/ and dist-test/ itself
+node ../test/e2e.mjs                     # 63 cases; builds dist/ and dist-test/ itself
 ```
 
 The suite runs Chromium **headless by default** (`--headless=new` loads MV3 extensions fine, so
@@ -343,10 +358,12 @@ fixture at a real repository — every screenshot in `docs/screenshots/` is comm
 | Test | Guards |
 | --- | --- |
 | 8, 24 | SPA re-targeting. The MAIN-world `pushState` shim on Graphite's router and on GitHub's Turbo; a stale PR number can never reach `/v1/resolve`. |
+| 10g | Remote plain HTTP is rejected before Chrome permission is requested; an HTTPS proxy URL can request only its exact origin. |
 | 11 | The bearer token is unreachable from the page — DOM, shadow roots, attributes, `window`, both storages, plus a static scan of the built bundles. |
 | 12 | Every bridge security rule: Origin on preflight and real request, Host, body cap, rate limit and its keying. |
 | 13 | The live bridge, read-only. The only test that proves the real plugin and the real extension agree. |
-| 18 | No fixture host, test port or `dist-test` in a shipping artifact, and that the only `host:port` form anywhere in it is `127.0.0.1:7788`. Bare `localhost` is allowed only as the optional host permission and the bridge-URL hint, by exact allowlist — "zero occurrences of localhost" is the wrong invariant and was asserted wrongly once. |
+| 18 | No fixture host, test port or `dist-test` in a shipping artifact. The default required origin stays `127.0.0.1:7788`; loopback alternates and HTTPS proxy hosts appear only as optional permission patterns or user-entered examples. |
+| 18b2 | Simple routing: one stored Primary browser bridge expands two machine slices, and an Additional-machine target sends once to the Primary with the exact `routeId`. |
 | 19, 19b, 28, 28b | Keyboard containment on Graphite and on GitHub, with faithful stand-ins for both shortcut layers. `19b`/`28b` cover the Target combobox's own search input, which is a second text-entry surface inside the same shadow root and would otherwise be assumed covered rather than proved covered. |
 | 20 | One workspace per stack: a stack sibling is the default, not `create`. |
 | 20a–20c | The mode select is filtered per provider with the resolved default preselected and unattended modes marked, `modeId` reaches `/v1/send`, and a degraded resolve with an empty `pr.headBranch` reads as unknown rather than "a different branch". |

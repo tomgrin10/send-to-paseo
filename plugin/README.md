@@ -184,7 +184,8 @@ so `npm run typecheck` works for contributors.
 
 1. Open **Send to Paseo** in the Paseo sidebar.
 2. Under **Pairing token**, press **Copy** (or **Reveal** and copy by hand).
-3. Paste it into the extension's options page along with the bridge URL.
+3. Paste it into the extension's options page. Simple setup already uses the Primary Paseo
+   machine's loopback bridge URL.
 
 **Regenerate** issues a new token and immediately invalidates the old one, so any
 paired extension has to be re-paired.
@@ -198,6 +199,8 @@ All of it lives in the Paseo surface; there is no config file to hunt for.
 | Setting | Default | Notes |
 | --- | --- | --- |
 | Port | `7788` | Saving rebinds the listener straight away. Bind address is always `127.0.0.1`. |
+| Private bridge address (`externalBridgeUrl`) | none | Optional HTTPS origin for a reverse proxy such as Tailscale Serve. Saving explicitly allowlists only that origin's Host header; the listener remains loopback-only. |
+| Additional Paseo machines | none | Connections imported from `stp1_…` codes. The Primary plugin resolves and sends through these bridges. |
 | Pairing token | generated on first run | 32 random bytes, base64url. |
 | Default model | the daemon's own default | `provider/model`, e.g. `claude/claude-opus-5`. A send may override it per request. |
 | Agent profile | none | One of your saved Paseo profiles (`daemon.agentProfiles`), followed by id. |
@@ -206,8 +209,9 @@ All of it lives in the Paseo surface; there is no config file to hunt for.
 State is stored at `$PASEO_HOME/plugin-data/send-to-paseo/settings.json`, written
 `0600` inside a `0700` directory. It holds the token, the port, the default
 model, the followed profile id, the default mode, the paired flag, the last 20
-sends, two optional allowlists — `allowedExtensionIds` and `allowedHosts` (see
-[Security model](#security-model)) — and `daemonPassword`.
+sends, the declared `externalBridgeUrl`, connected Additional Paseo machines and their tokens, two optional advanced allowlists —
+`allowedExtensionIds` and `allowedHosts` (see [Security model](#security-model))
+— and `daemonPassword`.
 
 ### A daemon that requires a password
 
@@ -246,39 +250,82 @@ Note that on such a daemon the `paseo` CLI needs the password too, so
 `PASEO_PASSWORD` has to be set in your shell before `paseo plugin reload` will
 work at all.
 
-`defaultProfileId`, `defaultModeId` and `allowedHosts` are read with schema
+`defaultProfileId`, `defaultModeId`, `externalBridgeUrl`, `additionalMachines` and `allowedHosts` are read with schema
 defaults, so a `settings.json` written before those fields existed still
 validates. That matters more than it looks: a failed parse regenerates the file,
 and the file holds the pairing token — an upgrade must not silently unpair the
 extension.
 
-### Reaching this bridge from another machine
+### Connect Primary and Additional Paseo machines
 
-The listener is loopback-only, by design, so a browser on a different machine
-cannot contact it directly. Forward it instead:
+The listener is loopback-only, by design. Use these exact roles:
+
+- **Browser machine:** runs Chrome.
+- **Primary Paseo machine:** sits beside Chrome; its plugin is the only bridge the extension uses.
+- **Additional Paseo machine:** a dev VM or other Paseo installation reached by the Primary plugin.
+
+On the Additional Paseo machine, open **Share this Paseo machine**, press **Enable private
+access**, then **Copy connection code**. On the Primary Paseo machine, paste it into **Paseo
+machines** and press **Connect additional machine**. The code bundles the private URL, machine name,
+and token; it is a secret. The Primary plugin checks the other bridge's name and contract before
+resolving or sending, and never follows that machine's own routes, which prevents routing loops.
+The ping and operation share one end-to-end deadline: 9 seconds for resolve and 55 seconds for
+send. Those budgets sit just inside the extension's 10-second and 60-second limits. A slow
+worktree creation therefore has time to finish without the Primary falsely reporting HTTP 503
+after the Additional machine has already started the agent.
+
+The button runs Tailscale Serve on the machine where it is pressed. Serve proxies a private
+tailnet HTTPS URL to the loopback port and survives the terminal closing.
+
+<details>
+<summary>Advanced: configure private access manually</summary>
+
+If the automatic button cannot find Tailscale, run this **on the Additional Paseo machine**:
+
+```sh
+# on this Paseo machine; --bg survives the terminal closing
+tailscale serve --bg 7788
+```
+
+Copy the printed `https://…ts.net` origin into **Private bridge address** in the same plugin
+surface and save it. Then copy the connection code and paste it on the Primary Paseo machine.
+The first Serve command may ask you to enable tailnet HTTPS. Use
+`tailscale serve off` to disable it. Use Serve, not Funnel: Funnel is public.
+Use the URL Serve prints, not a cloud `.internal` hostname or a `100.x` address
+over plain HTTP.
+
+The URL field accepts only an HTTPS origin, with no credentials, path, query or fragment. Saving it
+updates the exact Host-header allowlist immediately; it does not rebind the bridge or create a proxy.
+
+</details>
+
+<details>
+<summary>Advanced: connect Chrome directly</summary>
+
+The extension retains its prior direct mode. Each machine then needs a URL, its own token, and an
+exact Chrome permission. An SSH tunnel is a temporary fallback:
 
 ```sh
 # on the machine running the browser
 ssh -L 7789:127.0.0.1:7788 devbox
 ```
 
-The extension then adds a host pointing at `http://127.0.0.1:7789` and pastes
-**this** machine's pairing token. Nothing needs configuring here: the `Host`
+The extension then adds a direct connection pointing at `http://127.0.0.1:7789` and pastes
+**this** machine's pairing token. Nothing needs configuring in the plugin: the `Host`
 check accepts any loopback hostname regardless of port, so the tunnel's local
 port does not have to match the port the bridge bound.
 
-If instead a reverse proxy fronts the bridge under a real name — Tailscale
-Serve, say — that name arrives in the `Host` header and is refused. Add it to
-`allowedHosts` by hand:
+For setups with more than one proxy name, `allowedHosts` remains a
+file-only compatibility escape hatch:
 
 ```json
 { "allowedHosts": ["devbox.example.ts.net:443"] }
 ```
 
-Exact `host:port` matches, empty by default, and deliberately file-only with no
-UI: widening the set of names that can reach an endpoint which starts agents is
-a security decision, and it should not be one click away. The listener still
-binds `127.0.0.1`, so such a proxy has to be something you ran.
+Those are additional exact `host:port` matches, empty by default. Prefer the
+single declared private bridge address for normal use.
+
+</details>
 
 ### Permission mode, and the profile it can come from
 
@@ -707,8 +754,9 @@ treated as a privilege boundary rather than a convenience.
    `Authorization` header forces a preflight, and failing that preflight means
    the browser never sends the real request. Set `allowedExtensionIds` in
    `settings.json` to pin specific extension IDs.
-4. **`Host` must have a loopback hostname** — `127.0.0.1`, `localhost` or `::1`.
-   Anything else gets `403 forbidden_host`. This closes DNS rebinding, where a
+4. **`Host` must have a loopback hostname or match the declared external HTTPS
+   origin** — `127.0.0.1`, `localhost`, `::1`, or the origin saved as
+   **Private bridge address**. Anything else gets `403 forbidden_host`. This closes DNS rebinding, where a
    hostile page resolves a name it controls to `127.0.0.1`: the request then
    arrives carrying `Host: evil.com` and `Origin: https://evil.com`, and rule 3
    and this rule both refuse it.
@@ -718,9 +766,9 @@ treated as a privilege boundary rather than a convenience.
    an `ssh -L 7789:127.0.0.1:7788` tunnel makes the browser send
    `Host: 127.0.0.1:7789` while this bridge is on 7788. Pinning the port never
    added anything on top of the hostname test, because the hostname is what a
-   rebinding attack cannot control. `allowedHosts` in `settings.json` extends
-   this to explicit non-loopback `host:port` values for a reverse proxy; it is
-   empty by default, exact-match, and not settable from the extension.
+   rebinding attack cannot control. `allowedHosts` in `settings.json` can add
+   further exact non-loopback `host:port` values for advanced reverse proxies;
+   it is empty by default and not settable from the extension.
 5. **CORS echo on success only.** The request's own `chrome-extension://` origin,
    `GET, POST, OPTIONS`, `Authorization, Content-Type`, `Max-Age: 600`. No
    `Access-Control-Allow-Credentials`, ever. `Vary: Origin` on every response,

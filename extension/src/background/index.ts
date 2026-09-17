@@ -4,9 +4,9 @@
  * The content script can only ask for an *intent* to be carried out; it never
  * receives a token and never sees a bridge URL it could authenticate against.
  *
- * With more than one Paseo machine paired, this is also the fan-out point: one
- * `resolve` intent becomes one request per host, in parallel, and the answers
- * are merged into a single ranked candidate list before the composer sees them.
+ * A Primary plugin can return several routed machine slices from one request.
+ * Advanced direct mode also fans a resolve out to several stored bridges. Both
+ * shapes are merged into one ranked candidate list before the composer sees it.
  */
 
 import {
@@ -96,9 +96,10 @@ async function cacheMachineName(host: HostConfig, name: string | undefined): Pro
 async function resolveOnHost(
   host: HostConfig,
   request: ResolveRequest,
-): Promise<HostSlice> {
+): Promise<HostSlice[]> {
   const slice: HostSlice = {
     hostId: host.id,
+    bridgeHostId: host.id,
     hostLabel: hostDisplayName(host),
     bridgeAuthority: authorityOf(host.bridgeUrl),
     resolved: null,
@@ -113,13 +114,13 @@ async function resolveOnHost(
       code: "not_configured",
       message: `No pairing token is stored for ${hostDisplayName(host)}.`,
     };
-    return slice;
+    return [slice];
   }
 
   const gate = await requireCompatibleContract(host);
   if (!gate.ok) {
     slice.error = gate.error;
-    return slice;
+    return [slice];
   }
   await cacheMachineName(host, gate.data.machine?.name);
   // The label may have only just become knowable, so re-derive it.
@@ -128,11 +129,27 @@ async function resolveOnHost(
   const res = await resolve(host, request);
   if (!res.ok) {
     slice.error = res.error;
-    return slice;
+    return [slice];
+  }
+  if (Array.isArray(res.data.routes) && res.data.routes.length > 0) {
+    const routed = res.data.routes.map((route): HostSlice => {
+      const syntheticId = `${host.id}::${route.routeId}`;
+      if (route.resolved !== null) void cacheProviders(syntheticId, route.resolved.providers);
+      return {
+        hostId: syntheticId,
+        bridgeHostId: host.id,
+        routeId: route.routeId,
+        hostLabel: route.routeLabel.trim() || route.bridgeAuthority,
+        bridgeAuthority: route.bridgeAuthority,
+        resolved: route.resolved,
+        error: route.error,
+      };
+    });
+    return routed;
   }
   await cacheProviders(host.id, res.data.providers);
   slice.resolved = res.data;
-  return slice;
+  return [slice];
 }
 
 async function handleResolve(request: ResolveRequest): Promise<Result<MultiResolveResponse>> {
@@ -154,7 +171,7 @@ async function handleResolve(request: ResolveRequest): Promise<Result<MultiResol
   // Parallel: the whole point of this being a fan-out is that two hosts cost
   // one host's latency, not two. Every slice settles, so one timeout does not
   // hold up a bridge that already answered.
-  const slices = await Promise.all(hosts.map((h) => resolveOnHost(h, request)));
+  const slices = (await Promise.all(hosts.map((h) => resolveOnHost(h, request)))).flat();
   const merged = mergeHostAnswers(slices);
 
   // Only a total failure is an error. If any host answered, the composer opens
@@ -228,7 +245,7 @@ async function handle(intent: Intent): Promise<Result<unknown>> {
       // chosen target belongs to exactly one machine, and quietly falling back
       // to a different one would start an agent somewhere the user did not look
       // at.
-      const host = await hostById(intent.hostId);
+      const host = await hostById(intent.bridgeHostId ?? intent.hostId);
       if (!host) {
         return {
           ok: false,

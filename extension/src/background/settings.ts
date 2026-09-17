@@ -3,11 +3,10 @@
  * the options page — never into a content script. A host's `token` must not
  * cross into page-adjacent code.
  *
- * The store holds a *list* of bridges, because one browser routinely faces more
- * than one Paseo machine: a laptop and a dev box, each running its own daemon
- * and its own copy of this plugin, the remote one reached through a loopback
- * tunnel. Every entry carries its own URL and its own pairing token — tokens
- * are per-plugin-install and are never interchangeable.
+ * Simple mode uses the first entry as its one Primary Paseo bridge; Additional
+ * machines are configured in that plugin. The list remains for Advanced direct
+ * mode and for lossless migration of older multi-host installs. Every entry has
+ * its own URL and token — tokens are per-plugin-install and never interchangeable.
  */
 
 export interface HostConfig {
@@ -34,6 +33,8 @@ export interface HostConfig {
 export interface StoredSettings {
   version: 2;
   hosts: HostConfig[];
+  /** Simple uses one primary bridge; advanced lets Chrome contact every stored bridge directly. */
+  connectionMode: "simple" | "advanced";
   /**
    * Preferred provider id, applied to whichever host a send lands on when that
    * host offers it. Global rather than per-host: it expresses "I want Opus",
@@ -51,6 +52,7 @@ interface LegacySettings {
   bridgeUrl?: string;
   token?: string;
   defaultProvider?: string;
+  connectionMode?: "simple" | "advanced";
 }
 
 function newId(): string {
@@ -121,7 +123,13 @@ export async function readSettings(): Promise<StoredSettings> {
     const hosts = raw.hosts
       .map((h, i) => coerceHost(h, i))
       .filter((h): h is HostConfig => h !== null);
-    return { version: 2, hosts: dedupeIds(hosts), defaultProvider };
+    const connectionMode =
+      raw.connectionMode === "simple" || raw.connectionMode === "advanced"
+        ? raw.connectionMode
+        : hosts.length > 1 || hosts.some((host) => normaliseBridgeUrl(host.bridgeUrl) !== DEFAULT_BRIDGE_URL)
+          ? "advanced"
+          : "simple";
+    return { version: 2, hosts: dedupeIds(hosts), connectionMode, defaultProvider };
   }
 
   // Legacy single-bridge store, or an empty one. Either way it becomes exactly
@@ -135,6 +143,10 @@ export async function readSettings(): Promise<StoredSettings> {
         token: raw.token ?? "",
       }),
     ],
+    connectionMode:
+      normaliseBridgeUrl(raw.bridgeUrl ?? DEFAULT_BRIDGE_URL) === DEFAULT_BRIDGE_URL
+        ? "simple"
+        : "advanced",
     defaultProvider,
   };
 }
@@ -215,8 +227,8 @@ export async function hostById(id: string): Promise<HostConfig | null> {
  * one level up, in `resolveOnHost`.
  */
 export async function enabledHosts(): Promise<HostConfig[]> {
-  const { hosts } = await readSettings();
-  return hosts.filter((h) => h.enabled);
+  const { hosts, connectionMode } = await readSettings();
+  return (connectionMode === "simple" ? hosts.slice(0, 1) : hosts).filter((h) => h.enabled);
 }
 
 /** Never empty: the user's name, else the bridge's own, else the authority. */
@@ -243,6 +255,35 @@ export function normaliseBridgeUrl(url: string): string {
   return trimmed.replace(/\/+$/, "");
 }
 
+const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
+/**
+ * Explain why a bridge URL is unsafe or ambiguous, or return null when it is a
+ * supported origin. Plain HTTP is intentionally limited to loopback; remote
+ * hosts must be fronted by HTTPS (for example with Tailscale Serve).
+ */
+export function bridgeUrlProblem(url: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(normaliseBridgeUrl(url));
+  } catch {
+    return "Enter a complete bridge URL, including http:// or https://.";
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return "Bridge URLs must use HTTP or HTTPS.";
+  }
+  if (parsed.username !== "" || parsed.password !== "") {
+    return "Credentials are not allowed in the bridge URL.";
+  }
+  if (parsed.pathname !== "/" || parsed.search !== "" || parsed.hash !== "") {
+    return "Enter only the bridge origin, without a path, query, or fragment.";
+  }
+  if (parsed.protocol === "http:" && !LOOPBACK_HOSTNAMES.has(parsed.hostname.toLowerCase())) {
+    return "Remote bridges require HTTPS. Tailscale Serve is the recommended setup.";
+  }
+  return null;
+}
+
 /**
  * The `chrome.permissions` origin pattern for a bridge URL, or null when the URL
  * is not an http(s) one it makes sense to request.
@@ -253,6 +294,7 @@ export function normaliseBridgeUrl(url: string): string {
  * daemon that is running perfectly well.
  */
 export function originPatternFor(url: string): string | null {
+  if (bridgeUrlProblem(url) !== null) return null;
   try {
     const u = new URL(normaliseBridgeUrl(url));
     if (u.protocol !== "http:" && u.protocol !== "https:") return null;

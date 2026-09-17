@@ -17,7 +17,12 @@ import {
   type SendResponse,
 } from "../shared/contract";
 import type { FailurePayload, Result } from "../shared/messages";
-import { hostDisplayName, originPatternFor, type HostConfig } from "./settings";
+import {
+  bridgeUrlProblem,
+  hostDisplayName,
+  originPatternFor,
+  type HostConfig,
+} from "./settings";
 
 const PING_TIMEOUT_MS = 4000;
 const RESOLVE_TIMEOUT_MS = 10000;
@@ -112,6 +117,13 @@ async function request<T>(
     timeoutMs: number;
   },
 ): Promise<Result<T>> {
+  const urlProblem = bridgeUrlProblem(host.bridgeUrl);
+  if (urlProblem !== null) {
+    return fail("invalid_bridge_url", urlProblem, {
+      hint: "Use HTTP only for 127.0.0.1 or localhost. For another machine, configure an HTTPS reverse proxy such as Tailscale Serve.",
+    });
+  }
+
   if (init.auth === "required" && !host.token) {
     return fail(
       "not_configured",
@@ -128,7 +140,7 @@ async function request<T>(
   let url: string;
   try {
     url = `${host.bridgeUrl}${path}`;
-    // Validate early so a typo'd bridge URL is a clear message, not a TypeError.
+    // `bridgeUrlProblem` already validated the origin; this guards composition.
     new URL(url);
   } catch {
     return fail(

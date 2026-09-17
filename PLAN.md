@@ -202,7 +202,11 @@ extension/
   src/options/                bridge URL, token, default provider, test connection
 ```
 
-`host_permissions: ["http://127.0.0.1:7788/*"]`; content script matches
+`host_permissions: ["http://127.0.0.1:7788/*"]`. In the normal path this is the only bridge the
+browser contacts: the Primary Paseo plugin owns Additional-machine connection codes, fans out
+resolve calls, and proxies sends with an optional `target.routeId`. The previous browser-direct
+host list remains an Advanced mode; loopback and HTTPS origins are declared only as optional
+permissions for its exact-origin runtime grants. Content script matches
 `https://app.graphite.com/github/pr/*` and `https://app.graphite.dev/github/pr/*`.
 
 ### The `SiteAdapter` seam — how GitHub comes for cheap later
@@ -273,8 +277,9 @@ privilege boundary, not a convenience:
    stops a page *reading* a response, not the request firing. Requiring an `Authorization` header
    forces a preflight, and failing that preflight means a malicious page's request never executes
    the side effect. Optionally pin specific extension IDs in settings.
-4. **Check the `Host` header** is `127.0.0.1:<port>` or `localhost:<port>`, which closes off
-   DNS-rebinding from a hostile page.
+4. **Check the `Host` header** has a loopback hostname or exactly matches the HTTPS origin the user
+   declared in the Paseo surface. This closes DNS rebinding while supporting a separately run,
+   tailnet-only reverse proxy; the bridge itself remains bound to loopback.
 5. Body size cap, per-origin rate limit, no secrets in logs (following the same convention as
    that earlier plugin), `Vary: Origin` on every response.
 
