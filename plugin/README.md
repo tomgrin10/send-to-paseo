@@ -114,7 +114,7 @@ One command, straight from the public repository. No clone, no `npm install`, no
 build step:
 
 ```sh
-paseo plugin add tomgrin10/send-to-paseo --path plugin --ref v1.0.3
+paseo plugin add tomgrin10/send-to-paseo --path plugin --ref v1.1.0
 paseo plugin ls          # expect: send-to-paseo  running  yes
 paseo plugin logs send-to-paseo
 ```
