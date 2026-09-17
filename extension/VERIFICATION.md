@@ -1,5 +1,23 @@
 # Verification record
 
+## Latest regression run — 2026-09-15
+
+The Primary-plugin routing flow, compatibility-preserving Advanced direct mode, and HTTPS
+permission flow were run against the real unpacked extension in headless Chromium. Case 18b2
+proves that one stored Primary bridge expands into two machine slices and that a selected
+Additional-machine target sends once to the Primary with its opaque `routeId`. Case 10g keeps the
+Advanced direct-mode permission boundary covered.
+
+```text
+npm run typecheck   # clean
+npm run build       # shipping build completed
+node ../test/e2e.mjs
+=== 63 passed, 0 failed, 0 skipped (of 63) ===
+```
+
+This browser run did not mutate Tailscale state. The routed response/send behavior, URL validation,
+permission behavior, and live loopback bridge contract were exercised.
+
 Every result below is copied from a real run. Nothing here is asserted from reading the
 code. The raw machine-readable output of the last run is at `test/.last-run.json`.
 
@@ -943,7 +961,7 @@ never constructed, never parsed, and asserted only by shape.
 cd extension && npm install
 npm run typecheck
 npm run build
-node ../test/e2e.mjs          # 61 cases, ~60 s, headless by default
+node ../test/e2e.mjs          # 63 cases, ~60 s, headless by default
                               # STP_HEADED=1 node ../test/e2e.mjs  to watch it
 ```
 

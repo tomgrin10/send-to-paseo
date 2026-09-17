@@ -5,10 +5,9 @@
  * content script posts *intents*; the service worker owns the credentials and
  * performs every fetch. See README "Security model".
  *
- * Everything PR-scoped is keyed on a `hostId`, because the extension can be
- * paired with several Paseo machines at once. A resolve fans out to all of them
- * and comes back as one merged list; a send names the single host that owns the
- * chosen target.
+ * Everything PR-scoped is keyed on a destination `hostId`. It may be a stored
+ * Advanced direct bridge or a routed machine slice returned by the Primary
+ * plugin. A send also names the stored `bridgeHostId` that carries the request.
  */
 
 import type {
@@ -42,6 +41,10 @@ export interface IntentSend {
   type: "send";
   /** The host that owns the chosen target. Never inferred. */
   hostId: string;
+  /** Stored browser bridge that carries the request; differs for routed machines. */
+  bridgeHostId?: string;
+  /** Additional-machine route owned by the primary plugin. */
+  routeId?: string;
   pr: PrRef;
   prompt: string;
   target: SendTarget;
@@ -72,6 +75,10 @@ export type Intent =
 /** One host's answer to a fanned-out resolve. Exactly one of the last two is set. */
 export interface HostSlice {
   hostId: string;
+  /** The stored browser bridge used for network I/O. */
+  bridgeHostId: string;
+  /** `local` or an additional-machine id when this slice came from a router. */
+  routeId?: string;
   /** Display name, resolved by the worker. Never empty. */
   hostLabel: string;
   /**

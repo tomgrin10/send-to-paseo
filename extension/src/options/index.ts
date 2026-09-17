@@ -13,6 +13,7 @@ import { presentError } from "../shared/errors";
 import { renderProse } from "../shared/format";
 import { ping } from "../background/bridge-client";
 import {
+  bridgeUrlProblem,
   addHost,
   authorityOf,
   DEFAULT_BRIDGE_URL,
@@ -34,6 +35,11 @@ const testAllBtn = $<HTMLButtonElement>("testAll");
 const defaultProvider = $<HTMLSelectElement>("defaultProvider");
 const providerHelp = $<HTMLSpanElement>("providerHelp");
 const savedFlag = $<HTMLSpanElement>("saved");
+const useSimpleBtn = $<HTMLButtonElement>("useSimple");
+const useAdvancedBtn = $<HTMLButtonElement>("useAdvanced");
+const advancedDetails = $<HTMLDetailsElement>("advancedDetails");
+const hostsHeading = $<HTMLElement>("hostsHeading");
+const hostsHelp = $<HTMLElement>("hostsHelp");
 
 let savedTimer: number | undefined;
 
@@ -285,6 +291,7 @@ interface HostRow {
   enabled: HTMLInputElement;
   status: HTMLElement;
   test: HTMLButtonElement;
+  grant: HTMLButtonElement;
   grantRow: HTMLElement;
   grantHelp: HTMLElement;
 }
@@ -297,17 +304,26 @@ const pick = <T extends HTMLElement>(root: ParentNode, cls: string): T =>
  * reads exactly like "the bridge is down". So the grant row is surfaced next to
  * the URL that needs it, and re-checked whenever that URL changes.
  *
- * Only `127.0.0.1:7788` is granted by the manifest. Every tunnel port is a
- * different origin and needs its own consent — which is the correct trade for
- * an endpoint that can start agents.
+ * Only `127.0.0.1:7788` is granted by the manifest. Every other loopback port
+ * or HTTPS proxy origin needs its own consent — which is the correct trade for
+ * an endpoint that can start agents. Remote plain HTTP is rejected before a
+ * permission request because the manifest deliberately never allows it.
  */
 async function refreshGrantRow(row: HostRow): Promise<void> {
+  const problem = bridgeUrlProblem(row.url.value);
+  if (problem !== null) {
+    row.grantRow.hidden = false;
+    row.grant.disabled = true;
+    row.grantHelp.textContent = problem;
+    return;
+  }
   const pattern = originPatternFor(row.url.value);
   if (!pattern) {
     row.grantRow.hidden = true;
     row.grantHelp.textContent = "";
     return;
   }
+  row.grant.disabled = false;
   let granted = false;
   try {
     granted = await chrome.permissions.contains({ origins: [pattern] });
@@ -332,6 +348,7 @@ function buildRow(host: HostConfig, index: number, total: number): HostRow {
     enabled: pick<HTMLInputElement>(el, "hostEnabled"),
     status: pick<HTMLElement>(el, "hostStatus"),
     test: pick<HTMLButtonElement>(el, "hostTest"),
+    grant: pick<HTMLButtonElement>(el, "hostGrant"),
     grantRow: pick<HTMLElement>(el, "hostGrantRow"),
     grantHelp: pick<HTMLElement>(el, "hostGrantHelp"),
   };
@@ -389,7 +406,8 @@ function buildRow(host: HostConfig, index: number, total: number): HostRow {
     );
   });
 
-  pick<HTMLButtonElement>(el, "hostGrant").addEventListener("click", async () => {
+  row.grant.addEventListener("click", async () => {
+    if (bridgeUrlProblem(row.url.value) !== null) return;
     const pattern = originPatternFor(row.url.value);
     if (!pattern) return;
     try {
@@ -460,6 +478,20 @@ async function refreshProviderPicker(): Promise<void> {
  */
 async function load(): Promise<void> {
   const s = await readSettings();
+  document.body.dataset.mode = s.connectionMode;
+  const simple = s.connectionMode === "simple";
+  advancedDetails.open = !simple;
+  useSimpleBtn.disabled = simple;
+  useSimpleBtn.textContent = simple ? "Using simple setup" : "Use simple setup";
+  useAdvancedBtn.disabled = !simple;
+  useAdvancedBtn.textContent = simple
+    ? "Use advanced direct connections"
+    : "Using advanced direct connections";
+  hostsHeading.textContent = simple ? "Primary Paseo machine" : "Direct Paseo connections";
+  hostsHelp.textContent = simple
+    ? "Copy the pairing token from Paseo on this browser machine. No Tailscale command, SSH tunnel, remote URL, or Chrome permission is needed here."
+    : "Chrome contacts every enabled machine directly. Each row needs that machine’s own private bridge address, pairing token, and Chrome permission.";
+  testAllBtn.textContent = simple ? "Test connection" : "Test all connections";
   hostsBox.textContent = "";
   rows = [];
 
@@ -470,13 +502,14 @@ async function load(): Promise<void> {
     hostsBox.append(empty);
   }
 
-  for (const [i, host] of s.hosts.entries()) {
-    const row = buildRow(host, i, s.hosts.length);
+  const visibleHosts = simple ? s.hosts.slice(0, 1) : s.hosts;
+  for (const [i, host] of visibleHosts.entries()) {
+    const row = buildRow(host, i, visibleHosts.length);
     hostsBox.append(row.el);
     rows.push({ row, hostId: host.id });
   }
 
-  renderProviders(await cachedProviders(), s.defaultProvider, s.hosts.length);
+  renderProviders(await cachedProviders(), s.defaultProvider, visibleHosts.length);
 
   // With a token present, refresh providers (and the pairing verdict) straight
   // away — that is the whole point of ping taking optional auth. Sequential
@@ -524,15 +557,45 @@ defaultProvider.addEventListener("change", async () => {
   flashSaved();
 });
 
+useSimpleBtn.addEventListener("click", async () => {
+  const current = await readSettings();
+  if (current.hosts.length === 0) {
+    await addHost({ bridgeUrl: DEFAULT_BRIDGE_URL });
+  } else if (current.hosts[0]?.bridgeUrl !== DEFAULT_BRIDGE_URL) {
+    // A token belongs to a specific bridge. Do not silently send a remote
+    // machine's credential to the primary loopback bridge after switching modes.
+    await writeHost(current.hosts[0].id, {
+      bridgeUrl: DEFAULT_BRIDGE_URL,
+      token: "",
+      enabled: true,
+      machineName: "",
+    });
+  }
+  await writeSettings({ connectionMode: "simple" });
+  flashSaved();
+  await load();
+});
+
+useAdvancedBtn.addEventListener("click", async () => {
+  await writeSettings({ connectionMode: "advanced" });
+  flashSaved();
+  await load();
+});
+
 // A host renamed or re-pointed from another surface (the composer's cog opens
 // this page in a second tab) must not leave a stale list behind.
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local" || !changes.settings) return;
-  const before = changes.settings.oldValue as { hosts?: unknown[] } | undefined;
-  const after = changes.settings.newValue as { hosts?: unknown[] } | undefined;
+  const before = changes.settings.oldValue as { hosts?: unknown[]; connectionMode?: string } | undefined;
+  const after = changes.settings.newValue as { hosts?: unknown[]; connectionMode?: string } | undefined;
   // Only a change in the *set* of hosts needs a rebuild. Reacting to every
   // keystroke's autosave would rip the focused input out from under the user.
-  if ((before?.hosts?.length ?? -1) !== (after?.hosts?.length ?? -1)) void load();
+  if (
+    (before?.hosts?.length ?? -1) !== (after?.hosts?.length ?? -1) ||
+    (before?.connectionMode !== undefined &&
+      after?.connectionMode !== undefined &&
+      before.connectionMode !== after.connectionMode)
+  ) void load();
 });
 
 void load();

@@ -32,6 +32,55 @@ export const MAX_TITLE_SUMMARY_CHARS = 60;
 export const LABEL_PR = "send-to-paseo/pr";
 export const LABEL_ORIGIN = "send-to-paseo/origin";
 
+/**
+ * A user-declared HTTPS origin that fronts the loopback bridge.
+ *
+ * Keeping this as an origin (rather than an arbitrary URL) makes the matching
+ * rule unambiguous and prevents credentials, paths, queries, or fragments from
+ * being smuggled into what is ultimately a Host-header allowlist.
+ */
+export function externalBridgeUrlProblem(value: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(value.trim());
+  } catch {
+    return "Enter a complete HTTPS URL, for example https://devbox.example.ts.net.";
+  }
+  if (parsed.protocol !== "https:") return "Remote bridge URLs must use HTTPS.";
+  if (parsed.username !== "" || parsed.password !== "") {
+    return "Credentials are not allowed in the URL.";
+  }
+  if (parsed.pathname !== "/" || parsed.search !== "" || parsed.hash !== "") {
+    return "Enter only the origin, without a path, query, or fragment.";
+  }
+  return null;
+}
+
+export function normalizeExternalBridgeUrl(value: string): string {
+  const problem = externalBridgeUrlProblem(value);
+  if (problem !== null) throw new Error(problem);
+  return new URL(value.trim()).origin;
+}
+
+/** Exact Host-header authorities corresponding to one declared HTTPS origin. */
+export function externalBridgeHostAuthorities(value: string | null): string[] {
+  if (value === null) return [];
+  const parsed = new URL(normalizeExternalBridgeUrl(value));
+  const host = parsed.host.toLowerCase();
+  // Some proxies preserve an explicit default port in Host even though URL.host
+  // canonicalizes it away. These are the same HTTPS authority, not a wildcard.
+  return parsed.port === "" ? [host, `${parsed.hostname.toLowerCase()}:443`] : [host];
+}
+
+export const ExternalBridgeUrlSchema = z
+  .string()
+  .trim()
+  .superRefine((value, context) => {
+    const problem = externalBridgeUrlProblem(value);
+    if (problem !== null) context.addIssue({ code: z.ZodIssueCode.custom, message: problem });
+  })
+  .transform((value) => new URL(value).origin);
+
 // ---------------------------------------------------------------------------
 // HTTP request payloads
 // ---------------------------------------------------------------------------
@@ -62,8 +111,13 @@ export const ResolveRequestSchema = PrRefSchema.extend({
 export type ResolveRequest = z.infer<typeof ResolveRequestSchema>;
 
 export const SendTargetSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("existing"), workspaceId: z.string().min(1).max(400) }),
-  z.object({ kind: z.literal("create") }),
+  z.object({
+    kind: z.literal("existing"),
+    workspaceId: z.string().min(1).max(400),
+    /** Optional additional-machine route. Missing (and `local`) means this machine. */
+    routeId: z.string().min(1).max(200).optional(),
+  }),
+  z.object({ kind: z.literal("create"), routeId: z.string().min(1).max(200).optional() }),
 ]);
 export type SendTarget = z.infer<typeof SendTargetSchema>;
 
@@ -260,7 +314,7 @@ export interface ModeOption {
   colorTier?: string;
 }
 
-export interface ResolveResponse {
+export interface LocalResolveResponse {
   pr: PrPayload;
   project: ProjectPayload;
   candidates: Candidate[];
@@ -275,6 +329,23 @@ export interface ResolveResponse {
    * omitted from `agents.create` entirely.
    */
   resolvedModeId: string | null;
+}
+
+/** One Paseo machine reached through the primary machine's bridge. */
+export interface ResolveRoute {
+  routeId: string;
+  routeLabel: string;
+  bridgeAuthority: string;
+  resolved: LocalResolveResponse | null;
+  error: ErrorBody["error"] | null;
+}
+
+export interface ResolveResponse extends LocalResolveResponse {
+  /**
+   * Additive router result. Older extensions ignore this and keep using the
+   * top-level local answer; newer ones show every route as a separate machine.
+   */
+  routes?: ResolveRoute[];
 }
 
 export interface SendResponse {
@@ -341,6 +412,8 @@ export const BridgeStatusSchema = z.object({
   defaultProfileId: z.string().nullable(),
   /** Explicit permission-mode override, or null to follow the chain. */
   defaultModeId: z.string().nullable(),
+  /** Explicit HTTPS origin allowed to front this loopback-only bridge. */
+  externalBridgeUrl: ExternalBridgeUrlSchema.nullable(),
   daemon: z.object({
     reachable: z.boolean(),
     version: z.string().nullable(),
@@ -348,6 +421,17 @@ export const BridgeStatusSchema = z.object({
   }),
 });
 export type BridgeStatus = z.infer<typeof BridgeStatusSchema>;
+
+export const AdditionalMachineSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  bridgeUrl: ExternalBridgeUrlSchema,
+  enabled: z.boolean(),
+  machineName: z.string(),
+  /** Preview only. The actual token never leaves the server except inside a connection code. */
+  tokenPreview: z.string(),
+});
+export type AdditionalMachine = z.infer<typeof AdditionalMachineSchema>;
 
 export const ProviderOptionSchema = z.object({
   id: z.string(),
@@ -410,6 +494,7 @@ export const getStatus = defineRpc({
     profilesError: z.string().nullable(),
     recentSends: z.array(RecentSendSchema),
     dependencies: z.array(DependencyReportSchema),
+    additionalMachines: z.array(AdditionalMachineSchema),
   }),
 });
 
@@ -435,6 +520,8 @@ export const updateConfig = defineRpc({
     defaultProfileId: z.string().max(200).nullable().optional(),
     /** Null clears the override and falls back to the mode chain. */
     defaultModeId: z.string().max(200).nullable().optional(),
+    /** Null removes the declared reverse-proxy origin. */
+    externalBridgeUrl: ExternalBridgeUrlSchema.nullable().optional(),
   }),
   output: z.object({ status: BridgeStatusSchema, error: z.string().nullable() }),
 });
@@ -443,6 +530,58 @@ export const clearRecentSends = defineRpc({
   name: "send-to-paseo.recent.clear",
   input: z.object({}),
   output: z.object({ removed: z.number() }),
+});
+
+export const addAdditionalMachine = defineRpc({
+  name: "send-to-paseo.machine.add",
+  input: z.object({ connectionCode: z.string().trim().min(1).max(4096) }),
+  output: z.object({ machine: AdditionalMachineSchema }),
+});
+
+export const updateAdditionalMachine = defineRpc({
+  name: "send-to-paseo.machine.update",
+  input: z.object({
+    id: z.string().min(1).max(200),
+    label: z.string().max(120).optional(),
+    enabled: z.boolean().optional(),
+  }),
+  output: z.object({ machine: AdditionalMachineSchema }),
+});
+
+export const removeAdditionalMachine = defineRpc({
+  name: "send-to-paseo.machine.remove",
+  input: z.object({ id: z.string().min(1).max(200) }),
+  output: z.object({ removed: z.boolean() }),
+});
+
+export const testAdditionalMachine = defineRpc({
+  name: "send-to-paseo.machine.test",
+  input: z.object({ id: z.string().min(1).max(200) }),
+  output: z.object({
+    ok: z.boolean(),
+    machineName: z.string().nullable(),
+    detail: z.string(),
+  }),
+});
+
+const ConnectionCodeResultSchema = z.object({
+  ready: z.boolean(),
+  code: z.string().nullable(),
+  bridgeUrl: ExternalBridgeUrlSchema.nullable(),
+  command: z.string(),
+  error: z.string().nullable(),
+});
+
+export const getConnectionCode = defineRpc({
+  name: "send-to-paseo.connection-code.get",
+  input: z.object({}),
+  output: ConnectionCodeResultSchema,
+});
+
+export const enablePrivateAccess = defineRpc({
+  name: "send-to-paseo.private-access.enable",
+  input: z.object({}),
+  output: ConnectionCodeResultSchema,
 });
 
 // ---------------------------------------------------------------------------

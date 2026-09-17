@@ -22,8 +22,9 @@ on github.com and on Graphite.
   and it resolves to the workspace you already have, then tells the agent which branch the change
   belongs on — so one workspace per stack is enough. It still finds that workspace when the branch
   it is parked on has already merged.
-- **More than one Paseo machine.** Pair a laptop and a dev box and every pull request is resolved
-  on both at once, in one list, with the machine named on each row. The default target is
+- **More than one Paseo machine.** Pair the extension once with a Primary Paseo machine, then add
+  a laptop, dev VM, or other machine to the plugin with one connection code. Every pull request is
+  resolved on all of them at once, in one list, with the machine named on each row. The default is
   whichever machine already has a worktree for the PR, not whichever you configured first, and the
   send goes only to the machine you picked. A host that is asleep is a footnote in the composer,
   not a wall.
@@ -79,22 +80,56 @@ Pair the two halves once:
 
 Then open a pull request and press **Send to Paseo**. There is no config file on either side.
 
-### A second Paseo machine
+### Add another Paseo machine
 
-Each bridge binds `127.0.0.1` on its own machine, so forward it to a loopback port here:
+These names are used throughout the setup:
+
+- **Browser machine:** the computer running Chrome.
+- **Primary Paseo machine:** the Paseo installation beside Chrome. The extension connects only to
+  its loopback bridge at `http://127.0.0.1:7788`.
+- **Additional Paseo machine:** a dev VM, workstation, or any other Paseo installation you want in
+  the target list.
+
+The normal setup is two copy/paste actions:
+
+1. On the **Additional Paseo machine**, open Paseo → **Send to Paseo** → **Share this Paseo
+   machine** and press **Enable private access**. Then press **Copy connection code**.
+2. On the **Primary Paseo machine**, open Paseo → **Send to Paseo** → **Paseo machines**, paste the
+   code, and press **Connect additional machine**.
+
+That is all. Do not put the additional machine's address or token in the extension. The Primary
+Paseo plugin resolves the pull request on every connected machine and proxies the selected send.
+The connection code is a secret because it contains the Additional machine's private bridge
+address and pairing token.
+
+The one-click button uses [Tailscale Serve](https://tailscale.com/kb/1242/tailscale-serve). It runs
+on the **Additional Paseo machine**, publishes only to the tailnet, and survives a terminal closing.
+Tailscale may ask you to enable HTTPS the first time. Use `tailscale serve off` on that same machine
+to remove the proxy. Do not use Tailscale Funnel, which is public.
+
+<details>
+<summary>Advanced: manual private access or direct browser connections</summary>
+
+If the one-click button cannot find Tailscale, expand **Advanced: configure private access
+manually** on the Additional Paseo machine. Run the command shown there **in a terminal on that
+Additional Paseo machine** (normally `tailscale serve --bg 7788`), then paste the printed
+`https://…ts.net` address back into that same Paseo screen. Do not use the VM's `.internal`
+hostname or its `100.x` Tailscale IP over plain HTTP.
+
+The extension also retains **Advanced: connect the browser directly to each Paseo machine** for
+special cases and existing setups. In that mode each machine needs its private HTTPS address, its
+own token, and an exact Chrome permission. An SSH loopback tunnel is supported there as a temporary
+fallback:
 
 ```sh
+# Run on the Browser machine; this process must stay open.
 ssh -L 7789:127.0.0.1:7788 devbox
 ```
 
-Then in the extension's options press **Add a host**, set its bridge URL to
-`http://127.0.0.1:7789`, press **Grant access to this address** (only `127.0.0.1:7788` is
-permitted up front), and paste **that machine's** pairing token — tokens belong to a plugin
-install and are not interchangeable. Each host names itself, so the list reads `devbox` rather
-than `127.0.0.1:7789`.
+Then add `http://127.0.0.1:7789` as an Advanced direct connection. Tailscale SSH policy controls
+which login user is allowed; a rejected user cannot be fixed by this plugin.
 
-Every enabled, paired host is queried on each pull request. Untick **Enabled** to keep a host's
-token but skip it.
+</details>
 
 ## Where it shows up
 
@@ -104,12 +139,10 @@ token but skip it.
   alternative — type a workspace name, a branch, a PR number, or a machine name — and provider and
   mode pickers. With more than one host paired, every row names its machine and the resolved
   target line leads with it. ⌘↵ sends, Esc closes.
-- **The Send to Paseo surface** in Paseo's sidebar and under ⌘K: bridge status, the pairing token,
-  the port, which agent profile to follow, the default permission mode, a **Requirements** card,
-  and your last 20 sends.
-- **The extension's options page**: one card per Paseo host — name, bridge URL, token, **Grant
-  access** and **Test connection** — plus **Add a host** and **Test all connections**. The cog in
-  the composer's header opens it, so it is reachable from the pull request itself.
+- **The Send to Paseo surface** in Paseo's sidebar and under ⌘K: Primary/Additional machine setup,
+  bridge status, the pairing token, the port, agent defaults, requirements, and recent sends.
+- **The extension's options page**: normally one pairing token for the Primary Paseo machine.
+  Direct URLs, per-machine tokens, and Chrome permission controls live under **Advanced**.
 
 ## How it works
 
@@ -126,7 +159,8 @@ links, and those are only a hint — everything else is resolved on the daemon s
 5. Candidates are ranked: **exact** branch match, then another branch in the same **stack**
    (nearest first), then any workspace in the **project**, then a synthetic **create** option
 
-Every paired host runs all five steps, in parallel, and the results are merged into one list
+The Primary Paseo plugin runs all five steps locally and asks every connected Additional Paseo
+machine to do the same, in parallel. The extension merges those machine slices into one list
 ranked across machines: rank first, so an exact match on the dev box outranks a same-project
 workspace on the laptop; then position within a rank, so each bridge's own nearest-first ordering
 survives the interleave. Each host contributes its own **create** row, because creating a worktree
@@ -143,9 +177,11 @@ so nothing here creates one by hand. The only git this project runs is read-only
 workspace is on, a remote's `owner/repo`, and one ancestry query that recognises a stack whose
 chain GitHub has already retargeted past a merged branch.
 
-The extension never talks to the Paseo daemon. It talks only to the plugin's local HTTP bridge on
-`127.0.0.1:7788` — or to whatever loopback port a tunnel forwards a remote one to — over one
-frozen contract, [`CONTRACT.md`](CONTRACT.md).
+The extension never talks to the Paseo daemon. In the normal setup it talks only to the Primary
+plugin's bridge on `127.0.0.1:7788`; that plugin talks to Additional plugin bridges over their
+declared tailnet-only HTTPS addresses. Advanced mode can still contact those bridges directly.
+Both paths use one frozen contract,
+[`CONTRACT.md`](CONTRACT.md).
 
 <details>
 <summary>Why a plugin, and not the extension talking to the daemon</summary>
@@ -186,17 +222,16 @@ line per dependency at every start.
 The bridge can start agents that execute code on your machine, so it is treated as a real
 privilege boundary:
 
-- binds `127.0.0.1` only, never `0.0.0.0` — a bridge on another machine is reached by forwarding
-  it to a loopback port here, never by opening it up there
+- binds `127.0.0.1` only, never `0.0.0.0`; remote access uses a separately configured HTTPS
+  reverse proxy, and the plugin explicitly allowlists that one origin
 - bearer token on every endpoint except `GET /v1/ping`, whose auth is *optional*: with no
   `Authorization` header it is an unauthenticated liveness check, with a valid one it confirms
   pairing and returns the provider list, and with an invalid one it returns `401`. That is what
   lets **Test connection** tell "bridge down" from "bad token"
 - rejects any request whose `Origin` is not `chrome-extension://…`, on the preflight *and* the
   real request — CORS alone stops a page reading a response, not the request firing
-- validates the `Host` header, closing DNS rebinding: the hostname must be loopback. The port is
-  not pinned, so an `ssh -L` tunnel works; pinning it never added anything, because a rebinding
-  request arrives carrying the attacker's own hostname and origin, both already refused
+- validates the `Host` header, closing DNS rebinding: the hostname must be loopback or the exact
+  origin declared as the **Private bridge address**. Remote bridges accept only HTTPS
 - 64 KiB body cap, 60 requests per 10 s, no shell anywhere, and no token, prompt or agent title
   in any log line
 
@@ -213,8 +248,8 @@ this one listens on a socket: read the source before installing it.
   `paseo plugin logs send-to-paseo` says why if it is not.
 - **"Not paired with Paseo" or "Token rejected".** Re-copy the token from the Paseo surface, on
   the machine that host points at. The two are deliberately different messages.
-- **"Chrome hasn't been given access to this bridge".** A host on a non-default port needs a
-  one-time consent: options → that host → **Grant access to this address**.
+- **"Chrome hasn't been given access to this bridge".** This applies only to Advanced direct
+  connections. Normal Primary-machine routing needs no remote Chrome permissions.
 - **A host named in a warning row under the target picker.** That machine did not answer; the
   others still did. The row carries its own error code.
 - **"Update required".** The plugin and extension are on different contract versions and sends are
@@ -243,7 +278,7 @@ Longer tables, keyed on exact message text, are in
 
 Nothing here is claimed without evidence: [`plugin/VERIFICATION.md`](plugin/VERIFICATION.md) and
 [`extension/VERIFICATION.md`](extension/VERIFICATION.md) record real output for both halves,
-failures included, behind 61 end-to-end cases with the extension genuinely loaded in Chromium.
+failures included, behind 63 end-to-end cases with the extension genuinely loaded in Chromium.
 [`docs/screenshots/`](docs/screenshots/) is indexed and names, per image, which bridge answered it.
 
 ## Credits

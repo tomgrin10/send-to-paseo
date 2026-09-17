@@ -1506,12 +1506,79 @@ await test("10f. Options page fresh state: masked token, hidden grant row", asyn
     "the 'Grant access' row must stay hidden when the bridge URL is already covered by host_permissions",
   );
   assertEq(ui.statusTone, "idle", "with no token stored the page must not auto-ping");
+  await opt.setViewportSize({ width: 480, height: 720 });
+  const compact = await opt.evaluate(() => ({
+    viewport: window.innerWidth,
+    content: document.documentElement.scrollWidth,
+  }));
+  assert(
+    compact.content <= compact.viewport,
+    `the compact options page must not scroll horizontally: ${compact.content} > ${compact.viewport}`,
+  );
+  await opt.screenshot({ path: join(shots, "options-page-compact-light.png"), fullPage: true });
+  await opt.emulateMedia({ colorScheme: "dark" });
+  await opt.screenshot({ path: join(shots, "options-page-compact-dark.png"), fullPage: true });
   await opt.close();
   await seedSettings(context, extId, {});
   return [
     "token input is type=password by default",
     "'Grant access to this address' row hidden for an already-permitted bridge URL",
     "no automatic ping when unpaired",
+    "480px compact layout has no horizontal overflow in light or dark mode",
+  ];
+});
+
+await test("10g. Remote hosts require HTTPS before Chrome permission is requested", async () => {
+  const opt = await context.newPage();
+  await seedSettings(context, extId, {
+    bridgeUrl: "http://100.64.0.42:7789",
+    token: DEFAULT_TOKEN,
+  });
+  await opt.goto(optionsUrl());
+  await opt.waitForTimeout(400);
+
+  const blocked = await opt.evaluate(() => {
+    const card = document.querySelector(".host");
+    return {
+      visible: card.querySelector(".hostGrantRow").getBoundingClientRect().height > 0,
+      disabled: card.querySelector(".hostGrant").disabled,
+      help: card.querySelector(".hostGrantHelp").textContent.trim(),
+    };
+  });
+  assert(blocked.visible, "the validation row must be visible for remote HTTP");
+  assert(blocked.disabled, "Grant access must be disabled for remote HTTP");
+  assert(blocked.help.includes("require HTTPS"), `help must explain the fix: ${blocked.help}`);
+
+  const st = await runTestConnection(opt);
+  assertEq(st.title, "Remote bridges require HTTPS", "test connection headline");
+  assert(st.hint.includes("Tailscale Serve"), `test hint must recommend Tailscale Serve: ${st.hint}`);
+
+  await seedSettings(context, extId, {
+    bridgeUrl: "https://devbox.example.ts.net",
+    token: "",
+  });
+  await opt.reload();
+  await opt.waitForTimeout(400);
+  const allowed = await opt.evaluate(() => {
+    const card = document.querySelector(".host");
+    return {
+      visible: card.querySelector(".hostGrantRow").getBoundingClientRect().height > 0,
+      disabled: card.querySelector(".hostGrant").disabled,
+      help: card.querySelector(".hostGrantHelp").textContent.trim(),
+    };
+  });
+  assert(allowed.visible, "an ungranted HTTPS origin must show the grant row");
+  assert(!allowed.disabled, "Grant access must be enabled for HTTPS origins");
+  assert(
+    allowed.help.includes("https://devbox.example.ts.net/*"),
+    `grant help must name the exact origin: ${allowed.help}`,
+  );
+
+  await opt.close();
+  await seedSettings(context, extId, {});
+  return [
+    "remote http:// URL rejected locally with Tailscale Serve guidance",
+    "remote https:// URL can request Chrome access for its exact origin",
   ];
 });
 
@@ -1923,8 +1990,8 @@ await test("18. Shipping build contains no test host or test bridge port", async
   // Other localhost ports are user-consented only, never pre-granted.
   assertEq(
     manifest.optional_host_permissions,
-    ["http://127.0.0.1/*", "http://localhost/*"],
-    "localhost breadth is optional_host_permissions only, and exactly these two",
+    ["http://127.0.0.1/*", "http://localhost/*", "https://*/*"],
+    "only loopback HTTP and runtime-consented HTTPS are optional",
   );
   assert(!manifest.name.includes("test build"), `shipping name must not be the test build: ${manifest.name}`);
 
@@ -1964,61 +2031,20 @@ await test("18. Shipping build contains no test host or test bridge port", async
     "the shipping build's injected extra-host list must be empty",
   );
 
-  /* No localhost ORIGIN may reach a shipping artifact. Stated as "no
-     host:port form anywhere", which is the thing that would actually be
-     dangerous, plus an exact allowlist of the two remaining bare `localhost`
-     substrings so a third one cannot appear unnoticed.
-
-     Those two are deliberate and are NOT hosts the extension talks to:
-       manifest.json  "http://localhost/*" under optional_host_permissions —
-                      breadth the user must grant explicitly, asserted above.
-       content.js     an error HINT string telling the user what a valid bridge
-                      URL looks like (src/shared/errors.ts). */
+  /* No non-default localhost ORIGIN may reach a shipping artifact. Prose may
+     describe localhost, but no code or manifest entry may bake in a second
+     loopback port. */
   const originForms = /(?:localhost|127\.0\.0\.1):\d+/g;
   const originHits = [];
-  const bareLocalhost = [];
   for (const f of files) {
     const src = readFileSync(join(dist, f), "utf8");
     for (const m of src.matchAll(originForms)) {
       // The real bridge origin is the one legitimate host:port in a shipping build.
       if (m[0] === "127.0.0.1:7788") continue;
-      // PROSE, not a fetch target: the hosts section shows the `ssh -L` command
-      // and the URL that a tunnelled second Paseo machine gets, because that is
-      // the whole setup step and a placeholder would not teach it. The extension
-      // only ever contacts a URL the user stored, and a non-default origin also
-      // needs a Chrome permission the user grants by hand.
-      //
-      // Deliberately allowed in options.html ONLY. A port literal in options.js,
-      // background.js or content.js would mean code had grown an assumption
-      // about a second bridge's address, which is what this scan is for.
-      if (f === "options.html" && m[0] === "127.0.0.1:7789") {
-        originHits.push("options.html: 127.0.0.1:7789 (documented tunnel example)");
-        continue;
-      }
       originHits.push(`${f}: ${m[0]}`);
     }
-    for (const line of src.split("\n")) {
-      if (!line.includes("localhost")) continue;
-      // Collapse the one known prose string so this assertion is about WHICH
-      // files carry a localhost substring, not about the wording of a hint.
-      const HINT = 'The bridge URL must be http://127.0.0.1:<port> or http://localhost:<port>.';
-      bareLocalhost.push(line.includes(HINT) ? `${f}: BRIDGE-URL HINT` : `${f}: ${line.trim()}`);
-    }
   }
-  assertEq(
-    originHits,
-    ["options.html: 127.0.0.1:7789 (documented tunnel example)"],
-    "the only non-default origin in a shipping build is the tunnel example in the options prose",
-  );
-  assertEq(
-    bareLocalhost,
-    [
-      'manifest.json: "http://localhost/*"',
-      "content.js: BRIDGE-URL HINT",
-      "options.js: BRIDGE-URL HINT",
-    ],
-    "the only `localhost` substrings in a shipping build are the optional permission and the error hint",
-  );
+  assertEq(originHits, [], "no non-default localhost origin is baked into a shipping artifact");
 
   // Sanity: the TEST build is the one that carries them, so this test can fail.
   const testManifest = JSON.parse(readFileSync(join(distTest, "manifest.json"), "utf8"));
@@ -2032,8 +2058,7 @@ await test("18. Shipping build contains no test host or test bridge port", async
     `shipping host_permissions: ${JSON.stringify(manifest.host_permissions)}`,
     `shipping optional_host_permissions: ${JSON.stringify(manifest.optional_host_permissions)}`,
     `no occurrence of ${forbidden.join(", ")} in any shipping file`,
-    "the only localhost/127.0.0.1 origins in the shipping build are 127.0.0.1:7788 and the documented tunnel example in options.html",
-    `the only bare \`localhost\` substrings are the optional permission + the error hint (${bareLocalhost.length})`,
+    "the only localhost/127.0.0.1 origin baked into the shipping build is 127.0.0.1:7788",
     "__STP_EXTRA_HOSTS__ compiles to [] in the shipping bundle",
     `test build (for contrast): ${JSON.stringify(testManifest.host_permissions)}`,
   ];
@@ -2168,6 +2193,63 @@ await test("18b. Two hosts: candidates from both bridges, merged and host-labell
     // Restore the single-host seed even on failure. A leaked two-host store —
     // or a leaked provider preference — silently breaks a later test, and the
     // cascade then looks like a bug in whatever failed next.
+    await seedSettings(context, extId, {});
+  }
+});
+
+await test("18b2. Simple mode: one primary bridge exposes and routes an additional machine", async () => {
+  await bridgeReset();
+  await bridgeConfig({ routed: true });
+  try {
+    await seedSettings(context, extId, {
+      connectionMode: "simple",
+      hosts: [hostEntry()],
+    });
+    await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
+    await waitForButton(page);
+    await openPopover(page);
+    await waitForPhase(page, "ready");
+
+    const cands = await readCandidates(page, { close: false });
+    assertEq(cands.options.length, 8, "the primary bridge contributes both machine slices");
+    assertEq(
+      (await readStoredSettings(context)).hosts.length,
+      1,
+      "the browser stores only the Primary Paseo machine",
+    );
+    assert(
+      cands.options.some((label) => label.startsWith("devbox · ")),
+      "the routed Additional Paseo machine is named in the target list",
+    );
+
+    const devboxExact = cands.options.findIndex(
+      (label) => label.startsWith("devbox · ") && label.includes("exact match"),
+    );
+    assert(devboxExact >= 0, "the additional machine has a selectable exact-match workspace");
+    await closeCandidates(page);
+    await pickCandidate(page, devboxExact);
+    await page.locator("[data-stp-prompt]").fill("Route this through the primary machine");
+    await page.locator("[data-stp-send]").click();
+    await waitForPhase(page, "sent");
+
+    const sends = (await bridgeLog()).filter((request) => request.path === "/v1/send");
+    assertEq(sends.length, 1, "Chrome sends once, to the primary bridge only");
+    assertEq(
+      sends[0].body.target,
+      {
+        kind: "existing",
+        workspaceId: "additional-wks_4d1a8b7c2e0f9351",
+        routeId: "additional-devbox",
+      },
+      "the target carries the additional-machine route for the primary plugin",
+    );
+    await closePopover(page);
+    return [
+      "one stored browser bridge -> two Paseo machine slices",
+      "additional-machine target -> one send to the primary bridge with routeId",
+    ];
+  } finally {
+    await bridgeConfig({ routed: false });
     await seedSettings(context, extId, {});
   }
 });

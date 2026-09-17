@@ -105,13 +105,14 @@ CONTRACT.md's Clarifications.
 
 | Image | What it demonstrates |
 | --- | --- |
-| `options-page.png` | Fresh, unpaired state. One host card — bridge URL, masked pairing token (`type=password` by default) — plus the provider picker and an untested connection status. With no token stored the page does not auto-ping. |
+| `options-page.png` | Fresh, unpaired Simple setup. One Primary Paseo machine card with a masked pairing token (`type=password` by default), the Advanced direct-mode disclosure, provider picker, and untested status. With no token stored the page does not auto-ping. |
 | `options-page-paired.png` | **Test connection** with a valid token: ok tone, "Paired with Paseo", plugin name/version, contract v1, daemon version and `serverId`, and the provider count. The **Default provider** dropdown is populated straight from the authenticated `GET /v1/ping`, with the bridge's own default marked `(plugin default)`. |
 | `options-page-not-paired.png` | **Test connection** with no token: warn tone, "Bridge reachable, not paired yet", `0 providers`. This is the unauthenticated ping — liveness confirmed, pairing not done. |
 | `options-page-token-rejected.png` | **Test connection** with a wrong token: bad tone, "Token rejected", telling the user to re-copy it. Distinct from the bridge being down, which is the whole reason ping takes optional auth. |
 | `options-page-bridge-down.png` | **Test connection** with the bridge stopped: bad tone, naming the exact URL that was tried. |
 | `options-page-contract-mismatch.png` | **Test connection** against a plugin on contract v2: bad tone, "Update required", and an explicit warning that sends are blocked. |
-| `options-page-dark.png` | Dark theme, paired state. |
+| `options-page-dark.png` | Dark theme, paired Simple setup. |
+| `options-page-compact-light.png`, `options-page-compact-dark.png` | The Simple/Advanced split at 480px wide, with no horizontal overflow, in both themes. |
 
 ## Multiple Paseo hosts
 

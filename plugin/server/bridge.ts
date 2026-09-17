@@ -5,6 +5,7 @@ import {
   BridgeError,
   CONTRACT_VERSION,
   DEFAULT_PORT,
+  externalBridgeHostAuthorities,
   MAX_BODY_BYTES,
   PLUGIN_NAME,
   PLUGIN_VERSION,
@@ -17,6 +18,7 @@ import {
   type ModeOption,
   type PingResponse,
   type ProviderOption,
+  type ResolveRoute,
 } from "../shared/contracts";
 import { readDaemonStatus, withPaseo } from "./daemon";
 import { logDependencySelfCheck } from "./deps";
@@ -28,6 +30,7 @@ import {
 } from "./resolve";
 import { handleSend, isDryRun, recordFailedSend } from "./send";
 import { previewToken, settings, tokenMatches } from "./settings";
+import { machineById, resolveOnMachine, sendToMachine } from "./peers";
 
 /**
  * The local HTTP bridge the Chrome extension talks to.
@@ -180,18 +183,22 @@ function hostnameOf(hostHeader: string): string {
  * are already refused here — the hostname is not loopback, and the origin is not
  * `chrome-extension://`. A port number was never what stood in the way.
  *
- * `allowedHosts` in settings.json is the escape hatch for a reverse proxy that
- * presents a real name (Tailscale Serve, say). It is exact-match on the whole
- * `host:port`, empty by default, and file-only on purpose: naming a non-loopback
- * host here is a security decision, so it should not be one click away in a UI.
- * The listener still binds 127.0.0.1 only, so such a proxy has to be something
- * the user ran.
+ * `externalBridgeUrl` is the declared reverse-proxy origin. Saving it is an
+ * explicit allowlist decision in the Paseo surface; the listener still binds
+ * 127.0.0.1 only, so the user must separately run that proxy. `allowedHosts`
+ * remains as a backwards-compatible file-only escape hatch.
  */
-function hostAllowed(host: string | undefined, extraAllowed: readonly string[]): boolean {
+function hostAllowed(
+  host: string | undefined,
+  externalBridgeUrl: string | null,
+  extraAllowed: readonly string[],
+): boolean {
   if (host === undefined) return false;
   const h = host.trim().toLowerCase();
   if (LOOPBACK_HOSTNAMES.has(hostnameOf(h))) return true;
-  return extraAllowed.some((allowed) => allowed.trim().toLowerCase() === h);
+  return [...externalBridgeHostAuthorities(externalBridgeUrl), ...extraAllowed].some(
+    (allowed) => allowed.trim().toLowerCase() === h,
+  );
 }
 
 /**
@@ -343,7 +350,12 @@ async function ping(authenticated: boolean): Promise<PingResponse> {
   };
 }
 
-async function route(req: IncomingMessage, res: ServerResponse, path: string): Promise<void> {
+async function route(
+  req: IncomingMessage,
+  res: ServerResponse,
+  path: string,
+  localOnly: boolean,
+): Promise<void> {
   const cors = corsHeaders(req.headers.origin);
 
   if (path === "/v1/ping") {
@@ -371,13 +383,77 @@ async function route(req: IncomingMessage, res: ServerResponse, path: string): P
     if (path === "/v1/resolve") {
       const parsed = ResolveRequestSchema.safeParse(json);
       if (!parsed.success) throw badRequest(parsed.error.issues);
-      writeJson(res, 200, await handleResolve(parsed.data), cors);
+      if (localOnly) {
+        writeJson(res, 200, await handleResolve(parsed.data), cors);
+        return;
+      }
+
+      const configured = (await settings.read()).additionalMachines.filter(
+        (machine) => machine.enabled,
+      );
+      if (configured.length === 0) {
+        writeJson(res, 200, await handleResolve(parsed.data), cors);
+        return;
+      }
+
+      let localError: unknown = null;
+      const localAttempt = handleResolve(parsed.data).catch((error: unknown) => {
+        localError = error;
+        return null;
+      });
+      // Local and Additional machines run together. A dev VM should add no
+      // more latency than whichever machine is slowest.
+      const [local, peerRoutes] = await Promise.all([
+        localAttempt,
+        Promise.all(configured.map((machine) => resolveOnMachine(machine, parsed.data))),
+      ]);
+      const localRoute: ResolveRoute = {
+        routeId: "local",
+        routeLabel: machineName() || "Primary Paseo machine",
+        bridgeAuthority: `127.0.0.1:${runtime?.port ?? status.port}`,
+        resolved: local,
+        error:
+          local === null
+            ? errorPayload(localError, "The primary Paseo machine could not resolve this pull request.")
+            : null,
+      };
+      const routes = [localRoute, ...peerRoutes];
+      const base = local ?? peerRoutes.find((item) => item.resolved !== null)?.resolved ?? null;
+      if (base === null) {
+        if (localError instanceof BridgeError) throw localError;
+        throw new BridgeError(
+          "daemon_unreachable",
+          "No connected Paseo machine could resolve this pull request.",
+        );
+      }
+      writeJson(res, 200, { ...base, routes }, cors);
       return;
     }
 
     const parsed = SendRequestSchema.safeParse(json);
     if (!parsed.success) throw badRequest(parsed.error.issues);
     try {
+      const routeId = parsed.data.target.routeId;
+      if (!localOnly && routeId !== undefined && routeId !== "local") {
+        const machine = await machineById(routeId);
+        if (machine === null || !machine.enabled) {
+          throw new BridgeError(
+            "bad_request",
+            "The additional Paseo machine for this target is no longer connected. Reopen the composer.",
+          );
+        }
+        try {
+          writeJson(res, 200, await sendToMachine(machine, parsed.data), cors);
+        } catch (error) {
+          if (error instanceof BridgeError) throw error;
+          throw new BridgeError(
+            "daemon_unreachable",
+            error instanceof Error ? error.message : String(error),
+            "Check Tailscale and the Send to Paseo plugin on the Additional machine. If this followed Send, check Paseo there before retrying because the request may still have completed.",
+          );
+        }
+        return;
+      }
       writeJson(res, 200, await handleSend(parsed.data), cors);
     } catch (error) {
       // Validation noise does not belong in the surface's send history; a real
@@ -396,6 +472,11 @@ async function route(req: IncomingMessage, res: ServerResponse, path: string): P
     "No such endpoint on this bridge.",
     "Valid paths are /v1/ping, /v1/resolve and /v1/send.",
   );
+}
+
+function errorPayload(error: unknown, fallback: string): ErrorBody["error"] {
+  if (error instanceof BridgeError) return error.toBody().error;
+  return { code: "internal", message: fallback };
 }
 
 function methodNotAllowed(): BridgeError {
@@ -431,13 +512,19 @@ async function onRequest(req: IncomingMessage, res: ServerResponse): Promise<voi
   }
 
   // 2. Host. Closes DNS rebinding from a page that resolves a name to 127.0.0.1.
-  if (!hostAllowed(req.headers.host, current?.allowedHosts ?? [])) {
+  if (
+    !hostAllowed(
+      req.headers.host,
+      current?.externalBridgeUrl ?? null,
+      current?.allowedHosts ?? [],
+    )
+  ) {
     fail(
       res,
       new BridgeError(
         "forbidden_host",
-        "This bridge only answers on 127.0.0.1 or localhost.",
-        "Reach a bridge on another machine through a loopback tunnel (ssh -L), or add the proxy's host:port to allowedHosts in the plugin's settings.json.",
+        "This Host header is not allowed by the bridge configuration.",
+        "Set the Private bridge address under Share this Paseo machine, then reconnect it on the Primary Paseo machine.",
       ),
       cors,
     );
@@ -465,9 +552,10 @@ async function onRequest(req: IncomingMessage, res: ServerResponse): Promise<voi
     return;
   }
 
-  const path = new URL(req.url ?? "/", `http://${BIND_HOST}:${port}`).pathname;
+  const requestUrl = new URL(req.url ?? "/", `http://${BIND_HOST}:${port}`);
+  const path = requestUrl.pathname;
   try {
-    await route(req, res, path);
+    await route(req, res, path, requestUrl.searchParams.get("local") === "1");
   } catch (error) {
     if (error instanceof BridgeError) {
       fail(res, error, cors);
@@ -614,6 +702,7 @@ export async function getBridgeStatus(): Promise<BridgeStatus> {
     defaultProvider: current.defaultProvider,
     defaultProfileId: current.defaultProfileId,
     defaultModeId: current.defaultModeId,
+    externalBridgeUrl: current.externalBridgeUrl,
     daemon,
   };
 }

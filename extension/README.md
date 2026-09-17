@@ -146,7 +146,7 @@ survives reloads as long as you don't move the folder.
    | amber **Bridge reachable, not paired yet** | The plugin is running but no token is stored. Paste one. |
    | red **Token rejected** | The plugin is running and refused this token. Copy it again. |
    | red **Can't reach the Paseo bridge** | The plugin isn't listening on that URL. |
-   | red **Chrome hasn't been given access to this bridge** | Press **Grant access to this address** on that host. |
+   | red **Chrome hasn't been given access to this bridge** | Advanced direct mode only: press **Grant access to this address** on that connection. |
    | red **Update required** | Plugin and extension speak different contract versions. Sends are blocked until you update one of them. |
    | amber **Bridge up, Paseo daemon unreachable** | Start the Paseo app. |
 
@@ -154,41 +154,39 @@ survives reloads as long as you don't move the folder.
    it still returns 200 (liveness), with a valid token it returns `paired: true` plus the
    full provider list, and with an invalid token it returns 401.
 
-5. Optionally pick a **Default provider**. The list is the union of what every paired host
+5. Optionally pick a **Default provider**. The list is the union of what every connected machine
    reports, so it is real — leave it on *(use each host's own default)* to defer to each
    plugin's own setting. It is applied to whichever host a send lands on, when that host
    offers it.
 6. Open a Graphite PR (`https://app.graphite.com/github/pr/...`) or a GitHub PR
    (`https://github.com/{owner}/{repo}/pull/{n}`) and click **Send to Paseo**.
 
-Default bridge URL is `http://127.0.0.1:7788`. If your plugin runs on a different port,
-change that host's Bridge URL field and click **Grant access to this address** — the manifest
-only pre-declares `http://127.0.0.1:7788/*` as a required host permission, and other localhost
-ports come from `optional_host_permissions` on demand.
+Simple setup always uses `http://127.0.0.1:7788` on the Browser machine. If the Primary Paseo
+plugin uses a different port, switch to **Advanced: connect the browser directly to each Paseo
+machine**, change the URL, and grant the exact permission.
 
 ### More than one Paseo machine
 
-Press **Add a host** for each additional machine. Every host owns its own bridge URL and its own
-pairing token; tokens belong to a plugin install and are never interchangeable. Untick **Enabled**
-to keep a host's token but skip it, and **Test all connections** checks them one at a time.
+The extension does not configure them in the normal flow. On an Additional Paseo machine, use
+**Share this Paseo machine** to enable private access and copy its connection code. Paste the code
+into **Paseo machines** on the Primary Paseo machine. Chrome remains paired only to the Primary
+loopback bridge; that plugin fans out resolves and proxies the chosen send.
 
-A bridge on another machine binds `127.0.0.1` *there*, so forward it to a loopback port here and
-point the host at that:
+A connection code contains the Additional machine's tailnet-only HTTPS address and token. Treat it
+as a password. Machine names, provider and mode catalogs, failures, and workspace candidates come
+back as separate routed slices, so the existing merged picker still shows the correct per-machine
+data. An unavailable Additional machine is one warning row, not a failure of the whole composer.
 
-```sh
-ssh -L 7789:127.0.0.1:7788 devbox     # then use http://127.0.0.1:7789
-```
+<details>
+<summary>Advanced direct mode</summary>
 
-Hosts name themselves. `GET /v1/ping` returns `machine.name`, so the list reads `devbox` rather
-than `127.0.0.1:7789`, and the name is cached against the host so it survives that machine going
-away. Type a label if you want a different one; a typed label always wins. Where two hosts would
-display the same name, the address is appended to both — and only to those.
+The old browser-to-every-machine design is retained under **Advanced: connect the browser directly
+to each Paseo machine**. Each direct connection owns its URL and token and needs an exact Chrome
+permission. Use it for unusual network layouts or to keep an existing setup unchanged. Tailscale
+Serve and SSH tunnel instructions are in the repository root README; SSH tunnels end with their
+terminal process and are not the recommended durable setup.
 
-Opening a pull request resolves it on **every** enabled, paired host at once, and the composer
-shows one list ranked across machines with the host on each row. Anything per-host — provider,
-mode, PR title, project — follows the selected target's machine, and a send goes only there. A
-host that fails gets its own warning row under the picker, naming it and its error code, and the
-rest of the composer keeps working.
+</details>
 
 ## Security model
 
@@ -198,7 +196,8 @@ treated as a real credential:
 - **Tokens live only in the service worker.** They are stored in `chrome.storage.local`
   and read exclusively by `src/background/bridge-client.ts`. The content script posts
   *intents* over `chrome.runtime.sendMessage`; the service worker performs every HTTP
-  request and attaches the `Authorization` header. One token per host, and a request is
+  request and attaches the `Authorization` header. Simple mode stores only the Primary machine's
+  token. Advanced direct mode stores one token per browser connection, and a request is
   built from the `HostConfig` it is going to — there is no ambient "the token".
 - **`content.js` and `mainworld.js` contain no credential code at all** — no `Bearer`, no
   `Authorization`, no `chrome.storage`. The e2e suite asserts this statically against the
@@ -208,8 +207,11 @@ treated as a real credential:
   `Access-Control-Allow-Credentials`.
 - The MAIN-world script is deliberately ~30 lines of navigation plumbing and nothing else,
   because it shares a JS context with Graphite's own code.
-- **Only `http://127.0.0.1:7788/*` is a required host permission.** Every other bridge address
-  is consented to per host through **Grant access to this address**. A Chrome match pattern's
+- **Only `http://127.0.0.1:7788/*` is a required host permission.** Simple mode needs nothing else.
+  In Advanced direct mode, every other supported bridge
+  origin is consented to per host through **Grant access to this address**. The manifest declares
+  HTTPS origins as optional so Chrome can grant the exact remote origin at runtime; remote plain
+  HTTP is never declared or accepted. A Chrome match pattern's
   host makes the port a don't-care, so the `http://127.0.0.1/*` optional permission covers any
   tunnel port without the manifest listing them — multi-host support widened nothing.
   `bridge-client.ts` checks the permission *before* fetching, because a blocked fetch fails as
@@ -226,8 +228,8 @@ extension/
   src/shared/errors.ts          error code -> specific headline + next step
   src/shared/format.ts          prose -> text + <code>; owns command formatting
   src/shared/messages.ts        content <-> service-worker intent protocol
-  src/shared/merge.ts           merges several hosts' resolves into one ranking (pure)
-  src/background/index.ts       intent router; fans a resolve out to every host
+  src/shared/merge.ts           merges several machine slices into one ranking (pure)
+  src/background/index.ts       expands primary-plugin routes; direct-mode fan-out
   src/background/bridge-client.ts  per-host HTTP client; the only token reader
   src/background/settings.ts    chrome.storage access; the host list + its migration
   src/content/index.ts          injection loop + SPA lifecycle (site-agnostic)
@@ -471,7 +473,8 @@ Specific behaviours worth knowing:
 | Button appears bottom-right instead of in the header | Every anchor rung is missing — usually a site redesign. The extension still works; open an issue with the new header markup. |
 | Popover says "Not paired with Paseo" | No token, or the wrong one. Options → paste the token from the Paseo plugin surface → **Test connection**. |
 | Popover says "Can't reach the Paseo bridge" | The plugin isn't running (`paseo plugin ls` should show `send-to-paseo` as `running`), or the port differs from the Bridge URL. Check `paseo plugin logs send-to-paseo`. |
-| "Bridge rejected the request host" | The Bridge URL's host must be `127.0.0.1` or `localhost` — the port is free. A bridge on another machine is reached by forwarding it to a loopback port (`ssh -L 7789:127.0.0.1:7788`); a real host name is refused by design (DNS-rebinding defence) unless it is in the plugin's `allowedHosts`. |
+| "Remote bridges require HTTPS" | Advanced direct mode only: plain HTTP is accepted only for loopback. On the Additional machine, enable private access and use its `.ts.net` address. |
+| "Bridge rejected the request host" | Save the HTTPS origin as **Private bridge address** under **Share this Paseo machine**. The allowlist is exact. |
 | "This repo isn't a Paseo project" | Add the repository as a project in Paseo, then reopen the popover. |
 | "GitHub CLI isn't authenticated" | Run `gh auth login` on the machine running Paseo. |
 | Popover says **Update required** | Plugin and extension are on different contract versions. Sends are blocked deliberately. Update whichever side is older; **Test connection** prints both numbers. |
@@ -479,7 +482,7 @@ Specific behaviours worth knowing:
 | Success state says **Dry run — no agent created** | The plugin is running with `SEND_TO_PASEO_DRY_RUN=1`. Nothing was created and the ids are synthetic. Unset the env var and reload the plugin. |
 | **Default provider** dropdown is empty | Providers come from an authenticated ping. Paste a valid token and click **Test all connections**. |
 | "Chrome hasn't been given access to this bridge" | Only `127.0.0.1:7788` is permitted up front. Options → that host → **Grant access to this address**. |
-| A host is named in a warning row under the Target picker | That machine did not answer; the others did. The row carries its own error code — `bridge_unreachable` (tunnel down or Paseo not running there), `unauthorized` (wrong token for *that* machine), `contract_mismatch` (its plugin is a different version). |
+| A host is named in a warning row under the Target picker | That machine did not answer; the others did. The row carries its own error code — `bridge_unreachable` (proxy/tunnel down or Paseo not running there), `unauthorized` (wrong token for *that* machine), `contract_mismatch` (its plugin is a different version). |
 | A workspace you expect is missing from the Target list | Its host is disabled, has no token, or is in a warning row. The field label counts the hosts that answered: "4 candidates on 1 host" with two paired means one is missing. |
 | A send started an agent on the wrong machine | Shouldn't be possible — the send names the host that owns the chosen target. Check the host chip on the resolved-target line and in the success state; both name the machine. |
 | Esc closes the whole composer while the Target dropdown is open | The layering in `Popover.open()`'s capturing `keydown` listener is gone — it must ask `candidateCombo.handleEscape()` before `closePopover()`. `test/e2e.mjs` case 32 is the guard. |

@@ -3,7 +3,12 @@ import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { DEFAULT_PORT, RecentSendSchema, type RecentSend } from "../shared/contracts";
+import {
+  DEFAULT_PORT,
+  ExternalBridgeUrlSchema,
+  RecentSendSchema,
+  type RecentSend,
+} from "../shared/contracts";
 
 /**
  * The bridge's own state: the pairing token, the port, the default provider
@@ -51,11 +56,17 @@ const SettingsSchema = z.object({
    * parse failure would regenerate the file and silently rotate the pairing
    * token on upgrade.
    *
-   * File-only, with no UI, because widening the set of names that can reach an
-   * agent-starting endpoint is a security decision — see `hostAllowed` in
-   * server/bridge.ts.
+   * File-only, with no UI, because this is the advanced multi-name escape
+   * hatch. Normal remote setup uses the single, validated
+   * `externalBridgeUrl` below — see `hostAllowed` in server/bridge.ts.
    */
   allowedHosts: z.array(z.string()).default([]),
+  /**
+   * HTTPS origin of a reverse proxy the user explicitly configured in Paseo.
+   * The listener remains on loopback; this only authorizes the proxy's Host
+   * header. Null keeps the default local-only posture.
+   */
+  externalBridgeUrl: ExternalBridgeUrlSchema.nullable().default(null),
   /**
    * Plaintext password for a Paseo daemon that requires one, or null.
    *
@@ -70,6 +81,19 @@ const SettingsSchema = z.object({
    * `resolvePassword` in server/daemon.ts.
    */
   daemonPassword: z.string().nullable().default(null),
+  /** Additional Paseo machines this plugin routes browser requests to. */
+  additionalMachines: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        label: z.string(),
+        bridgeUrl: ExternalBridgeUrlSchema,
+        token: z.string().min(1),
+        enabled: z.boolean(),
+        machineName: z.string().default(""),
+      }),
+    )
+    .default([]),
 });
 
 export type Settings = z.infer<typeof SettingsSchema>;
@@ -99,7 +123,9 @@ function defaults(): Settings {
     recentSends: [],
     allowedExtensionIds: [],
     allowedHosts: [],
+    externalBridgeUrl: null,
     daemonPassword: null,
+    additionalMachines: [],
   };
 }
 
@@ -204,6 +230,41 @@ export const settings = {
       const removed = current.recentSends.length;
       if (removed > 0) await persist({ ...current, recentSends: [] });
       return removed;
+    }),
+
+  addAdditionalMachine: (machine: Settings["additionalMachines"][number]): Promise<Settings> =>
+    serialize(async () => {
+      const current = await load();
+      const additionalMachines = [
+        ...current.additionalMachines.filter((item) => item.id !== machine.id),
+        machine,
+      ];
+      const next = { ...current, additionalMachines };
+      await persist(next);
+      return next;
+    }),
+
+  updateAdditionalMachine: (
+    id: string,
+    patch: Partial<Omit<Settings["additionalMachines"][number], "id" | "token" | "bridgeUrl">>,
+  ): Promise<Settings> =>
+    serialize(async () => {
+      const current = await load();
+      const additionalMachines = current.additionalMachines.map((item) =>
+        item.id === id ? { ...item, ...patch } : item,
+      );
+      const next = { ...current, additionalMachines };
+      await persist(next);
+      return next;
+    }),
+
+  removeAdditionalMachine: (id: string): Promise<boolean> =>
+    serialize(async () => {
+      const current = await load();
+      const additionalMachines = current.additionalMachines.filter((item) => item.id !== id);
+      if (additionalMachines.length === current.additionalMachines.length) return false;
+      await persist({ ...current, additionalMachines });
+      return true;
     }),
 };
 

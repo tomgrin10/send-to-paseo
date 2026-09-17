@@ -33,7 +33,7 @@ const TABLE: Record<ContractErrorCode | LocalErrorCode, PresentedError> = {
   },
   forbidden_host: {
     title: "Bridge rejected the request host",
-    hint: "The bridge URL must be http://127.0.0.1:<port> or http://localhost:<port>. A bridge on another machine has to be reached through a loopback tunnel, or have its proxy name added to allowedHosts in the plugin's settings.json.",
+    hint: "For a remote bridge, save the HTTPS origin as External bridge URL in Paseo's Send to Paseo settings, then use the same URL in the extension.",
     openOptions: true,
   },
   bad_request: {
@@ -78,6 +78,11 @@ const TABLE: Record<ContractErrorCode | LocalErrorCode, PresentedError> = {
   },
 
   /* ---- extension-local codes ------------------------------------------- */
+  invalid_bridge_url: {
+    title: "Remote bridges require HTTPS",
+    hint: "Use HTTP only for 127.0.0.1 or localhost. For another machine, configure Tailscale Serve or another HTTPS reverse proxy.",
+    openOptions: true,
+  },
   bridge_unreachable: {
     title: "Can't reach the Paseo bridge",
     hint: "Open Paseo and make sure the send-to-paseo plugin is running, then check the bridge URL in options.",
@@ -90,7 +95,7 @@ const TABLE: Record<ContractErrorCode | LocalErrorCode, PresentedError> = {
   },
   permission_required: {
     title: "Chrome hasn't been given access to this bridge",
-    hint: "Only 127.0.0.1:7788 is granted up front. Open the extension options and press Grant access on this host.",
+    hint: "Open the extension options and press Grant access on this host. Chrome grants only that exact origin.",
     openOptions: true,
   },
   bad_response: {

@@ -178,6 +178,23 @@
         padding: 16px;
         text-align: center;
       }
+      details.advanced {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+      }
+      details.advanced > summary {
+        cursor: pointer;
+        padding: 14px 16px;
+        font-weight: 600;
+      }
+      details.advanced > .advanced-body { padding: 0 16px 16px; display: grid; gap: 12px; }
+      .mode-choice { justify-content: space-between; align-items: flex-start; }
+      .mode-choice > span { display: grid; gap: 2px; }
+      .simple-only { display: none; }
+      body[data-mode="simple"] .simple-only { display: block; }
+      body[data-mode="simple"] .advanced-only { display: none !important; }
+      body[data-mode="simple"] .hosts .host:not(:first-child) { display: none; }
     </style>
   </head>
   <body>
@@ -189,28 +206,49 @@
         Send to Paseo
       </h1>
       <p class="sub">
-        Pairs this extension with the <code>send-to-paseo</code> Paseo plugin's local bridge —
-        on as many Paseo machines as you run one on.
+        The browser connects to one Primary Paseo machine. That machine can route sends to your
+        other Paseo machines without giving Chrome more network permissions.
       </p>
 
-      <section>
-        <h2>Paseo hosts</h2>
-        <span class="help">
-          Every pull request is resolved on <b>all</b> enabled hosts at once, and the composer
-          shows the workspaces each one has. Each host needs its own pairing token: tokens belong
-          to a plugin install and are not interchangeable.
-          <br />
-          A bridge on another machine binds <code>127.0.0.1</code> there, so reach it through a
-          loopback tunnel — <code>ssh -L 7789:127.0.0.1:7788 devbox</code> — and give this host
-          <code>http://127.0.0.1:7789</code>.
+      <section id="connectionMode">
+        <h2>Simple setup</h2>
+        <div class="row mode-choice">
+          <span>
+            <b>Browser machine → Primary Paseo machine</b>
+            <span class="help">
+              Recommended. The extension always uses <code>http://127.0.0.1:7788</code>. Add dev
+              VMs and other machines inside the Send to Paseo plugin on the Primary Paseo machine.
+            </span>
+          </span>
+          <button id="useSimple" class="primary" type="button">Use simple setup</button>
+        </div>
+      </section>
+
+      <section id="hostsSection">
+        <h2 id="hostsHeading">Primary Paseo machine</h2>
+        <span class="help" id="hostsHelp">
+          Copy the pairing token from Paseo on this browser machine. No Tailscale command, SSH
+          tunnel, remote URL, or Chrome permission is needed here.
         </span>
         <div class="hosts" id="hosts"></div>
         <div class="row">
-          <button id="addHost" type="button">Add a host</button>
-          <button id="testAll" class="primary" type="button">Test all connections</button>
+          <button id="addHost" class="advanced-only" type="button">Add a direct connection</button>
+          <button id="testAll" class="primary advanced-only" type="button">Test all connections</button>
           <span class="saved" id="saved">Saved</span>
         </div>
       </section>
+
+      <details class="advanced" id="advancedDetails">
+        <summary>Advanced: connect the browser directly to each Paseo machine</summary>
+        <div class="advanced-body">
+          <span class="help">
+            Use this only when you do not want the Primary Paseo machine to route requests. Every
+            additional machine needs its own HTTPS private bridge address, pairing token, and exact
+            Chrome site permission. Existing multi-machine setups remain here and keep working.
+          </span>
+          <button id="useAdvanced" type="button">Use advanced direct connections</button>
+        </div>
+      </details>
 
       <section>
         <h2>Defaults</h2>
@@ -237,7 +275,8 @@
          page has no innerHTML anywhere. -->
     <template id="hostTemplate">
       <div class="host">
-        <div class="host-head">
+        <b class="simple-only">Primary Paseo machine</b>
+        <div class="host-head advanced-only">
           <span class="idx"></span>
           <input class="hostLabel" type="text" spellcheck="false" autocomplete="off" />
           <label class="toggle">
@@ -246,7 +285,7 @@
           </label>
           <button class="hostRemove danger" type="button">Remove</button>
         </div>
-        <label class="field">
+        <label class="field advanced-only">
           <span class="lbl">Bridge URL</span>
           <input class="hostUrl" type="text" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:7788" />
         </label>

@@ -1,9 +1,15 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import {
+  addAdditionalMachine,
   clearRecentSends,
+  enablePrivateAccess,
+  getConnectionCode,
   getStatus,
+  removeAdditionalMachine,
   regenerateToken,
   revealToken,
+  testAdditionalMachine,
+  updateAdditionalMachine,
   updateConfig,
 } from "./shared/contracts";
 import { getBridgeStatus, restartBridge, runBridge } from "./server/bridge";
@@ -15,6 +21,13 @@ import {
   resolveSelectedProfile,
 } from "./server/resolve";
 import { settings } from "./server/settings";
+import {
+  addMachineFromCode,
+  enableMachinePrivateAccess,
+  getMachineConnectionCode,
+  publicMachine,
+  testMachine,
+} from "./server/peers";
 
 export default function contribute(server: PluginServerContext) {
   server.handle(getStatus, async (_input, { paseo }) => {
@@ -38,6 +51,7 @@ export default function contribute(server: PluginServerContext) {
       profilesError: profileResult.error,
       recentSends: current.recentSends,
       dependencies: deps.dependencies,
+      additionalMachines: current.additionalMachines.map(publicMachine),
     };
   });
 
@@ -49,18 +63,20 @@ export default function contribute(server: PluginServerContext) {
 
   server.handle(
     updateConfig,
-    async ({ port, defaultProvider, defaultProfileId, defaultModeId }) => {
+    async ({ port, defaultProvider, defaultProfileId, defaultModeId, externalBridgeUrl }) => {
       const before = await settings.read();
       const patch: {
         port?: number;
         defaultProvider?: string | null;
         defaultProfileId?: string | null;
         defaultModeId?: string | null;
+        externalBridgeUrl?: string | null;
       } = {};
       if (port !== undefined) patch.port = port;
       if (defaultProvider !== undefined) patch.defaultProvider = defaultProvider;
       if (defaultProfileId !== undefined) patch.defaultProfileId = defaultProfileId;
       if (defaultModeId !== undefined) patch.defaultModeId = defaultModeId;
+      if (externalBridgeUrl !== undefined) patch.externalBridgeUrl = externalBridgeUrl;
       await settings.update(patch);
       // Only rebinding the listener needs a restart; a provider or mode change
       // does not.
@@ -76,6 +92,38 @@ export default function contribute(server: PluginServerContext) {
   server.handle(clearRecentSends, async () => ({
     removed: await settings.clearRecentSends(),
   }));
+
+  server.handle(addAdditionalMachine, async ({ connectionCode }) => ({
+    machine: await addMachineFromCode(connectionCode),
+  }));
+
+  server.handle(updateAdditionalMachine, async ({ id, label, enabled }) => {
+    const current = await settings.read();
+    const before = current.additionalMachines.find((machine) => machine.id === id);
+    if (before === undefined) throw new Error("That additional Paseo machine no longer exists.");
+    await settings.updateAdditionalMachine(id, {
+      ...(label === undefined ? {} : { label }),
+      ...(enabled === undefined ? {} : { enabled }),
+    });
+    const after = (await settings.read()).additionalMachines.find((machine) => machine.id === id);
+    if (after === undefined) throw new Error("That additional Paseo machine no longer exists.");
+    return { machine: publicMachine(after) };
+  });
+
+  server.handle(removeAdditionalMachine, async ({ id }) => ({
+    removed: await settings.removeAdditionalMachine(id),
+  }));
+
+  server.handle(testAdditionalMachine, async ({ id }) => {
+    const machine = (await settings.read()).additionalMachines.find((item) => item.id === id);
+    if (machine === undefined) {
+      return { ok: false, machineName: null, detail: "That additional Paseo machine no longer exists." };
+    }
+    return testMachine(machine);
+  });
+
+  server.handle(getConnectionCode, async () => getMachineConnectionCode());
+  server.handle(enablePrivateAccess, async () => enableMachinePrivateAccess());
 
   return runBridge();
 }

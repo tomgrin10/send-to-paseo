@@ -53,6 +53,7 @@ export type ContractErrorCode = (typeof CONTRACT_ERROR_CODES)[number];
  * contract's table on purpose.
  */
 export const LOCAL_ERROR_CODES = [
+  "invalid_bridge_url",
   "bridge_unreachable",
   "not_configured",
   "permission_required",
@@ -206,6 +207,16 @@ export interface ResolveResponse {
    * own resolution chain. Null when it would omit the field entirely. Additive.
    */
   resolvedModeId?: string | null;
+  /** Additive router result returned by a primary Paseo machine. */
+  routes?: ResolveRoute[];
+}
+
+export interface ResolveRoute {
+  routeId: string;
+  routeLabel: string;
+  bridgeAuthority: string;
+  resolved: Omit<ResolveResponse, "routes"> | null;
+  error: ErrorBody["error"] | null;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -213,8 +224,8 @@ export interface ResolveResponse {
 /* -------------------------------------------------------------------------- */
 
 export type SendTarget =
-  | { kind: "existing"; workspaceId: string }
-  | { kind: "create" };
+  | { kind: "existing"; workspaceId: string; routeId?: string }
+  | { kind: "create"; routeId?: string };
 
 export interface SendRequest extends PrRef {
   prompt: string;
