@@ -445,12 +445,14 @@ try {
       url: "https://devbox.example.ts.net",
       token: "test-token-not-a-real-secret",
       label: "devbox",
+      serverId: "srv_devbox",
     });
     const decoded = peers.decodeConnectionCode(code);
     check("code has an identifiable version prefix", code.startsWith("stp1_"));
     check("private bridge address round-trips", decoded.url === "https://devbox.example.ts.net");
     check("pairing token round-trips", decoded.token === "test-token-not-a-real-secret");
     check("machine label round-trips", decoded.label === "devbox");
+    check("Paseo server ID round-trips", decoded.serverId === "srv_devbox");
     let rejectedHttp = false;
     try {
       peers.decodeConnectionCode(
@@ -477,6 +479,7 @@ try {
   /* -------------------------------------------------------------------- */
   console.log("\n13. routed operations share one browser-sized timeout budget");
   {
+    let sendRequests = 0;
     const peerServer = createServer((req, res) => {
       const reply = (body) => {
         res.writeHead(200, { "Content-Type": "application/json" });
@@ -501,6 +504,7 @@ try {
         return;
       }
       if (req.url === "/v1/send?local=1") {
+        sendRequests += 1;
         req.resume();
         setTimeout(
           () =>
@@ -530,6 +534,7 @@ try {
       if (address === null || typeof address === "string") throw new Error("test peer did not bind");
       const machine = {
         id: "test-vm",
+        serverId: "srv_test",
         label: "test VM",
         bridgeUrl: `http://127.0.0.1:${address.port}`,
         token: "test-token",
@@ -562,6 +567,23 @@ try {
 
       const sent = await peers.sendToMachine(machine, request, 600);
       check("a send within the larger route budget succeeds", sent.ok === true);
+
+      const sendsBeforeMismatch = sendRequests;
+      let mismatch = null;
+      try {
+        await peers.sendToMachine({ ...machine, serverId: "srv_other" }, request, 600);
+      } catch (error) {
+        mismatch = error;
+      }
+      check(
+        "a route whose bridge answers for another serverId is rejected",
+        mismatch?.message?.includes("answered as Paseo host srv_test") === true,
+        mismatch?.message,
+      );
+      check(
+        "identity mismatch is rejected before the send request",
+        sendRequests === sendsBeforeMismatch,
+      );
     } finally {
       await new Promise((resolve) => peerServer.close(resolve));
     }

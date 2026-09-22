@@ -9,7 +9,7 @@ import { z } from "zod";
 
 /** Advertised in `GET /v1/ping`. Keep in step with `package.json`. */
 export const PLUGIN_NAME = "send-to-paseo";
-export const PLUGIN_VERSION = "1.1.0";
+export const PLUGIN_VERSION = "1.2.0";
 /** Bumped only for an incompatible bridge API; the paths stay `/v1`. */
 export const CONTRACT_VERSION = 1;
 
@@ -424,6 +424,8 @@ export type BridgeStatus = z.infer<typeof BridgeStatusSchema>;
 
 export const AdditionalMachineSchema = z.object({
   id: z.string(),
+  /** Paseo daemon identity. Null only for a route imported before v1.2.0 and not yet pinged. */
+  serverId: z.string().nullable(),
   label: z.string(),
   bridgeUrl: ExternalBridgeUrlSchema,
   enabled: z.boolean(),
@@ -482,9 +484,14 @@ export const DependencyReportSchema = z.object({
 });
 export type DependencyReportPayload = z.infer<typeof DependencyReportSchema>;
 
+const SurfaceTargetSchema = z.object({
+  /** Exact host owning this surface action; handlers reject a mismatched installation. */
+  serverId: z.string().min(1).max(200),
+});
+
 export const getStatus = defineRpc({
   name: "send-to-paseo.status",
-  input: z.object({}),
+  input: SurfaceTargetSchema,
   output: z.object({
     status: BridgeStatusSchema,
     providers: z.array(ProviderOptionSchema),
@@ -500,19 +507,19 @@ export const getStatus = defineRpc({
 
 export const revealToken = defineRpc({
   name: "send-to-paseo.token.reveal",
-  input: z.object({}),
+  input: SurfaceTargetSchema,
   output: z.object({ token: z.string() }),
 });
 
 export const regenerateToken = defineRpc({
   name: "send-to-paseo.token.regenerate",
-  input: z.object({}),
+  input: SurfaceTargetSchema,
   output: z.object({ token: z.string() }),
 });
 
 export const updateConfig = defineRpc({
   name: "send-to-paseo.config.update",
-  input: z.object({
+  input: SurfaceTargetSchema.extend({
     port: z.number().int().min(1).max(65535).optional(),
     /** Null clears the override and falls back to the daemon's own default. */
     defaultProvider: z.string().max(200).nullable().optional(),
@@ -528,19 +535,19 @@ export const updateConfig = defineRpc({
 
 export const clearRecentSends = defineRpc({
   name: "send-to-paseo.recent.clear",
-  input: z.object({}),
+  input: SurfaceTargetSchema,
   output: z.object({ removed: z.number() }),
 });
 
 export const addAdditionalMachine = defineRpc({
   name: "send-to-paseo.machine.add",
-  input: z.object({ connectionCode: z.string().trim().min(1).max(4096) }),
+  input: SurfaceTargetSchema.extend({ connectionCode: z.string().trim().min(1).max(4096) }),
   output: z.object({ machine: AdditionalMachineSchema }),
 });
 
 export const updateAdditionalMachine = defineRpc({
   name: "send-to-paseo.machine.update",
-  input: z.object({
+  input: SurfaceTargetSchema.extend({
     id: z.string().min(1).max(200),
     label: z.string().max(120).optional(),
     enabled: z.boolean().optional(),
@@ -550,13 +557,13 @@ export const updateAdditionalMachine = defineRpc({
 
 export const removeAdditionalMachine = defineRpc({
   name: "send-to-paseo.machine.remove",
-  input: z.object({ id: z.string().min(1).max(200) }),
+  input: SurfaceTargetSchema.extend({ id: z.string().min(1).max(200) }),
   output: z.object({ removed: z.boolean() }),
 });
 
 export const testAdditionalMachine = defineRpc({
   name: "send-to-paseo.machine.test",
-  input: z.object({ id: z.string().min(1).max(200) }),
+  input: SurfaceTargetSchema.extend({ id: z.string().min(1).max(200) }),
   output: z.object({
     ok: z.boolean(),
     machineName: z.string().nullable(),
@@ -574,13 +581,13 @@ const ConnectionCodeResultSchema = z.object({
 
 export const getConnectionCode = defineRpc({
   name: "send-to-paseo.connection-code.get",
-  input: z.object({}),
+  input: SurfaceTargetSchema,
   output: ConnectionCodeResultSchema,
 });
 
 export const enablePrivateAccess = defineRpc({
   name: "send-to-paseo.private-access.enable",
-  input: z.object({}),
+  input: SurfaceTargetSchema,
   output: ConnectionCodeResultSchema,
 });
 

@@ -1,5 +1,54 @@
 # Verification log — `send-to-paseo` plugin
 
+## 2026-09-22 — Paseo 0.9 host discovery and explicit targeting
+
+The plugin now requires Paseo 0.9.0 and imports `useHosts()` plus
+`getPaseoClient(serverId)` from the 0.9 client boundary. PR
+`getpaseo/paseo#4971` and its merged implementation were inspected directly: configured offline
+hosts remain in `useHosts()`, unknown and disconnected IDs throw without fallback, retained APIs
+survive reconnect on the same client, and replacement/removal/disposal/unload releases them. The
+surface therefore acquires a host client inside each action and correlates bridge routes only by
+exact `serverId`.
+
+The browser bridge still keeps its connection-code registry. The 0.9 summaries intentionally
+contain no URL or credential and the targeted API is client-only, so it cannot replace the
+Primary plugin's server-side proxy. New codes carry the daemon `serverId`; authenticated peer
+pings reject an identity mismatch before `/v1/send`. Old codes/settings remain valid with a null
+ID until the next successful ping learns it. Every surface RPC also includes the surface
+`host.id`, which Paseo's own surface implementation confirms is the selected `serverId`; the
+server rejects a mismatched installation rather than acting on a newly selected host.
+
+```text
+$ cd plugin && npm run verify
+typecheck clean
+73/73 server checks passed
+7/7 host-client tests passed
+
+$ paseo plugin install <this-worktree>/plugin --id send-to-paseo --json
+status: running (Paseo daemon 0.9.0)
+
+$ mv plugin/node_modules <temporary-path>; paseo plugin reload send-to-paseo
+status: running (proves the Git/no-package-manager compiler path)
+$ mv <temporary-path> plugin/node_modules
+
+$ time paseo plugin reload send-to-paseo   # twice
+elapsed=1.67 exit=0
+elapsed=1.66 exit=0
+
+$ curl http://127.0.0.1:7788/v1/ping
+version: 1.2.0; contract: 1; daemon.reachable: true; serverId: srv_b-bnn6tWrd95
+
+$ STP_CHROMIUM=.../chromium-1243/chrome-linux64/chrome node test/e2e.mjs
+=== 63 passed, 0 failed, 0 skipped (of 63) ===
+```
+
+The live e2e case called only `/v1/ping` and `/v1/resolve`; it returned the expected fictional
+`project_not_found`, created no workspace or agent, and preserved bridge contract v1. Plugin logs
+showed `Plugin ready`, the loopback listener, and three clean dependency self-check lines with no
+stderr. This VM session does not provide a controllable Paseo app viewport, so the native surface
+was compiler/runtime-loaded but not screenshot-tested in wide/compact light/dark modes; the new
+row/model behavior is covered by the focused pure tests.
+
 ## 2026-09-17 — routed send timeout false failure
 
 The VM successfully created a worktree at `12:00:10` and recorded the new agent at `12:00:17`,

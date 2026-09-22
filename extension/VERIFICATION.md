@@ -1,6 +1,25 @@
 # Verification record
 
-## Latest regression run — 2026-09-15
+## Latest regression run — 2026-09-22
+
+The v1.2.0 release changes the Paseo plugin surface and minimum host version, not the frozen
+extension/bridge contract. The extension version was kept in lockstep for the release artifact.
+After installing this clean worktree's locked development dependencies, the typecheck, unit tests,
+shipping build, and full unpacked-extension suite passed on Linux Chromium 1243. Case 13 exercised
+the candidate plugin running on the VM's Paseo 0.9.0 daemon and remained read-only.
+
+```text
+npm run typecheck
+npm run test:unit             # 3/3 passed
+npm run build                 # shipping dist/ completed
+STP_CHROMIUM=~/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome node ../test/e2e.mjs
+=== 63 passed, 0 failed, 0 skipped (of 63) ===
+```
+
+The run regenerated screenshots using Linux font rendering; those binary-only differences were
+not committed because this change does not alter extension UI.
+
+## Regression run — 2026-09-15
 
 The Primary-plugin routing flow, compatibility-preserving Advanced direct mode, and HTTPS
 permission flow were run against the real unpacked extension in headless Chromium. Case 18b2

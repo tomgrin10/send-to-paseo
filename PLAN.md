@@ -111,7 +111,7 @@ into the new agent in the desktop app.
 
 ## 3. Component A — the Paseo plugin
 
-Following Paseo 0.8's runtime-entry and directory boundaries, because Paseo bundles the client and
+Following Paseo 0.9's runtime-entry and directory boundaries, because Paseo bundles the client and
 server runtimes separately.
 
 ```
@@ -184,6 +184,14 @@ A sidebar item, so all configuration lives in Paseo rather than a JSON file you 
 - The pairing token: reveal, copy, regenerate
 - Default provider/model picker, populated from `paseo.providers`
 - Recent sends: PR, workspace, agent, outcome — with tap-through to the agent
+
+Paseo 0.9 also supplies `useHosts()` and `getPaseoClient(serverId)`. The surface lists every
+configured host from that live inventory, including offline hosts, and reacquires an explicitly
+targeted client for each access check. It never substitutes the selected host for an unknown or
+disconnected target. Browser routing remains separate: summaries intentionally omit URLs and
+credentials, and the API exists only in the client runtime, so the Primary bridge still needs a
+connection code for each Additional machine it proxies to. Saved routes are correlated to
+discovered hosts by `serverId` only.
 
 ---
 
@@ -292,7 +300,7 @@ privilege boundary, not a convenience:
   server does the same, harder. Cleanup must `server.close()` **and**
   `server.closeAllConnections()` (keep-alive sockets will otherwise hold it open), then await
   the close.
-- **Runtime crossing.** Paseo 0.8 compiles `client/`, `server/`, and `shared/` as strict boundaries.
+- **Runtime crossing.** Paseo 0.9 compiles `client/`, `server/`, and `shared/` as strict boundaries.
   The client entry never imports `server/`; the server entry owns the HTTP listener and returns its
   cleanup directly.
 - **Port already in use.** Fail loudly into the surface's status line and `paseo plugin logs`,

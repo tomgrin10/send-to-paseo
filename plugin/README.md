@@ -28,7 +28,7 @@ through its own forge credentials. `gh` only supplies metadata.
 
 | | Required? | Minimum verified | What it is used for | What breaks without it |
 | --- | --- | --- | --- | --- |
-| **Paseo** | yes | `0.8.0` | Everything. The plugin uses Paseo 0.8's split client/server runtime entries. | The plugin does not load. |
+| **Paseo** | yes | `0.9.0` | Everything. The surface uses Paseo 0.9's configured-host discovery and host-targeted client APIs. | The plugin does not load. |
 | **`git`** | yes | `2.51.2` | Reading the branch a workspace is on, and the repository's `origin`. Paseo itself needs it to create a worktree. | Creating a worktree fails with a message naming `git`. Workspace branches read as unknown, so nothing is ranked as an exact or stack match — everything falls back to "create". |
 | **`gh`** | **no** | `2.98.0` | PR title, head and base branch names, and stack discovery (`gh pr list` rebuilds the whole Graphite stack, including its merged and closed members). | Sending still works. You lose the PR title, the branch names, exact/stack candidate ranking, and the `Title:`/`Branch:` lines in the agent's prompt. Stack detection is lost **entirely**, local git ancestry included: that check proves "this branch is an ancestor of a branch in the stack", and without `gh` there is no stack and no PR head branch to compare against. The bridge says so in the target picker, in the agent's prompt and in the log. |
 
@@ -114,7 +114,7 @@ One command, straight from the public repository. No clone, no `npm install`, no
 build step:
 
 ```sh
-paseo plugin add tomgrin10/send-to-paseo --path plugin --ref v1.1.0
+paseo plugin add tomgrin10/send-to-paseo --path plugin --ref v1.2.0
 paseo plugin ls          # expect: send-to-paseo  running  yes
 paseo plugin logs send-to-paseo
 ```
@@ -200,7 +200,8 @@ All of it lives in the Paseo surface; there is no config file to hunt for.
 | --- | --- | --- |
 | Port | `7788` | Saving rebinds the listener straight away. Bind address is always `127.0.0.1`. |
 | Private bridge address (`externalBridgeUrl`) | none | Optional HTTPS origin for a reverse proxy such as Tailscale Serve. Saving explicitly allowlists only that origin's Host header; the listener remains loopback-only. |
-| Additional Paseo machines | none | Connections imported from `stp1_…` codes. The Primary plugin resolves and sends through these bridges. |
+| Paseo host discovery | automatic | Paseo 0.9 supplies every configured host and live status, including offline hosts. “Check Paseo access” always calls `getPaseoClient(serverId)` for that exact row. |
+| Additional browser routes | none | Connections imported from `stp1_…` codes. These remain necessary only because host discovery exposes neither a private bridge URL nor its token; the Primary plugin resolves and sends through these bridges. |
 | Pairing token | generated on first run | 32 random bytes, base64url. |
 | Default model | the daemon's own default | `provider/model`, e.g. `claude/claude-opus-5`. A send may override it per request. |
 | Agent profile | none | One of your saved Paseo profiles (`daemon.agentProfiles`), followed by id. |
@@ -209,7 +210,8 @@ All of it lives in the Paseo surface; there is no config file to hunt for.
 State is stored at `$PASEO_HOME/plugin-data/send-to-paseo/settings.json`, written
 `0600` inside a `0700` directory. It holds the token, the port, the default
 model, the followed profile id, the default mode, the paired flag, the last 20
-sends, the declared `externalBridgeUrl`, connected Additional Paseo machines and their tokens, two optional advanced allowlists —
+sends, the declared `externalBridgeUrl`, connected Additional Paseo machines with their server IDs
+and tokens, two optional advanced allowlists —
 `allowedExtensionIds` and `allowedHosts` (see [Security model](#security-model))
 — and `daemonPassword`.
 
@@ -258,6 +260,16 @@ extension.
 
 ### Connect Primary and Additional Paseo machines
 
+The **Paseo machines** card is populated automatically from the app's configured hosts. It keeps
+offline hosts visible and correlates a saved browser route only by exact `serverId`; labels and URLs
+are never treated as identity. The per-row access check reacquires
+`getPaseoClient(serverId)` for every action, as required when Paseo replaces a connection, and
+unknown/disconnected errors are shown without falling back to the selected or local host.
+
+Automatic discovery is not browser routing. Host summaries intentionally contain no URL or
+credential, and the host-targeted API is client-side. The connection code below is therefore kept
+only to authorize the Primary plugin's server-side bridge to proxy extension requests.
+
 The listener is loopback-only, by design. Use these exact roles:
 
 - **Browser machine:** runs Chrome.
@@ -266,9 +278,10 @@ The listener is loopback-only, by design. Use these exact roles:
 
 On the Additional Paseo machine, open **Share this Paseo machine**, press **Enable private
 access**, then **Copy connection code**. On the Primary Paseo machine, paste it into **Paseo
-machines** and press **Connect additional machine**. The code bundles the private URL, machine name,
-and token; it is a secret. The Primary plugin checks the other bridge's name and contract before
-resolving or sending, and never follows that machine's own routes, which prevents routing loops.
+machines** and press **Connect additional machine**. The code bundles the `serverId`, private URL,
+machine name and token; it is a secret. The Primary plugin checks the other bridge's identity,
+name and contract before resolving or sending, and never follows that machine's own routes, which
+prevents routing loops.
 The ping and operation share one end-to-end deadline: 9 seconds for resolve and 55 seconds for
 send. Those budgets sit just inside the extension's 10-second and 60-second limits. A slow
 worktree creation therefore has time to finish without the Primary falsely reporting HTTP 503
@@ -810,14 +823,15 @@ endpoint and a wrong method on a known endpoint both return
 
 ## Layout
 
-Paseo 0.8 uses separate runtime entries and directory boundaries. Client code,
+Paseo 0.9 uses separate runtime entries and directory boundaries. Client code,
 server code and shared contracts compile into their matching bundles.
 
 ```
-paseo-plugin.json          id and Paseo >=0.8.0 requirement
+paseo-plugin.json          id and Paseo >=0.9.0 requirement
 index.client.tsx           client contribution wiring
 index.server.ts            RPC handlers and bridge lifecycle
 client/settings.tsx        the Paseo surface
+client/hosts.ts            discovered-host correlation and explicit client checks
 server/bridge.ts           HTTP server, security checks and routing
 server/resolve.ts          PR -> project -> workspace resolution and ranking
 server/send.ts             workspace ensure + agent create + prompt composition
@@ -827,7 +841,9 @@ server/git.ts              read-only branch, remote, trunk and ancestry reads
 server/daemon.ts           short-lived Paseo SDK connections, daemon identity
 server/daemon-password.ts  password source precedence and VM secret-file reader
 server/settings.ts         token, port, default model, recent sends
+server/target.ts           fail-closed surface RPC host targeting
 shared/contracts.ts        Zod schemas, error taxonomy, formatting, RPC contracts
+shared/host-target.ts      pure serverId target assertion
 check-deps.mjs             standalone dependency-degradation checks (not bundled)
 ```
 
