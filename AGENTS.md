@@ -37,7 +37,7 @@ unknown field rather than rejecting the body.
 `PLAN.md` records the design and, more importantly, the research that justifies it. Read it before
 proposing an architectural change; several obvious-looking alternatives were tested and rejected.
 
-Minimum supported Paseo is 0.8.0, which is also what the README badge claims. Keep the two in
+Minimum supported Paseo is 0.9.0, which is also what the README badge claims. Keep the two in
 sync.
 
 ## Hard-won facts — do not re-derive
@@ -184,6 +184,16 @@ sync.
     needed no remote HTTP permission. Do not widen this to `http://*/*`. The declared
     `https://*/*` optional permission only makes exact-origin runtime grants possible; it is not a
     required permission and the extension still asks per direct connection.
+- **Paseo 0.9 host discovery does not replace bridge routing.** `useHosts()` is a live,
+  credential-free client-side inventory of configured hosts, including offline ones;
+  `getPaseoClient(serverId)` borrows the app's authenticated connection for an exact online host.
+  It exposes no URL or credential and is unavailable to the plugin server, so the Primary bridge
+  still needs each Additional machine's `stp1_…` connection code. Join the two views by
+  `serverId` only, never label or URL. Unknown and disconnected IDs throw with no fallback. A
+  borrowed API survives reconnect on the same client; connection replacement/removal, explicit
+  disposal, or plugin unload releases it. Acquire inside each action so a later action gets the
+  replacement client. Every surface RPC also carries the surface `host.id` and the server rejects
+  a mismatch, so a delayed callback cannot mutate whichever host became selected later.
 - **The bridge's `Host` check is loopback-hostname, ANY port.** It used to pin the listener's own
   port, which refused every `ssh -L` tunnel whose local port differed. The port was never the
   guard: rebinding arrives as `Host: evil.com` with a page `Origin`, and both are refused already.
@@ -310,7 +320,7 @@ the mock bridge.
 
 ```sh
 cd plugin
-npm run verify                           # typecheck + 70 tests; doctors PATH, tests password/remote-URL/route-timeout rules, never touches ~/.config/gh
+npm run verify                           # typecheck + 73 server checks + 7 host-client tests; never touches ~/.config/gh
 paseo plugin reload send-to-paseo && paseo plugin ls   # needs PASEO_PASSWORD on an authed daemon
 paseo plugin logs send-to-paseo          # expect the three dependency self-check lines, no stack traces
 time paseo plugin reload send-to-paseo   # must finish in seconds, twice — proves no reload hang
@@ -398,7 +408,7 @@ deleting the record.
 
 ## Create a release
 
-Exercised: `v0.1.0`, `v0.2.0` and `v0.3.0` are published. `origin` is
+Exercised through `v1.2.0`; all releases are published. `origin` is
 `github.com/tomgrin10/send-to-paseo`, and tags live on `main`.
 
 - Release user-facing features, bug fixes, compatibility changes, or contract changes.

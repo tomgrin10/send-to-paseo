@@ -28,9 +28,11 @@ import {
   publicMachine,
   testMachine,
 } from "./server/peers";
+import { requireServerTarget } from "./server/target";
 
 export default function contribute(server: PluginServerContext) {
-  server.handle(getStatus, async (_input, { paseo }) => {
+  server.handle(getStatus, async ({ serverId }, { paseo }) => {
+    await requireServerTarget(serverId);
     const current = await settings.read();
     const profile = await resolveSelectedProfile(paseo);
     const [status, providerResult, catalog, profileResult, deps] = await Promise.all([
@@ -55,15 +57,27 @@ export default function contribute(server: PluginServerContext) {
     };
   });
 
-  server.handle(revealToken, async () => ({ token: (await settings.read()).token }));
+  server.handle(revealToken, async ({ serverId }) => {
+    await requireServerTarget(serverId);
+    return { token: (await settings.read()).token };
+  });
 
-  server.handle(regenerateToken, async () => ({
-    token: (await settings.regenerateToken()).token,
-  }));
+  server.handle(regenerateToken, async ({ serverId }) => {
+    await requireServerTarget(serverId);
+    return { token: (await settings.regenerateToken()).token };
+  });
 
   server.handle(
     updateConfig,
-    async ({ port, defaultProvider, defaultProfileId, defaultModeId, externalBridgeUrl }) => {
+    async ({
+      serverId,
+      port,
+      defaultProvider,
+      defaultProfileId,
+      defaultModeId,
+      externalBridgeUrl,
+    }) => {
+      await requireServerTarget(serverId);
       const before = await settings.read();
       const patch: {
         port?: number;
@@ -89,15 +103,18 @@ export default function contribute(server: PluginServerContext) {
     },
   );
 
-  server.handle(clearRecentSends, async () => ({
-    removed: await settings.clearRecentSends(),
-  }));
+  server.handle(clearRecentSends, async ({ serverId }) => {
+    await requireServerTarget(serverId);
+    return { removed: await settings.clearRecentSends() };
+  });
 
-  server.handle(addAdditionalMachine, async ({ connectionCode }) => ({
-    machine: await addMachineFromCode(connectionCode),
-  }));
+  server.handle(addAdditionalMachine, async ({ serverId, connectionCode }) => {
+    await requireServerTarget(serverId);
+    return { machine: await addMachineFromCode(connectionCode) };
+  });
 
-  server.handle(updateAdditionalMachine, async ({ id, label, enabled }) => {
+  server.handle(updateAdditionalMachine, async ({ serverId, id, label, enabled }) => {
+    await requireServerTarget(serverId);
     const current = await settings.read();
     const before = current.additionalMachines.find((machine) => machine.id === id);
     if (before === undefined) throw new Error("That additional Paseo machine no longer exists.");
@@ -110,11 +127,13 @@ export default function contribute(server: PluginServerContext) {
     return { machine: publicMachine(after) };
   });
 
-  server.handle(removeAdditionalMachine, async ({ id }) => ({
-    removed: await settings.removeAdditionalMachine(id),
-  }));
+  server.handle(removeAdditionalMachine, async ({ serverId, id }) => {
+    await requireServerTarget(serverId);
+    return { removed: await settings.removeAdditionalMachine(id) };
+  });
 
-  server.handle(testAdditionalMachine, async ({ id }) => {
+  server.handle(testAdditionalMachine, async ({ serverId, id }) => {
+    await requireServerTarget(serverId);
     const machine = (await settings.read()).additionalMachines.find((item) => item.id === id);
     if (machine === undefined) {
       return { ok: false, machineName: null, detail: "That additional Paseo machine no longer exists." };
@@ -122,8 +141,14 @@ export default function contribute(server: PluginServerContext) {
     return testMachine(machine);
   });
 
-  server.handle(getConnectionCode, async () => getMachineConnectionCode());
-  server.handle(enablePrivateAccess, async () => enableMachinePrivateAccess());
+  server.handle(getConnectionCode, async ({ serverId }) => {
+    await requireServerTarget(serverId);
+    return getMachineConnectionCode();
+  });
+  server.handle(enablePrivateAccess, async ({ serverId }) => {
+    await requireServerTarget(serverId);
+    return enableMachinePrivateAccess();
+  });
 
   return runBridge();
 }

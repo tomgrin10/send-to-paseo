@@ -1,5 +1,10 @@
 import type { PluginTheme } from "@getpaseo/plugin";
-import { type PluginSurfaceProps, useRpc } from "@getpaseo/plugin/client";
+import {
+  getPaseoClient,
+  type PluginSurfaceProps,
+  useHosts,
+  useRpc,
+} from "@getpaseo/plugin/client";
 import { copyText, useToast } from "@getpaseo/plugin/client/react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useMemo, useState } from "react";
@@ -26,6 +31,7 @@ import {
   type ProviderOption,
   type RecentSend,
 } from "../shared/contracts";
+import { checkHostAccess, organizeDiscoveredHosts, type DiscoveredHostRow } from "./hosts";
 
 /**
  * The Send to Paseo sidebar surface: bridge status, the pairing token, the
@@ -56,6 +62,15 @@ function stateLabel(status: BridgeStatus): string {
 function stateTone(status: BridgeStatus, theme: PluginTheme): string {
   if (status.state === "running") return theme.colors.statusSuccess;
   if (status.state === "failed") return theme.colors.statusDanger;
+  return theme.colors.statusWarning;
+}
+
+function hostStatusTone(
+  status: DiscoveredHostRow["status"],
+  theme: PluginTheme,
+): string {
+  if (status === "online") return theme.colors.statusSuccess;
+  if (status === "error") return theme.colors.statusDanger;
   return theme.colors.statusWarning;
 }
 
@@ -504,10 +519,11 @@ function RecentSendRow({
   );
 }
 
-export function SendToPaseoSettings({ theme, layout, navigation }: PluginSurfaceProps) {
+export function SendToPaseoSettings({ theme, host, layout, navigation }: PluginSurfaceProps) {
   const styles = useStyles(theme, layout.compact);
   const toast = useToast();
   const queryClient = useQueryClient();
+  const paseoHosts = useHosts();
 
   const fetchStatus = useRpc(getStatus);
   const reveal = useRpc(revealToken);
@@ -528,17 +544,18 @@ export function SendToPaseoSettings({ theme, layout, navigation }: PluginSurface
   const [sharedCode, setSharedCode] = useState<string | null>(null);
   const [showAdvancedAccess, setShowAdvancedAccess] = useState(false);
   const [machineTests, setMachineTests] = useState<Record<string, string>>({});
+  const [hostChecks, setHostChecks] = useState<Record<string, string>>({});
 
   const query = useQuery({
-    queryKey: QUERY_KEY,
-    queryFn: () => fetchStatus({}),
+    queryKey: [...QUERY_KEY, host.id],
+    queryFn: () => fetchStatus({ serverId: host.id }),
     refetchInterval: 5_000,
   });
 
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: QUERY_KEY });
 
   const savePort = useMutation({
-    mutationFn: async (port: number) => update({ port }),
+    mutationFn: async (port: number) => update({ serverId: host.id, port }),
     onSuccess: (result) => {
       setPortDraft(null);
       invalidate();
@@ -549,7 +566,8 @@ export function SendToPaseoSettings({ theme, layout, navigation }: PluginSurface
   });
 
   const saveProvider = useMutation({
-    mutationFn: async (defaultProvider: string | null) => update({ defaultProvider }),
+    mutationFn: async (defaultProvider: string | null) =>
+      update({ serverId: host.id, defaultProvider }),
     onSuccess: () => {
       invalidate();
       toast.show("Default model saved", { variant: "success" });
@@ -558,7 +576,8 @@ export function SendToPaseoSettings({ theme, layout, navigation }: PluginSurface
   });
 
   const saveExternalUrl = useMutation({
-    mutationFn: async (externalBridgeUrl: string | null) => update({ externalBridgeUrl }),
+    mutationFn: async (externalBridgeUrl: string | null) =>
+      update({ serverId: host.id, externalBridgeUrl }),
     onSuccess: (result) => {
       setExternalUrlDraft(null);
       invalidate();
@@ -573,7 +592,8 @@ export function SendToPaseoSettings({ theme, layout, navigation }: PluginSurface
   });
 
   const saveProfile = useMutation({
-    mutationFn: async (defaultProfileId: string | null) => update({ defaultProfileId }),
+    mutationFn: async (defaultProfileId: string | null) =>
+      update({ serverId: host.id, defaultProfileId }),
     onSuccess: () => {
       invalidate();
       toast.show("Profile saved", { variant: "success" });
@@ -582,7 +602,8 @@ export function SendToPaseoSettings({ theme, layout, navigation }: PluginSurface
   });
 
   const saveMode = useMutation({
-    mutationFn: async (defaultModeId: string | null) => update({ defaultModeId }),
+    mutationFn: async (defaultModeId: string | null) =>
+      update({ serverId: host.id, defaultModeId }),
     onSuccess: () => {
       invalidate();
       toast.show("Default permission mode saved", { variant: "success" });
@@ -591,7 +612,7 @@ export function SendToPaseoSettings({ theme, layout, navigation }: PluginSurface
   });
 
   const rotate = useMutation({
-    mutationFn: async () => regenerate({}),
+    mutationFn: async () => regenerate({ serverId: host.id }),
     onSuccess: (result) => {
       setRevealed(result.token);
       invalidate();
@@ -603,7 +624,8 @@ export function SendToPaseoSettings({ theme, layout, navigation }: PluginSurface
   });
 
   const connectMachine = useMutation({
-    mutationFn: async (code: string) => addMachine({ connectionCode: code }),
+    mutationFn: async (code: string) =>
+      addMachine({ serverId: host.id, connectionCode: code }),
     onSuccess: (result) => {
       setConnectionCodeDraft("");
       invalidate();
@@ -616,7 +638,7 @@ export function SendToPaseoSettings({ theme, layout, navigation }: PluginSurface
   });
 
   const enableAccessMutation = useMutation({
-    mutationFn: async () => enableAccess({}),
+    mutationFn: async () => enableAccess({ serverId: host.id }),
     onSuccess: (result) => {
       if (!result.ready || result.code === null) {
         toast.error(result.error ?? "Private access could not be enabled.");
@@ -638,6 +660,10 @@ export function SendToPaseoSettings({ theme, layout, navigation }: PluginSurface
   const recent = query.data?.recentSends ?? [];
   const dependencies = query.data?.dependencies ?? [];
   const additionalMachines = query.data?.additionalMachines ?? [];
+  const hostDiscovery = useMemo(
+    () => organizeDiscoveredHosts(paseoHosts, host.id, additionalMachines),
+    [paseoHosts, host.id, additionalMachines],
+  );
   const selectedProvider =
     status?.defaultProvider ?? providers.find((provider) => provider.isDefault)?.id ?? null;
   const selectedProfileId = status?.defaultProfileId ?? null;
@@ -649,7 +675,7 @@ export function SendToPaseoSettings({ theme, layout, navigation }: PluginSurface
       return;
     }
     try {
-      const result = await reveal({});
+      const result = await reveal({ serverId: host.id });
       setRevealed(result.token);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -658,7 +684,7 @@ export function SendToPaseoSettings({ theme, layout, navigation }: PluginSurface
 
   async function onCopy() {
     try {
-      const token = revealed ?? (await reveal({})).token;
+      const token = revealed ?? (await reveal({ serverId: host.id })).token;
       const copied = await copyToClipboard(token);
       if (copied) {
         toast.show("Token copied", { variant: "success" });
@@ -680,7 +706,7 @@ export function SendToPaseoSettings({ theme, layout, navigation }: PluginSurface
 
   async function onCopyConnectionCode() {
     try {
-      const result = await connectionCode({});
+      const result = await connectionCode({ serverId: host.id });
       if (!result.ready || result.code === null) {
         toast.error(result.error ?? "Enable private access first.");
         return;
@@ -695,7 +721,7 @@ export function SendToPaseoSettings({ theme, layout, navigation }: PluginSurface
   async function onTestMachine(machine: AdditionalMachine) {
     setMachineTests((current) => ({ ...current, [machine.id]: "Testing…" }));
     try {
-      const result = await testMachine({ id: machine.id });
+      const result = await testMachine({ serverId: host.id, id: machine.id });
       setMachineTests((current) => ({ ...current, [machine.id]: result.detail }));
       invalidate();
       if (result.ok) toast.show("Additional machine connected", { variant: "success" });
@@ -703,6 +729,20 @@ export function SendToPaseoSettings({ theme, layout, navigation }: PluginSurface
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       setMachineTests((current) => ({ ...current, [machine.id]: detail }));
+      toast.error(detail);
+    }
+  }
+
+  async function onCheckHost(target: DiscoveredHostRow) {
+    setHostChecks((current) => ({ ...current, [target.serverId]: "Checking…" }));
+    try {
+      const projectCount = await checkHostAccess(target.serverId, getPaseoClient);
+      const detail = `Paseo access verified · ${projectCount} project${projectCount === 1 ? "" : "s"}`;
+      setHostChecks((current) => ({ ...current, [target.serverId]: detail }));
+      toast.show(`${target.label}: Paseo access verified`, { variant: "success" });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      setHostChecks((current) => ({ ...current, [target.serverId]: detail }));
       toast.error(detail);
     }
   }
@@ -767,11 +807,46 @@ export function SendToPaseoSettings({ theme, layout, navigation }: PluginSurface
 
       <View style={styles.card}>
         <Text style={styles.heading}>Paseo machines</Text>
-        <Text style={styles.body}>This is the Primary Paseo machine.</Text>
         <Text style={styles.muted}>
-          The browser extension connects only here. To add a dev VM or another computer, copy a
-          connection code on that Additional Paseo machine and paste it below on this Primary
-          Paseo machine.
+          Discovered automatically from Paseo 0.9. Offline configured hosts stay visible. “Check
+          Paseo access” borrows that exact host&apos;s authenticated app connection; it never falls
+          back to this screen&apos;s host.
+        </Text>
+        {hostDiscovery.hosts.length === 0 ? (
+          <Text style={styles.muted}>No Paseo hosts are configured in this app.</Text>
+        ) : (
+          hostDiscovery.hosts.map((target) => (
+            <View key={target.serverId} style={styles.listRow}>
+              <Text style={styles.body}>
+                {target.label}
+                {target.isSurfaceHost ? " — this screen" : ""}
+              </Text>
+              <Text style={{ ...styles.muted, color: hostStatusTone(target.status, theme) }}>
+                {target.status}
+              </Text>
+              <Text style={styles.mono}>{target.serverId}</Text>
+              <Text style={styles.muted}>
+                {target.isSurfaceHost
+                  ? "Browser route: this plugin's loopback bridge."
+                  : target.route === null
+                    ? "Discovered by Paseo; not connected to this browser bridge yet."
+                    : `Browser route: ${target.route.enabled ? "connected" : "disabled"} · ${target.route.bridgeUrl}`}
+              </Text>
+              {hostChecks[target.serverId] === undefined ? null : (
+                <Text style={styles.muted}>{hostChecks[target.serverId]}</Text>
+              )}
+              <Button
+                label={target.status === "online" ? "Check Paseo access" : `Unavailable (${target.status})`}
+                styles={styles}
+                disabled={target.status !== "online" || hostChecks[target.serverId] === "Checking…"}
+                onPress={() => void onCheckHost(target)}
+              />
+            </View>
+          ))
+        )}
+        <Text style={styles.muted}>
+          Paseo discovery does not expose bridge URLs or pairing tokens. To make another host a
+          browser target, copy its Send to Paseo connection code and paste it here.
         </Text>
         <TextInput
           value={connectionCodeDraft}
@@ -789,14 +864,18 @@ export function SendToPaseoSettings({ theme, layout, navigation }: PluginSurface
           disabled={connectionCodeDraft.trim() === "" || connectMachine.isPending}
           onPress={() => connectMachine.mutate(connectionCodeDraft)}
         />
+        <Text style={styles.heading}>Browser bridge routes</Text>
         {additionalMachines.length === 0 ? (
-          <Text style={styles.muted}>No additional Paseo machines connected yet.</Text>
+          <Text style={styles.muted}>No additional browser routes connected yet.</Text>
         ) : (
           additionalMachines.map((machine) => (
             <View key={machine.id} style={styles.listRow}>
               <Text style={styles.body}>
                 {machine.label || machine.machineName || new URL(machine.bridgeUrl).host}
                 {machine.enabled ? "" : " — disabled"}
+              </Text>
+              <Text style={styles.mono}>
+                {machine.serverId ?? "Server ID pending first successful check"}
               </Text>
               <Text style={styles.muted}>{machine.bridgeUrl}</Text>
               <Text style={styles.muted}>Token {machine.tokenPreview}</Text>
@@ -813,7 +892,11 @@ export function SendToPaseoSettings({ theme, layout, navigation }: PluginSurface
                   label={machine.enabled ? "Disable" : "Enable"}
                   styles={styles}
                   onPress={() =>
-                    void updateMachine({ id: machine.id, enabled: !machine.enabled })
+                    void updateMachine({
+                      serverId: host.id,
+                      id: machine.id,
+                      enabled: !machine.enabled,
+                    })
                       .then(invalidate)
                       .catch((error: unknown) =>
                         toast.error(error instanceof Error ? error.message : String(error)),
@@ -824,7 +907,7 @@ export function SendToPaseoSettings({ theme, layout, navigation }: PluginSurface
                   label="Remove"
                   styles={styles}
                   onPress={() =>
-                    void removeMachine({ id: machine.id })
+                    void removeMachine({ serverId: host.id, id: machine.id })
                       .then(invalidate)
                       .catch((error: unknown) =>
                         toast.error(error instanceof Error ? error.message : String(error)),
@@ -835,14 +918,22 @@ export function SendToPaseoSettings({ theme, layout, navigation }: PluginSurface
             </View>
           ))
         )}
+        {hostDiscovery.undiscoveredRoutes.length === 0 ? null : (
+          <Text style={styles.muted}>
+            {hostDiscovery.undiscoveredRoutes.length} route
+            {hostDiscovery.undiscoveredRoutes.length === 1 ? " is" : "s are"} retained for browser
+            compatibility but not currently present in Paseo&apos;s configured host list. Check or
+            remove {hostDiscovery.undiscoveredRoutes.length === 1 ? "it" : "them"} above.
+          </Text>
+        )}
       </View>
 
       <View style={styles.card}>
         <Text style={styles.heading}>Share this Paseo machine</Text>
         <Text style={styles.muted}>
-          Use this on the Additional Paseo machine you want to connect. “Enable private access”
-          runs Tailscale Serve on this machine, then creates one connection code containing its
-          private bridge address and pairing token. Paste that code into the Primary Paseo machine.
+          This is needed only for browser bridge routing; Paseo host discovery itself is automatic.
+          “Enable private access” runs Tailscale Serve on this machine, then creates one secret
+          connection code containing its server ID, private bridge address and pairing token.
         </Text>
         <View style={styles.wrapRow}>
           <Button
@@ -1030,7 +1121,7 @@ export function SendToPaseoSettings({ theme, layout, navigation }: PluginSurface
               label="Clear"
               styles={styles}
               onPress={() => {
-                void clearRecent({}).then(invalidate);
+                void clearRecent({ serverId: host.id }).then(invalidate);
               }}
             />
           )}
@@ -1046,7 +1137,7 @@ export function SendToPaseoSettings({ theme, layout, navigation }: PluginSurface
               onOpen={
                 navigation === undefined
                   ? null
-                  : (agentId) => navigation.openAgent({ agentId })
+                  : (agentId) => navigation.openAgent({ agentId, serverId: host.id })
               }
             />
           ))

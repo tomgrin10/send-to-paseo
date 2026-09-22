@@ -86,6 +86,8 @@ const SettingsSchema = z.object({
     .array(
       z.object({
         id: z.string().min(1),
+        /** Added in v1.2.0; learned from a new code or the next authenticated ping. */
+        serverId: z.string().nullable().default(null),
         label: z.string(),
         bridgeUrl: ExternalBridgeUrlSchema,
         token: z.string().min(1),
