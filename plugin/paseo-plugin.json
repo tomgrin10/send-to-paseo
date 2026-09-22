@@ -1,6 +1,6 @@
 {
   "id": "send-to-paseo",
   "requirements": {
-    "paseo": ">=0.8.0"
+    "paseo": ">=0.9.0"
   }
 }
