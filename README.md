@@ -1,6 +1,6 @@
 # send-to-paseo
 
-[![Paseo](https://img.shields.io/badge/Paseo-%E2%89%A5%200.8.0-8A63D2?style=for-the-badge)](https://paseo.sh)
+[![Paseo](https://img.shields.io/badge/Paseo-%E2%89%A5%200.9.0-8A63D2?style=for-the-badge)](https://paseo.sh)
 [![Release](https://img.shields.io/github/v/release/tomgrin10/send-to-paseo?display_name=tag&sort=semver&style=for-the-badge&label=release&color=6366f1)](https://github.com/tomgrin10/send-to-paseo/releases/latest)
 [![License](https://img.shields.io/github/license/tomgrin10/send-to-paseo?style=for-the-badge&color=2563eb)](LICENSE)
 
@@ -28,15 +28,19 @@ on github.com and on Graphite.
   whichever machine already has a worktree for the PR, not whichever you configured first, and the
   send goes only to the machine you picked. A host that is asleep is a footnote in the composer,
   not a wall.
+- **Hosts appear automatically in Paseo.** The plugin surface uses Paseo 0.9's configured-host
+  inventory, shows live online/offline state, and checks each host through its explicit
+  `serverId`. A connection code is still required only to give the browser's Primary bridge the
+  private URL and token that Paseo intentionally does not expose to plugins.
 
 ## Install
 
-Requires Paseo 0.8.0 or newer with plugins enabled, and `git`.
+Requires Paseo 0.9.0 or newer with plugins enabled, and `git`.
 
 **Plugin:**
 
 ```sh
-paseo plugin add tomgrin10/send-to-paseo --path plugin --ref v1.1.0
+paseo plugin add tomgrin10/send-to-paseo --path plugin --ref v1.2.0
 paseo plugin ls        # send-to-paseo must read `running` and `yes`
 ```
 
@@ -82,6 +86,11 @@ Then open a pull request and press **Send to Paseo**. There is no config file on
 
 ### Add another Paseo machine
 
+Every host already configured in the Paseo app appears automatically under **Paseo machines**, even
+while offline. The remaining setup below is only what lets the browser extension's local Primary
+bridge resolve and send through that host; Paseo's discovery API deliberately contains no bridge
+URL or credential.
+
 These names are used throughout the setup:
 
 - **Browser machine:** the computer running Chrome.
@@ -94,13 +103,13 @@ The normal setup is two copy/paste actions:
 
 1. On the **Additional Paseo machine**, open Paseo → **Send to Paseo** → **Share this Paseo
    machine** and press **Enable private access**. Then press **Copy connection code**.
-2. On the **Primary Paseo machine**, open Paseo → **Send to Paseo** → **Paseo machines**, paste the
-   code, and press **Connect additional machine**.
+2. On the **Primary Paseo machine**, open Paseo → **Send to Paseo** → **Paseo machines**, find the
+   automatically discovered host, paste the code, and press **Connect additional machine**.
 
 That is all. Do not put the additional machine's address or token in the extension. The Primary
 Paseo plugin resolves the pull request on every connected machine and proxies the selected send.
-The connection code is a secret because it contains the Additional machine's private bridge
-address and pairing token.
+The connection code is a secret because it contains the Additional machine's `serverId`, private
+bridge address and pairing token.
 
 The one-click button uses [Tailscale Serve](https://tailscale.com/kb/1242/tailscale-serve). It runs
 on the **Additional Paseo machine**, publishes only to the tailnet, and survives a terminal closing.
@@ -139,8 +148,9 @@ which login user is allowed; a rejected user cannot be fixed by this plugin.
   alternative — type a workspace name, a branch, a PR number, or a machine name — and provider and
   mode pickers. With more than one host paired, every row names its machine and the resolved
   target line leads with it. ⌘↵ sends, Esc closes.
-- **The Send to Paseo surface** in Paseo's sidebar and under ⌘K: Primary/Additional machine setup,
-  bridge status, the pairing token, the port, agent defaults, requirements, and recent sends.
+- **The Send to Paseo surface** in Paseo's sidebar and under ⌘K: automatic configured-host
+  discovery with online/offline state, browser-route setup, bridge status, the pairing token, the
+  port, agent defaults, requirements, and recent sends.
 - **The extension's options page**: normally one pairing token for the Primary Paseo machine.
   Direct URLs, per-machine tokens, and Chrome permission controls live under **Advanced**.
 

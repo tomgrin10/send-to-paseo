@@ -17,6 +17,7 @@ import {
   type SendRequest,
   type SendResponse,
 } from "../shared/contracts";
+import { readDaemonStatus } from "./daemon";
 import { resolveBinary, runProcess } from "./deps";
 import { previewToken, settings, type Settings } from "./settings";
 
@@ -39,6 +40,12 @@ interface ConnectionCodePayload {
   url: string;
   token: string;
   label: string;
+  /** Optional for compatibility with v1 codes created before Paseo 0.9. */
+  serverId?: string | null;
+}
+
+interface DecodedConnectionCode extends Omit<ConnectionCodePayload, "serverId"> {
+  serverId: string | null;
 }
 
 export interface ConnectionCodeResult {
@@ -53,7 +60,7 @@ export function encodeConnectionCode(payload: ConnectionCodePayload): string {
   return `${CONNECTION_CODE_PREFIX}${Buffer.from(JSON.stringify(payload), "utf8").toString("base64url")}`;
 }
 
-export function decodeConnectionCode(code: string): ConnectionCodePayload {
+export function decodeConnectionCode(code: string): DecodedConnectionCode {
   const trimmed = code.trim();
   if (!trimmed.startsWith(CONNECTION_CODE_PREFIX)) {
     throw new Error("This is not a Send to Paseo connection code (expected stp1_…).");
@@ -77,6 +84,10 @@ export function decodeConnectionCode(code: string): ConnectionCodePayload {
     url: normalizeExternalBridgeUrl(payload.url),
     token: payload.token,
     label: typeof payload.label === "string" ? payload.label.trim().slice(0, 120) : "",
+    serverId:
+      typeof payload.serverId === "string" && payload.serverId.trim() !== ""
+        ? payload.serverId.trim()
+        : null,
   };
 }
 
@@ -87,6 +98,7 @@ function displayName(machine: SavedMachine): string {
 export function publicMachine(machine: SavedMachine): AdditionalMachine {
   return {
     id: machine.id,
+    serverId: machine.serverId,
     label: machine.label,
     bridgeUrl: machine.bridgeUrl,
     enabled: machine.enabled,
@@ -98,9 +110,14 @@ export function publicMachine(machine: SavedMachine): AdditionalMachine {
 export async function addMachineFromCode(code: string): Promise<AdditionalMachine> {
   const payload = decodeConnectionCode(code);
   const current = await settings.read();
-  const duplicate = current.additionalMachines.find((machine) => machine.bridgeUrl === payload.url);
+  const duplicate = current.additionalMachines.find(
+    (machine) =>
+      (payload.serverId !== null && machine.serverId === payload.serverId) ||
+      machine.bridgeUrl === payload.url,
+  );
   const machine: SavedMachine = {
     id: duplicate?.id ?? randomUUID(),
+    serverId: payload.serverId ?? duplicate?.serverId ?? null,
     label: payload.label || duplicate?.label || "",
     bridgeUrl: payload.url,
     token: payload.token,
@@ -111,20 +128,22 @@ export async function addMachineFromCode(code: string): Promise<AdditionalMachin
   return publicMachine(machine);
 }
 
-function connectionCodeFor(current: Settings): string | null {
+function connectionCodeFor(current: Settings, serverId: string | null): string | null {
   if (current.externalBridgeUrl === null) return null;
   return encodeConnectionCode({
     v: 1,
     url: current.externalBridgeUrl,
     token: current.token,
     label: hostname() || new URL(current.externalBridgeUrl).hostname,
+    serverId,
   });
 }
 
 export async function getMachineConnectionCode(): Promise<ConnectionCodeResult> {
   const current = await settings.read();
+  const { serverId } = await readDaemonStatus();
   const command = `tailscale serve --bg ${current.port}`;
-  const code = connectionCodeFor(current);
+  const code = connectionCodeFor(current, serverId);
   return {
     ready: code !== null,
     code,
@@ -165,9 +184,10 @@ export async function enableMachinePrivateAccess(): Promise<ConnectionCodeResult
     if (dnsName === "") throw new Error("Tailscale did not report this machine's private DNS name.");
     const bridgeUrl = normalizeExternalBridgeUrl(`https://${dnsName}`);
     const next = await settings.update({ externalBridgeUrl: bridgeUrl });
+    const { serverId } = await readDaemonStatus();
     return {
       ready: true,
-      code: connectionCodeFor(next),
+      code: connectionCodeFor(next, serverId),
       bridgeUrl,
       command,
       error: null,
@@ -247,6 +267,16 @@ async function checkedPing(machine: SavedMachine, deadline: number): Promise<Pin
     );
   }
   if (json.paired !== true) throw new Error(`${displayName(machine)} rejected its connection code.`);
+  const actualServerId = json.daemon?.serverId?.trim() || null;
+  if (
+    machine.serverId !== null &&
+    actualServerId !== null &&
+    machine.serverId !== actualServerId
+  ) {
+    throw new Error(
+      `${displayName(machine)} answered as Paseo host ${actualServerId}, but this route targets ${machine.serverId}. Reconnect that host instead of retrying.`,
+    );
+  }
   return json as PingResponse;
 }
 
@@ -258,8 +288,15 @@ export async function testMachine(machine: SavedMachine): Promise<{
   try {
     const ping = await checkedPing(machine, Date.now() + RESOLVE_ROUTE_TIMEOUT_MS);
     const machineName = ping.machine?.name?.trim() || null;
-    if (machineName !== null && machineName !== machine.machineName) {
-      await settings.updateAdditionalMachine(machine.id, { machineName });
+    const serverId = ping.daemon.serverId?.trim() || null;
+    if (
+      (machineName !== null && machineName !== machine.machineName) ||
+      (serverId !== null && serverId !== machine.serverId)
+    ) {
+      await settings.updateAdditionalMachine(machine.id, {
+        ...(machineName === null ? {} : { machineName }),
+        ...(serverId === null ? {} : { serverId }),
+      });
     }
     return {
       ok: ping.daemon.reachable,
@@ -300,8 +337,15 @@ export async function resolveOnMachine(
     const deadline = Date.now() + timeoutMs;
     const ping = await checkedPing(machine, deadline);
     const machineName = ping.machine?.name?.trim() || "";
-    if (machineName && machineName !== machine.machineName) {
-      await settings.updateAdditionalMachine(machine.id, { machineName });
+    const serverId = ping.daemon.serverId?.trim() || null;
+    if (
+      (machineName && machineName !== machine.machineName) ||
+      (serverId !== null && serverId !== machine.serverId)
+    ) {
+      await settings.updateAdditionalMachine(machine.id, {
+        ...(machineName ? { machineName } : {}),
+        ...(serverId === null ? {} : { serverId }),
+      });
       if (!machine.label.trim()) route.routeLabel = machineName;
     }
     const json = await fetchJson(
