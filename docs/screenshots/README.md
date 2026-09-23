@@ -68,7 +68,7 @@ Against `test/fixtures/github-pr*.html`, reproduced from the live DOM measured i
 | `keyboard-containment-combobox-search.png` | Test 19b: the same shortcut-heavy string typed with real keystrokes into the combobox's **search box** rather than the instruction box. `Fix merge conflicts? c/j k n p a g r` survives byte-intact. The search box is a second text-entry surface inside the same shadow root, and it renders in normal flow inside the card precisely so it inherits the existing `containKeyboard()` host rather than needing a second one — this proves that inheritance instead of trusting it. |
 | `keyboard-containment-typed.png` | Test 19: the popover after typing the same shortcut-heavy prompt with real keystrokes while a faithful stand-in for Graphite's shortcut layer is installed on `window`/`document`/`body` in both phases. The text survives intact. |
 | `popover-success-deep-link.png` | Success state after a real `POST /v1/send` (`dryRun: false`): agent title, workspace, branch, and the **Open in Paseo** deep link with the raw `paseo://h/<serverId>/agent/<agentId>` URL printed underneath. The link is rendered verbatim from the bridge response; the extension never constructs it. |
-| `popover-success-dry-run.png` | The same send when the bridge reports `dryRun: true`: amber headline **Dry run — no agent created**, a `DRY RUN` badge, a note naming `SEND_TO_PASEO_DRY_RUN=1` and warning that the ids are synthetic, and the deep link relabelled *Open in Paseo (synthetic id)*. Deliberately impossible to mistake for the shot above. |
+| `popover-success-dry-run.png` | The same send when the bridge reports `dryRun: true`: amber headline **Dry run — nothing sent**, a `DRY RUN` badge, a note naming `SEND_TO_PASEO_DRY_RUN=1` and warning that the ids are synthetic, and the deep link relabelled *Open in Paseo (synthetic id)*. Deliberately impossible to mistake for the shot above. |
 | `popover-after-spa-nav-948-stack-default.png` | After a client-side `pushState` from PR #942 to #948, the popover has re-targeted: header reads `#948`. #948 has no exact workspace match but is in a stack, so the default is the stack workspace `candid-otter` rather than a new worktree. |
 | `popover-stack-default.png` | The one-workspace-per-stack case (test 20): PR #947 has no workspace on its own branch, so the resolved target is the stack workspace `candid-otter · stack #949`, with the amber note **worktree is on another branch of this stack**. `Create worktree` is still offered in the picker, just not as the default. |
 | `popover-stack-merged-default.png` | Test 33, the reported field bug fixed: the stack's only workspace is parked on a branch whose PR has already **merged**, and it is the resolved default (`→ workspace candid-otter · stack #949, merged`) instead of "create a worktree". The amber note reads *worktree is on a branch of this stack whose PR is merged* — deliberately not "another branch of this stack", which reads as a live sibling. The dropdown is open with `merged` typed, showing that the state reaches the search haystack too. |
@@ -105,14 +105,14 @@ CONTRACT.md's Clarifications.
 
 | Image | What it demonstrates |
 | --- | --- |
-| `options-page.png` | Fresh, unpaired Simple setup. One Primary Paseo machine card with a masked pairing token (`type=password` by default), the Advanced direct-mode disclosure, provider picker, and untested status. With no token stored the page does not auto-ping. |
+| `options-page.png` | Fresh, unpaired automatic setup: one flat **Connect to Paseo** form with a masked pairing token (`type=password` by default), provider picker, and untested status. Direct multi-host connections remain available under **Advanced**. With no token stored the page does not auto-ping. |
 | `options-page-paired.png` | **Test connection** with a valid token: ok tone, "Paired with Paseo", plugin name/version, contract v1, daemon version and `serverId`, and the provider count. The **Default provider** dropdown is populated straight from the authenticated `GET /v1/ping`, with the bridge's own default marked `(plugin default)`. |
 | `options-page-not-paired.png` | **Test connection** with no token: warn tone, "Bridge reachable, not paired yet", `0 providers`. This is the unauthenticated ping — liveness confirmed, pairing not done. |
 | `options-page-token-rejected.png` | **Test connection** with a wrong token: bad tone, "Token rejected", telling the user to re-copy it. Distinct from the bridge being down, which is the whole reason ping takes optional auth. |
 | `options-page-bridge-down.png` | **Test connection** with the bridge stopped: bad tone, naming the exact URL that was tried. |
 | `options-page-contract-mismatch.png` | **Test connection** against a plugin on contract v2: bad tone, "Update required", and an explicit warning that sends are blocked. |
-| `options-page-dark.png` | Dark theme, paired Simple setup. |
-| `options-page-compact-light.png`, `options-page-compact-dark.png` | The Simple/Advanced split at 480px wide, with no horizontal overflow, in both themes. |
+| `options-page-dark.png` | Dark theme, paired automatic setup. |
+| `options-page-compact-light.png`, `options-page-compact-dark.png` | The compact automatic/Advanced layout at 480px wide, with no horizontal overflow, in both themes. |
 
 ## Multiple Paseo hosts
 

@@ -29,6 +29,13 @@ import {
   resolveStackBranches,
 } from "./resolve";
 import { settings } from "./settings";
+import {
+  agentDisplayTitle,
+  agentProvider,
+  listProjectAgents,
+  selectMainAgent,
+  type ListedAgent,
+} from "./main-agent";
 
 type PaseoApi = PluginHandlerContext["paseo"];
 type PaseoWorkspace = Awaited<ReturnType<PaseoApi["workspaces"]["list"]>>["entries"][number];
@@ -36,8 +43,8 @@ type PaseoWorkspaceHandle = ReturnType<PaseoApi["workspaces"]["ref"]>;
 type PaseoAgentConfig = Parameters<PaseoWorkspaceHandle["agents"]["create"]>[0]["config"];
 
 /**
- * The one mutating endpoint: ensure a workspace, then start a brand new agent
- * in it. Never reuses or messages an existing agent.
+ * The one mutating endpoint: ensure a workspace, then either start a new agent
+ * or dispatch to the workspace's best root agent, according to plugin settings.
  */
 
 /** A freshly checked-out worktree is normally ready on return; this is a guard. */
@@ -203,32 +210,20 @@ export async function handleSend(request: SendRequest): Promise<SendResponse> {
   const dryRun = isDryRun();
 
   return withPaseo(async (paseo) => {
-    const project = await resolveProject(paseo, ref);
+    // All four are read-only and independent. On a cold send, `gh` and the
+    // daemon status are the slow inputs; starting them together avoids paying
+    // their latency in series after the already-prefetched resolve.
+    const [project, prLookup, serverId, currentSettings] = await Promise.all([
+      resolveProject(paseo, ref),
+      lookupPr(ref),
+      requireServerId(),
+      settings.read(),
+    ]);
     // Same degradation as resolve: a missing or unauthenticated `gh` costs the
     // title, the branches and the stack note in the prompt, not the send.
-    const { pr, outage } = await lookupPr(ref);
-    // Followed live, so editing the profile in Paseo changes the next send.
-    const profile = await resolveSelectedProfile(paseo);
-    // PRECEDENCE: an explicit choice in the popover always wins over the
-    // profile. The profile only supplies a provider when the request names
-    // none — picking "Codex" in the popover must not be silently overridden by
-    // a profile that happens to name Claude.
-    const provider = request.provider ?? (await resolveDefaultProvider(paseo, profile));
-    const modeId = await resolveDefaultMode(paseo, provider, {
-      requested: request.modeId,
-      profile,
-    });
-    // Thinking options are per *model*, so the profile's one is only copied
-    // when the send actually landed on the profile's own model.
-    const thinkingOptionId =
-      profileProviderId(profile) === provider ? (profile?.thinkingOptionId ?? null) : null;
-    const agentConfig: PaseoAgentConfig = {
-      provider,
-      ...(modeId === undefined ? {} : { modeId }),
-      ...(thinkingOptionId === null ? {} : { thinkingOptionId }),
-    };
+    const { pr, outage } = prLookup;
     const title = buildAgentTitle(ref.number, prompt);
-    const serverId = await requireServerId();
+    const configuredDispatch = currentSettings.agentDispatch;
 
     let workspaceId: string;
     let workspaceLabel: string;
@@ -287,52 +282,124 @@ export async function handleSend(request: SendRequest): Promise<SendResponse> {
       );
     }
 
-    let agentId: string;
-    if (dryRun) {
-      agentId = syntheticId("agt");
-    } else if (handle === null) {
-      throw new BridgeError("internal", "No workspace was resolved for this send.");
-    } else {
+    const composedPrompt = composePrompt({
+      ref,
+      pr,
+      prompt,
+      workspaceBranch: branch,
+      workspaceBranchState:
+        branch === null || branch === ""
+          ? null
+          : await stackStateOfBranch({
+              ref,
+              pr,
+              projectRoot: project.path,
+              branch,
+              outage,
+            }),
+      ...(outage === null ? {} : { prMetadataNote: promptNote(outage) }),
+      ...(request.pageUrl === undefined ? {} : { pageUrl: request.pageUrl }),
+    });
+
+    let mainAgent: ListedAgent | null = null;
+    if (configuredDispatch === "main" && request.target.kind === "existing") {
       try {
-        const agent = await handle.agents.create({
-          config: agentConfig,
-          title,
-          prompt: composePrompt({
-            ref,
-            pr,
-            prompt,
-            workspaceBranch: branch,
-            workspaceBranchState:
-              branch === null || branch === ""
-                ? null
-                : await stackStateOfBranch({
-                    ref,
-                    pr,
-                    projectRoot: project.path,
-                    branch,
-                    outage,
-                  }),
-            ...(outage === null ? {} : { prMetadataNote: promptNote(outage) }),
-            ...(request.pageUrl === undefined ? {} : { pageUrl: request.pageUrl }),
-          }),
-          labels: {
-            [LABEL_PR]: prLabelValue(ref),
-            [LABEL_ORIGIN]: "graphite",
-          },
-        });
-        agentId = agent.id;
+        mainAgent = selectMainAgent(
+          await listProjectAgents(paseo, project.projectId),
+          workspaceId,
+        );
       } catch (error) {
         throw new BridgeError(
           "agent_create_failed",
-          `Paseo refused to start the agent: ${error instanceof Error ? error.message : String(error)}`,
+          `Paseo could not find the main agent in ${workspaceLabel}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
         );
+      }
+    }
+
+    let agentId: string;
+    let responseTitle = title;
+    let recordedProvider: string;
+    let recordedModeId: string | null;
+    let agentCreated = true;
+    let dispatch: "new" | "main" = "new";
+
+    if (mainAgent !== null) {
+      agentId = mainAgent.id;
+      responseTitle = agentDisplayTitle(mainAgent);
+      recordedProvider = agentProvider(mainAgent);
+      recordedModeId = mainAgent.currentModeId ?? null;
+      agentCreated = false;
+      dispatch = "main";
+      if (!dryRun) {
+        try {
+          // The public 0.9 SDK forwards this supported daemon option but omits
+          // it from PaseoAgentSendOptions. Steering preserves a running main
+          // agent's current turn instead of implicitly interrupting it.
+          await paseo.agents.ref(mainAgent).send(
+            composedPrompt,
+            { activeTurnBehavior: "steer" } as Parameters<
+              ReturnType<PaseoApi["agents"]["ref"]>["send"]
+            >[1] & { activeTurnBehavior: "steer" },
+          );
+        } catch (error) {
+          throw new BridgeError(
+            "agent_create_failed",
+            `Paseo refused to message the main agent: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
+    } else {
+      // Provider/profile/mode resolution is needed only when an agent will be
+      // created. Reuse mode avoids those daemon round trips entirely.
+      const profile = await resolveSelectedProfile(paseo);
+      const provider = request.provider ?? (await resolveDefaultProvider(paseo, profile));
+      const modeId = await resolveDefaultMode(paseo, provider, {
+        requested: request.modeId,
+        profile,
+      });
+      const thinkingOptionId =
+        profileProviderId(profile) === provider ? (profile?.thinkingOptionId ?? null) : null;
+      const agentConfig: PaseoAgentConfig = {
+        provider,
+        ...(modeId === undefined ? {} : { modeId }),
+        ...(thinkingOptionId === null ? {} : { thinkingOptionId }),
+      };
+      recordedProvider = provider;
+      recordedModeId = modeId ?? null;
+
+      if (dryRun) {
+        agentId = syntheticId("agt");
+      } else if (handle === null) {
+        throw new BridgeError("internal", "No workspace was resolved for this send.");
+      } else {
+        try {
+          const agent = await handle.agents.create({
+            config: agentConfig,
+            title,
+            prompt: composedPrompt,
+            labels: {
+              [LABEL_PR]: prLabelValue(ref),
+              [LABEL_ORIGIN]: "graphite",
+            },
+          });
+          agentId = agent.id;
+        } catch (error) {
+          throw new BridgeError(
+            "agent_create_failed",
+            `Paseo refused to start the agent: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
       }
     }
 
     const deepLink = buildAgentDeepLink({ serverId, agentId });
     // Never log the prompt: it is the user's message body.
     console.log(
-      `[send-to-paseo] ${dryRun ? "dry-run " : ""}sent PR #${ref.number} to ${workspaceLabel} (agent ${agentId}, provider ${provider}, mode ${modeId ?? "paseo default"})`,
+      `[send-to-paseo] ${dryRun ? "dry-run " : ""}sent PR #${ref.number} to ${workspaceLabel} (${dispatch} agent ${agentId}, provider ${recordedProvider}, mode ${recordedModeId ?? "paseo default"})`,
     );
 
     await settings
@@ -343,9 +410,9 @@ export async function handleSend(request: SendRequest): Promise<SendResponse> {
         branch,
         agentId,
         deepLink,
-        title,
-        provider,
-        modeId: modeId ?? null,
+        title: responseTitle,
+        provider: recordedProvider,
+        modeId: recordedModeId,
         workspaceCreated,
         dryRun,
         outcome: "ok",
@@ -363,7 +430,9 @@ export async function handleSend(request: SendRequest): Promise<SendResponse> {
       workspaceLabel,
       branch,
       deepLink,
-      title,
+      title: responseTitle,
+      agentCreated,
+      dispatch,
       dryRun,
     };
   });

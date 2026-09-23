@@ -9,7 +9,7 @@ import { z } from "zod";
 
 /** Advertised in `GET /v1/ping`. Keep in step with `package.json`. */
 export const PLUGIN_NAME = "send-to-paseo";
-export const PLUGIN_VERSION = "1.2.0";
+export const PLUGIN_VERSION = "1.3.0";
 /** Bumped only for an incompatible bridge API; the paths stay `/v1`. */
 export const CONTRACT_VERSION = 1;
 
@@ -31,6 +31,9 @@ export const MAX_TITLE_SUMMARY_CHARS = 60;
 
 export const LABEL_PR = "send-to-paseo/pr";
 export const LABEL_ORIGIN = "send-to-paseo/origin";
+
+export const AgentDispatchSchema = z.enum(["new", "main"]);
+export type AgentDispatch = z.infer<typeof AgentDispatchSchema>;
 
 /**
  * A user-declared HTTPS origin that fronts the loopback bridge.
@@ -270,6 +273,15 @@ export interface ExistingCandidate {
    * `contract`.
    */
   stackPrState?: StackPrState;
+  /**
+   * Root agent the bridge would reuse when `agentDispatch` is `main`.
+   * Additive: older extensions simply omit the preview and the send still works.
+   */
+  mainAgent?: {
+    agentId: string;
+    title: string;
+    status: "error" | "initializing" | "idle" | "running" | "closed";
+  };
 }
 
 export interface CreateCandidate {
@@ -329,6 +341,11 @@ export interface LocalResolveResponse {
    * omitted from `agents.create` entirely.
    */
   resolvedModeId: string | null;
+  /**
+   * Whether this machine creates a fresh agent or reuses its workspace root agent.
+   * Additive: absent means the older `new` behavior.
+   */
+  agentDispatch?: AgentDispatch;
 }
 
 /** One Paseo machine reached through the primary machine's bridge. */
@@ -362,6 +379,10 @@ export interface SendResponse {
   branch: string | null;
   deepLink: string;
   title: string;
+  /** Additive. True when this send created an agent; false when it messaged an existing one. */
+  agentCreated?: boolean;
+  /** Additive. `main` is returned only when an existing main agent was messaged. */
+  dispatch?: AgentDispatch;
   /** Always present. True only under `SEND_TO_PASEO_DRY_RUN=1`. */
   dryRun: boolean;
 }
@@ -412,6 +433,7 @@ export const BridgeStatusSchema = z.object({
   defaultProfileId: z.string().nullable(),
   /** Explicit permission-mode override, or null to follow the chain. */
   defaultModeId: z.string().nullable(),
+  agentDispatch: AgentDispatchSchema,
   /** Explicit HTTPS origin allowed to front this loopback-only bridge. */
   externalBridgeUrl: ExternalBridgeUrlSchema.nullable(),
   daemon: z.object({
@@ -527,6 +549,7 @@ export const updateConfig = defineRpc({
     defaultProfileId: z.string().max(200).nullable().optional(),
     /** Null clears the override and falls back to the mode chain. */
     defaultModeId: z.string().max(200).nullable().optional(),
+    agentDispatch: AgentDispatchSchema.optional(),
     /** Null removes the declared reverse-proxy origin. */
     externalBridgeUrl: ExternalBridgeUrlSchema.nullable().optional(),
   }),

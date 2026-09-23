@@ -33,6 +33,12 @@ import {
   readTrunkBranch,
 } from "./git";
 import { settings } from "./settings";
+import {
+  agentDisplayTitle,
+  listProjectAgents,
+  selectMainAgent,
+  type ListedAgent,
+} from "./main-agent";
 
 type PaseoApi = PluginHandlerContext["paseo"];
 type PaseoWorkspace = Awaited<ReturnType<PaseoApi["workspaces"]["list"]>>["entries"][number];
@@ -127,20 +133,25 @@ function isolationOf(workspace: PaseoWorkspace): string {
   return workspace.workspaceKind === "worktree" ? "worktree" : "local";
 }
 
-async function agentCounts(paseo: PaseoApi): Promise<Map<string, number>> {
+async function workspaceAgents(
+  paseo: PaseoApi,
+  projectId: string,
+  prefetched?: readonly ListedAgent[],
+): Promise<{ counts: Map<string, number>; agents: readonly ListedAgent[] }> {
   const counts = new Map<string, number>();
   try {
-    const { entries } = await paseo.agents.list();
-    for (const entry of entries) {
-      const workspaceId = entry.agent?.workspaceId;
+    const agents = prefetched ?? (await listProjectAgents(paseo, projectId));
+    for (const agent of agents) {
+      const workspaceId = agent.workspaceId;
       if (typeof workspaceId !== "string" || workspaceId === "") continue;
       counts.set(workspaceId, (counts.get(workspaceId) ?? 0) + 1);
     }
+    return { counts, agents };
   } catch (error) {
     // A count is decoration; never fail a resolve over it.
     console.error("[send-to-paseo] could not count agents", String(error));
+    return { counts, agents: [] };
   }
-  return counts;
 }
 
 /** Workspaces of one project, freshest first, excluding ones being archived. */
@@ -169,11 +180,15 @@ export interface WorkspaceBranch {
 export async function readWorkspaceBranches(
   workspaces: readonly PaseoWorkspace[],
 ): Promise<WorkspaceBranch[]> {
-  const result: WorkspaceBranch[] = [];
-  for (const workspace of workspaces) {
-    result.push({ workspace, branch: await workspaceBranch(workspace) });
-  }
-  return result;
+  // Most descriptors already carry a branch, but cold worktrees fall back to
+  // one short git process apiece. Those reads are independent; serializing
+  // them made resolve latency grow with every workspace in the project.
+  return Promise.all(
+    workspaces.map(async (workspace) => ({
+      workspace,
+      branch: await workspaceBranch(workspace),
+    })),
+  );
 }
 
 /**
@@ -206,14 +221,21 @@ function stateWeight(state: StackPrState | null | undefined): number {
  */
 export async function buildCandidates(input: {
   paseo: PaseoApi;
+  projectId: string;
   ref: PrRef;
   pr: PrPayload;
   workspaces: readonly WorkspaceBranch[];
   stackBranches: Map<string, StackMember>;
   /** Non-null when `gh` could not be consulted; carried into the create label. */
   outage?: GhOutage | null;
+  agentDispatch?: "new" | "main";
+  agents?: readonly ListedAgent[];
 }): Promise<{ candidates: Candidate[]; defaultCandidateIndex: number }> {
-  const counts = await agentCounts(input.paseo);
+  const { counts, agents } = await workspaceAgents(
+    input.paseo,
+    input.projectId,
+    input.agents,
+  );
 
   const existing: ExistingCandidate[] = [];
   /** Stack distance per candidate, used only for ordering. Not on the wire. */
@@ -239,6 +261,20 @@ export async function buildCandidates(input: {
       cwd: workspace.workspaceDirectory,
       isolation: isolationOf(workspace),
       agentCount: counts.get(workspace.id) ?? 0,
+      ...(input.agentDispatch === "main"
+        ? (() => {
+            const main = selectMainAgent(agents, workspace.id);
+            return main === null
+              ? {}
+              : {
+                  mainAgent: {
+                    agentId: main.id,
+                    title: agentDisplayTitle(main),
+                    status: main.status,
+                  },
+                };
+          })()
+        : {}),
     };
     if (branch !== null && branch === input.pr.headBranch) {
       existing.push({ ...base, rank: 1, reason: "exact" });
@@ -936,20 +972,34 @@ export async function handleResolve(request: ResolveRequest): Promise<ResolveRes
     number: request.number,
   };
   return withPaseo(async (paseo) => {
-    // Project first: a repo that Paseo does not know is the more specific and
-    // more actionable failure, and it costs no GitHub round trip.
-    const project = await resolveProject(paseo, ref);
-    // Degrades instead of failing when `gh` is missing, unauthenticated or
-    // offline: the create path uses Paseo's own forge checkout, so the only
-    // casualties are the title, the branch names and stack detection.
-    const { pr, outage } = await lookupPr(ref);
+    // These sources are independent. Starting them together removes several
+    // daemon/network round trips from the click path (and the extension now
+    // starts this work before the popover opens).
+    const [project, prLookup, currentSettings, profile, catalog, allWorkspaces] =
+      await Promise.all([
+        resolveProject(paseo, ref),
+        lookupPr(ref),
+        settings.read(),
+        resolveSelectedProfile(paseo),
+        listModes(paseo),
+        paseo.workspaces.list(),
+      ]);
+    // PR lookup degrades instead of failing when `gh` is unavailable: Paseo's
+    // forge checkout still supports the create path.
+    const { pr, outage } = prLookup;
+    const projectWorkspaces = allWorkspaces.entries.filter(
+      (workspace) => workspace.projectId === project.projectId && workspace.archivingAt === null,
+    );
+    const agentsPromise = listProjectAgents(paseo, project.projectId).catch((error) => {
+      console.error("[send-to-paseo] could not list agents", String(error));
+      return [] as ListedAgent[];
+    });
+    const providersPromise = listEffectiveProviders(paseo, profile);
     // The workspace branches are read before stack discovery, not after,
     // because they are what decides whether the cheap open-PR graph was enough:
     // a branch it could not place is the signal that this may be a merged stack
     // branch and worth paying for the wider lookups. Read once, used twice.
-    const workspaces = await readWorkspaceBranches(
-      await listProjectWorkspaces(paseo, project.projectId),
-    );
+    const workspaces = await readWorkspaceBranches(projectWorkspaces);
     const stackBranches = await resolveStackBranches({
       ref,
       headBranch: pr.headBranch,
@@ -962,17 +1012,16 @@ export async function handleResolve(request: ResolveRequest): Promise<ResolveRes
     });
     const { candidates, defaultCandidateIndex } = await buildCandidates({
       paseo,
+      projectId: project.projectId,
       ref,
       pr,
       workspaces,
       stackBranches,
       outage,
+      agentDispatch: currentSettings.agentDispatch,
+      agents: await agentsPromise,
     });
-    // One profile read and one mode snapshot, shared by the provider list and
-    // the resolved mode, so a resolve stays a two-round-trip operation.
-    const profile = await resolveSelectedProfile(paseo);
-    const { providers } = await listEffectiveProviders(paseo, profile);
-    const catalog = await listModes(paseo);
+    const { providers } = await providersPromise;
     const effectiveProvider = providers.find((entry) => entry.isDefault)?.id ?? providers[0]?.id;
     const resolvedModeId =
       effectiveProvider === undefined
@@ -986,6 +1035,7 @@ export async function handleResolve(request: ResolveRequest): Promise<ResolveRes
       providers,
       modes: catalog.modes,
       resolvedModeId: resolvedModeId ?? null,
+      agentDispatch: currentSettings.agentDispatch,
     };
   });
 }

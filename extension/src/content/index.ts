@@ -8,7 +8,7 @@
 import type { PrRef } from "../shared/contract";
 import { adapterFor } from "./adapters";
 import type { SiteAdapter } from "./adapters/types";
-import { closePopover, togglePopover } from "./popover";
+import { closePopover, togglePopover, warmPopoverResolution } from "./popover";
 import { BUTTON_TAG, MARKER_ATTR, createButton, type ButtonHandle, type ButtonMode } from "./ui/button";
 
 const LOCATION_EVENT = "send-to-paseo:locationchange";
@@ -109,6 +109,7 @@ function inject(): void {
 
   place(handle.host, placement);
   mounted = { pr, mode: desiredMode, handle, adapter };
+  warmPopoverResolution({ pr, stackPrNumbers: adapter.findStackPrNumbers() });
 }
 
 function place(host: HTMLElement, placement: ReturnType<SiteAdapter["findAnchor"]>): void {

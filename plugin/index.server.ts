@@ -75,6 +75,7 @@ export default function contribute(server: PluginServerContext) {
       defaultProvider,
       defaultProfileId,
       defaultModeId,
+      agentDispatch,
       externalBridgeUrl,
     }) => {
       await requireServerTarget(serverId);
@@ -84,12 +85,14 @@ export default function contribute(server: PluginServerContext) {
         defaultProvider?: string | null;
         defaultProfileId?: string | null;
         defaultModeId?: string | null;
+        agentDispatch?: "new" | "main";
         externalBridgeUrl?: string | null;
       } = {};
       if (port !== undefined) patch.port = port;
       if (defaultProvider !== undefined) patch.defaultProvider = defaultProvider;
       if (defaultProfileId !== undefined) patch.defaultProfileId = defaultProfileId;
       if (defaultModeId !== undefined) patch.defaultModeId = defaultModeId;
+      if (agentDispatch !== undefined) patch.agentDispatch = agentDispatch;
       if (externalBridgeUrl !== undefined) patch.externalBridgeUrl = externalBridgeUrl;
       await settings.update(patch);
       // Only rebinding the listener needs a restart; a provider or mode change

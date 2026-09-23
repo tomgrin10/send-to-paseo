@@ -702,6 +702,7 @@ export async function getBridgeStatus(): Promise<BridgeStatus> {
     defaultProvider: current.defaultProvider,
     defaultProfileId: current.defaultProfileId,
     defaultModeId: current.defaultModeId,
+    agentDispatch: current.agentDispatch,
     externalBridgeUrl: current.externalBridgeUrl,
     daemon,
   };

@@ -37,7 +37,8 @@
  * browser can never reach it):
  *   POST /__test/fail   {"code": "project_not_found" | null, "once": true?}
  *   POST /__test/config {"contract": 2?, "dryRun": true?, "daemonDown": true?,
- *                        "noGh": true?, "machineName": "devbox"?}
+ *                        "noGh": true?, "machineName": "devbox"?,
+ *                        "agentDispatch": "new" | "main"?}
  *   POST /__test/reset
  *   GET  /__test/log    -> [{ method, path, origin, hasAuth, authState, body }]
  */
@@ -88,6 +89,8 @@ const CONFIG = {
   mergedStack: flag("merged-stack"),
   /** Return additive routed machine slices from one primary bridge. */
   routed: flag("routed"),
+  /** Whether an existing workspace reuses its selected root agent. */
+  agentDispatch: "new",
 };
 
 const MAX_BODY = 64 * 1024; // CONTRACT.md: 64 KiB
@@ -211,6 +214,15 @@ function candidatesFor(number, stackPrNumbers) {
       rank: 1,
       reason: "exact",
       agentCount: 2,
+      ...(CONFIG.agentDispatch === "main"
+        ? {
+            mainAgent: {
+              agentId: "agt_mainmock",
+              title: "Main",
+              status: "idle",
+            },
+          }
+        : {}),
     });
   }
 
@@ -488,6 +500,8 @@ function handleResolve(res, origin, body) {
       // The mode a send would actually use for the isDefault provider, after
       // the bridge's own chain. Null when it would omit the field entirely.
       resolvedModeId: RESOLVED_MODE_ID,
+      // Defaults to the legacy path; test 17b switches it to main-agent reuse.
+      agentDispatch: CONFIG.agentDispatch,
     };
   if (CONFIG.routed) {
     const additional = {
@@ -557,7 +571,10 @@ function handleSend(res, origin, body) {
 
   const pr = prFor(body.number);
   const created = target.kind === "create";
-  const agentId = `agt_mock${String(++state.agentSeq).padStart(4, "0")}`;
+  const reusedMain = CONFIG.agentDispatch === "main" && target.kind === "existing";
+  const agentId = reusedMain
+    ? "agt_mainmock"
+    : `agt_mock${String(++state.agentSeq).padStart(4, "0")}`;
   const workspaceId = created ? "wks_created0000mock" : target.workspaceId;
   const firstLine = prompt.split("\n")[0].slice(0, 60);
 
@@ -574,7 +591,9 @@ function handleSend(res, origin, body) {
       // CONTRACT.md "Deep link format": paseo://h/<serverId>/agent/<agentId>,
       // as produced by buildAgentDeepLink. The extension treats this as opaque.
       deepLink: `paseo://h/${SERVER_ID}/agent/${agentId}`,
-      title: `PR #${body.number} · ${firstLine}`,
+      title: reusedMain ? "Main" : `PR #${body.number} · ${firstLine}`,
+      agentCreated: !reusedMain,
+      dispatch: reusedMain ? "main" : "new",
       // CONTRACT.md: always present, never omitted.
       dryRun: CONFIG.dryRun === true,
     },
@@ -611,6 +630,9 @@ async function handleControl(req, res, url, origin) {
     if (body.mergedStack !== undefined) CONFIG.mergedStack = Boolean(body.mergedStack);
     if (body.machineName !== undefined) CONFIG.machineName = String(body.machineName);
     if (body.routed !== undefined) CONFIG.routed = Boolean(body.routed);
+    if (body.agentDispatch !== undefined) {
+      CONFIG.agentDispatch = body.agentDispatch === "main" ? "main" : "new";
+    }
     return sendJson(
       res,
       200,
@@ -622,6 +644,7 @@ async function handleControl(req, res, url, origin) {
         mergedStack: CONFIG.mergedStack,
         machineName: CONFIG.machineName,
         routed: CONFIG.routed,
+        agentDispatch: CONFIG.agentDispatch,
       },
       null,
     );
@@ -640,6 +663,7 @@ async function handleControl(req, res, url, origin) {
     CONFIG.mergedStack = false;
     CONFIG.machineName = "mock-machine";
     CONFIG.routed = false;
+    CONFIG.agentDispatch = "new";
     return sendJson(res, 200, { ok: true }, null);
   }
   res.writeHead(404).end();

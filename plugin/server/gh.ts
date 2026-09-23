@@ -6,6 +6,7 @@ import {
   type StackPrState,
 } from "../shared/contracts";
 import { INSTALL_HINT, findGh, ghEnv, runProcess } from "./deps";
+import { setBoundedCache } from "./cache";
 
 /**
  * Pull-request lookups through the real `gh` binary.
@@ -29,6 +30,8 @@ const PR_TIMEOUT_MS = 15_000;
 /** Sibling lookups are best-effort, so they get a much shorter leash. */
 const STACK_TIMEOUT_MS = 8_000;
 const PR_TTL_MS = 60_000;
+const MAX_PR_CACHE_ENTRIES = 512;
+const MAX_REPOSITORY_CACHE_ENTRIES = 128;
 
 const GhPrSchema = z.object({
   number: z.number(),
@@ -371,7 +374,10 @@ export async function viewPr(ref: PrRef): Promise<PrPayload> {
   if (hit !== undefined && Date.now() - hit.at < PR_TTL_MS) return hit.pr;
   try {
     const pr = await viewPrRaw(ref, PR_TIMEOUT_MS);
-    prCache.set(key, { at: Date.now(), pr });
+    setBoundedCache(prCache, key, { at: Date.now(), pr }, {
+      maxEntries: MAX_PR_CACHE_ENTRIES,
+      expired: (value) => Date.now() - value.at >= PR_TTL_MS,
+    });
     return pr;
   } catch (error) {
     if (error instanceof BridgeError) throw error;
@@ -567,7 +573,10 @@ async function listOpenPrs(ref: Pick<PrRef, "owner" | "repo">): Promise<PrListEn
         `the stack lookup may be truncated and stack candidates may be missing`,
     );
   }
-  prListCache.set(key, { at: Date.now(), entries });
+  setBoundedCache(prListCache, key, { at: Date.now(), entries }, {
+    maxEntries: MAX_REPOSITORY_CACHE_ENTRIES,
+    expired: (value) => Date.now() - value.at >= STACK_LIST_TTL_MS,
+  });
   return entries;
 }
 
@@ -604,7 +613,10 @@ async function listNonOpenPrs(ref: Pick<PrRef, "owner" | "repo">): Promise<PrLis
         `merged stack branch may not be recognised`,
     );
   }
-  closedPrListCache.set(key, { at: Date.now(), entries });
+  setBoundedCache(closedPrListCache, key, { at: Date.now(), entries }, {
+    maxEntries: MAX_REPOSITORY_CACHE_ENTRIES,
+    expired: (value) => Date.now() - value.at >= CLOSED_STACK_LIST_TTL_MS,
+  });
   return entries;
 }
 
@@ -634,7 +646,10 @@ export async function repoDefaultBranch(ref: Pick<PrRef, "owner" | "repo">): Pro
   } catch {
     branch = null;
   }
-  repoTrunkCache.set(key, { at: Date.now(), branch });
+  setBoundedCache(repoTrunkCache, key, { at: Date.now(), branch }, {
+    maxEntries: MAX_REPOSITORY_CACHE_ENTRIES,
+    expired: (value) => Date.now() - value.at >= REPO_TTL_MS,
+  });
   return branch;
 }
 
@@ -810,7 +825,10 @@ export async function viewStackBranches(
       const hit = prCache.get(key);
       if (hit !== undefined && Date.now() - hit.at < PR_TTL_MS) return hit.pr;
       const pr = await viewPrRaw(siblingRef, STACK_TIMEOUT_MS);
-      prCache.set(key, { at: Date.now(), pr });
+      setBoundedCache(prCache, key, { at: Date.now(), pr }, {
+        maxEntries: MAX_PR_CACHE_ENTRIES,
+        expired: (value) => Date.now() - value.at >= PR_TTL_MS,
+      });
       return pr;
     }),
   );

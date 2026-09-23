@@ -2,6 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve as resolvePath } from "node:path";
 import { INSTALL_HINT, findGit, runProcess } from "./deps";
 import { BridgeError } from "../shared/contracts";
+import { setBoundedCache } from "./cache";
 
 /**
  * Branch and remote reads for workspace directories.
@@ -33,6 +34,7 @@ import { BridgeError } from "../shared/contracts";
 const REMOTE_TTL_MS = 5 * 60_000;
 /** Trunk and ancestry are both derived from refs that already exist locally. */
 const TRUNK_TTL_MS = 30 * 60_000;
+const MAX_WORKSPACE_CACHE_ENTRIES = 512;
 /**
  * `git branch --contains` walks every ref in the repository, so unlike the
  * branch reads it is not O(1). Bounded like every other spawn in the plugin;
@@ -107,7 +109,7 @@ async function resolveHeadPath(cwd: string): Promise<string | null> {
   } catch {
     head = null;
   }
-  headPathCache.set(cwd, head);
+  setBoundedCache(headPathCache, cwd, head, { maxEntries: MAX_WORKSPACE_CACHE_ENTRIES });
   return head;
 }
 
@@ -139,7 +141,9 @@ export async function readBranch(cwd: string): Promise<string | null> {
   } catch {
     branch = null;
   }
-  branchCache.set(cwd, { mtimeMs, branch });
+  setBoundedCache(branchCache, cwd, { mtimeMs, branch }, {
+    maxEntries: MAX_WORKSPACE_CACHE_ENTRIES,
+  });
   return branch;
 }
 
@@ -189,7 +193,10 @@ export async function readOriginOwnerRepo(cwd: string): Promise<OwnerRepo | null
   } catch {
     ownerRepo = null;
   }
-  remoteCache.set(cwd, { at: Date.now(), ownerRepo });
+  setBoundedCache(remoteCache, cwd, { at: Date.now(), ownerRepo }, {
+    maxEntries: MAX_WORKSPACE_CACHE_ENTRIES,
+    expired: (value) => Date.now() - value.at >= REMOTE_TTL_MS,
+  });
   return ownerRepo;
 }
 
@@ -240,7 +247,10 @@ export async function readTrunkBranch(root: string): Promise<string | null> {
   } catch {
     branch = null;
   }
-  trunkCache.set(root, { at: Date.now(), branch });
+  setBoundedCache(trunkCache, root, { at: Date.now(), branch }, {
+    maxEntries: MAX_WORKSPACE_CACHE_ENTRIES,
+    expired: (value) => Date.now() - value.at >= TRUNK_TTL_MS,
+  });
   return branch;
 }
 

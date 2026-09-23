@@ -1,6 +1,23 @@
 # Verification record
 
-## Latest regression run — 2026-09-22
+## Latest regression run — 2026-09-23
+
+The full unpacked extension suite now covers pre-resolving on button mount and main-agent reuse.
+Case 17b verifies that reuse names the exact root agent, omits provider/mode controls that cannot
+change an existing agent, and renders a truthful send result. Cases 9e and 10f were made explicit
+about the new prewarm/settings timing so one test cannot reuse another test's state.
+
+```text
+npm run typecheck            # clean
+STP_CHROMIUM=~/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome node ../test/e2e.mjs
+=== 64 passed, 0 failed, 0 skipped (of 64) ===
+```
+
+The first browser invocation without `STP_CHROMIUM` exited before launching because the Linux
+binary is outside the script's macOS-only auto-discovery path; the documented explicit path above
+then completed green. Case 13 remained read-only and created no workspace or agent.
+
+## Release regression run — 2026-09-22
 
 The v1.2.0 release changes the Paseo plugin surface and minimum host version, not the frozen
 extension/bridge contract. The extension version was kept in lockstep for the release artifact.
@@ -980,7 +997,7 @@ never constructed, never parsed, and asserted only by shape.
 cd extension && npm install
 npm run typecheck
 npm run build
-node ../test/e2e.mjs          # 63 cases, ~60 s, headless by default
+node ../test/e2e.mjs          # 64 cases, ~60 s, headless by default
                               # STP_HEADED=1 node ../test/e2e.mjs  to watch it
 ```
 

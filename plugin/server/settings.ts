@@ -36,6 +36,8 @@ const SettingsSchema = z.object({
   defaultProfileId: z.string().nullable().default(null),
   /** Permission mode override, or null to follow the resolution chain. */
   defaultModeId: z.string().nullable().default(null),
+  /** Create a fresh agent, or reuse the best root agent in the target workspace. */
+  agentDispatch: z.enum(["new", "main"]).default("new"),
   /** Advisory: flipped true after the first authenticated request succeeds. */
   paired: z.boolean(),
   /** Newest first, capped at RECENT_LIMIT. */
@@ -121,6 +123,7 @@ function defaults(): Settings {
     defaultProvider: null,
     defaultProfileId: null,
     defaultModeId: null,
+    agentDispatch: "new",
     paired: false,
     recentSends: [],
     allowedExtensionIds: [],

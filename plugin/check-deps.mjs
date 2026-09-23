@@ -66,6 +66,7 @@ await writeFile(
 const deps = await import("./server/deps.ts");
 const gh = await import("./server/gh.ts");
 const git = await import("./server/git.ts");
+const cache = await import("./server/cache.ts");
 const daemonPassword = await import("./server/daemon-password.ts");
 const peers = await import("./server/peers.ts");
 const shared = await import("./shared/contracts.ts");
@@ -86,6 +87,28 @@ function check(name, condition, detail = "") {
 }
 
 const realPath = process.env.PATH ?? "";
+
+const bounded = new Map();
+cache.setBoundedCache(bounded, "expired", { at: 0 }, {
+  maxEntries: 2,
+  expired: (value) => value.at < 10,
+});
+cache.setBoundedCache(bounded, "first", { at: 10 }, {
+  maxEntries: 2,
+  expired: (value) => value.at < 10,
+});
+cache.setBoundedCache(bounded, "second", { at: 11 }, {
+  maxEntries: 2,
+  expired: (value) => value.at < 10,
+});
+cache.setBoundedCache(bounded, "third", { at: 12 }, {
+  maxEntries: 2,
+  expired: (value) => value.at < 10,
+});
+check(
+  "TTL caches discard expired and oldest keys",
+  JSON.stringify([...bounded.keys()]) === JSON.stringify(["second", "third"]),
+);
 
 /**
  * Runs `work` with `PATH` replaced and every binary/PR cache cleared.
@@ -517,6 +540,8 @@ try {
               branch: "test-branch",
               deepLink: "paseo://h/srv_test/agent/agt_test",
               title: "test",
+              agentCreated: true,
+              dispatch: "new",
               dryRun: true,
             }),
           100,
