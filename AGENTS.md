@@ -194,6 +194,14 @@ sync.
   disposal, or plugin unload releases it. Acquire inside each action so a later action gets the
   replacement client. Every surface RPC also carries the surface `host.id` and the server rejects
   a mismatch, so a delayed callback cannot mutate whichever host became selected later.
+- **Main-agent reuse means root-agent reuse, not newest-agent reuse.** Subagents carry a non-empty
+  `paseo.parent-agent-id` label and are never eligible. An exact `Main` / `Main Agent` title is the
+  strongest user signal, followed by an open-tab label, live status, and recent user activity.
+  Keep that ordering deterministic; otherwise a delegated or stale agent can receive PR work.
+- **PR resolution is intentionally warmed before the click.** The content script starts it when
+  the page button mounts and the popover reuses it for 45 seconds. SPA navigation is part of the
+  cache key. E2E tests that install a one-shot bridge failure must do so before navigation/reload,
+  or they are only testing a previously warmed success.
 - **The bridge's `Host` check is loopback-hostname, ANY port.** It used to pin the listener's own
   port, which refused every `ssh -L` tunnel whose local port differed. The port was never the
   guard: rebinding arrives as `Host: evil.com` with a page `Origin`, and both are refused already.
@@ -320,7 +328,7 @@ the mock bridge.
 
 ```sh
 cd plugin
-npm run verify                           # typecheck + 73 server checks + 7 host-client tests; never touches ~/.config/gh
+npm run verify                           # typecheck + 74 server checks + 7 host-client + 6 main-agent tests; never touches ~/.config/gh
 paseo plugin reload send-to-paseo && paseo plugin ls   # needs PASEO_PASSWORD on an authed daemon
 paseo plugin logs send-to-paseo          # expect the three dependency self-check lines, no stack traces
 time paseo plugin reload send-to-paseo   # must finish in seconds, twice — proves no reload hang
@@ -334,7 +342,7 @@ Require `running`, an empty `ERROR` column, and `bridge listening on http://127.
 cd extension
 npm run typecheck
 npm run build
-node ../test/e2e.mjs                     # 63 cases; builds dist/ and dist-test/ itself
+node ../test/e2e.mjs                     # 64 cases; builds dist/ and dist-test/ itself
 ```
 
 The suite runs Chromium **headless by default** (`--headless=new` loads MV3 extensions fine, so
@@ -367,11 +375,13 @@ fixture at a real repository — every screenshot in `docs/screenshots/` is comm
 
 | Test | Guards |
 | --- | --- |
+| 4 | Resolve prewarming: mounting the PR button reaches `/v1/resolve` before the user clicks, and the popover consumes that result. |
 | 8, 24 | SPA re-targeting. The MAIN-world `pushState` shim on Graphite's router and on GitHub's Turbo; a stale PR number can never reach `/v1/resolve`. |
 | 10g | Remote plain HTTP is rejected before Chrome permission is requested; an HTTPS proxy URL can request only its exact origin. |
 | 11 | The bearer token is unreachable from the page — DOM, shadow roots, attributes, `window`, both storages, plus a static scan of the built bundles. |
 | 12 | Every bridge security rule: Origin on preflight and real request, Host, body cap, rate limit and its keying. |
 | 13 | The live bridge, read-only. The only test that proves the real plugin and the real extension agree. |
+| 17b | Main-agent dispatch previews the exact reusable root agent, hides new-agent-only provider/mode controls, and reports reuse truthfully after send. |
 | 18 | No fixture host, test port or `dist-test` in a shipping artifact. The default required origin stays `127.0.0.1:7788`; loopback alternates and HTTPS proxy hosts appear only as optional permission patterns or user-entered examples. |
 | 18b2 | Simple routing: one stored Primary browser bridge expands two machine slices, and an Additional-machine target sends once to the Primary with the exact `routeId`. |
 | 19, 19b, 28, 28b | Keyboard containment on Graphite and on GitHub, with faithful stand-ins for both shortcut layers. `19b`/`28b` cover the Target combobox's own search input, which is a second text-entry surface inside the same shadow root and would otherwise be assumed covered rather than proved covered. |
@@ -408,7 +418,7 @@ deleting the record.
 
 ## Create a release
 
-Exercised through `v1.2.0`; all releases are published. `origin` is
+Exercised through `v1.3.0`; all releases are published. `origin` is
 `github.com/tomgrin10/send-to-paseo`, and tags live on `main`.
 
 - Release user-facing features, bug fixes, compatibility changes, or contract changes.

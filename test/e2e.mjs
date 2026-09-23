@@ -158,6 +158,16 @@ async function lastRequest(path) {
   return null;
 }
 
+async function waitForRequest(path, timeout = 4000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const request = await lastRequest(path);
+    if (request !== null) return request;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return null;
+}
+
 /* -------------------------------------------------------------------------- */
 /* helpers against the extension                                              */
 /* -------------------------------------------------------------------------- */
@@ -808,10 +818,12 @@ await test("3. Floating fallback appears when no anchor exists", async () => {
 });
 
 /* ---- 4 + 5. popover, resolve, candidates, stack scrape ------------------- */
-await test("4. Popover opens, calls /v1/resolve, renders target + candidates", async () => {
+await test("4. Resolution warms before open; popover renders target + candidates", async () => {
   await bridgeReset();
   await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
   await waitForButton(page);
+  const req = await waitForRequest("/v1/resolve");
+  assert(req, "mounting the PR button must start POST /v1/resolve before the click");
   await openPopover(page);
   await waitForPhase(page, "ready");
 
@@ -843,8 +855,6 @@ await test("4. Popover opens, calls /v1/resolve, renders target + candidates", a
     };
   });
 
-  const req = await lastRequest("/v1/resolve");
-  assert(req, "the popover must call POST /v1/resolve on open");
   assertEq(req.method, "POST", "resolve method");
   assert(req.hasAuth, "resolve must be authenticated by the service worker");
   assertEq(req.body.forge, "github", "forge");
@@ -1267,8 +1277,11 @@ await test("9e. Every CONTRACT.md error code renders a specific message", async 
 
   for (const code of codes) {
     await forceFail(code);
-    // Fresh popover per code.
-    await page.evaluate(() => document.querySelector("send-to-paseo-popover")?.remove());
+    // Resolution is intentionally warmed when the PR button mounts. Reload
+    // after installing each forced response so the warm request belongs to
+    // this iteration rather than reusing the previous successful result.
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await waitForButton(page);
     await openPopover(page);
     await waitForPhase(page, "error", 10000);
     const ui = await readError(page);
@@ -1485,11 +1498,12 @@ await test("10e. Options page: contract mismatch -> bad 'Update required'", asyn
 });
 
 await test("10f. Options page fresh state: masked token, hidden grant row", async () => {
-  const opt = await context.newPage();
-  await opt.goto(optionsUrl());
+  // Seed before opening the page. Otherwise its initial render can autosave
+  // the previous test's state after this seed and make the fixture racy.
   await clearCachedProviders(context);
   await seedSettings(context, extId, { bridgeUrl: "http://127.0.0.1:7788", token: "" });
-  await opt.reload();
+  const opt = await context.newPage();
+  await opt.goto(optionsUrl());
   await opt.waitForTimeout(400);
   await opt.screenshot({ path: join(shots, "options-page.png") });
   const ui = await opt.evaluate(() => {
@@ -1956,7 +1970,7 @@ await test("17. dryRun: true is surfaced distinctly from a real send", async () 
 
     assertEq(ui.hostAttr, "true", "host must be marked dryRun=true");
     assert(/dry run/i.test(ui.headline), `headline must say dry run, got: ${ui.headline}`);
-    assert(/no agent created/i.test(ui.headline), `headline must say nothing was created: ${ui.headline}`);
+    assert(/nothing sent/i.test(ui.headline), `headline must say nothing was sent: ${ui.headline}`);
     assertEq(ui.badge, "DRY RUN", "an explicit DRY RUN badge");
     assert(ui.note.includes("SEND_TO_PASEO_DRY_RUN=1"), `note must name the flag: ${ui.note}`);
     assert(ui.note.includes("synthetic"), `note must say the ids are synthetic: ${ui.note}`);
@@ -1972,6 +1986,52 @@ await test("17. dryRun: true is surfaced distinctly from a real send", async () 
     ];
   } finally {
     await bridgeConfig({ dryRun: false });
+  }
+});
+
+await test("17b. Main-agent dispatch is previewed and reported without new-agent controls", async () => {
+  await bridgeReset();
+  await bridgeConfig({ agentDispatch: "main" });
+  try {
+    await seedSettings(context, extId, {});
+    await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
+    await waitForButton(page);
+    await openPopover(page);
+    await waitForPhase(page, "ready");
+
+    const ready = await page.evaluate(() => {
+      const root = document.querySelector("send-to-paseo-popover").shadowRoot;
+      return {
+        main: root.querySelector("[data-stp-main-agent]")?.textContent.trim() ?? null,
+        provider: root.querySelector("[data-stp-provider]") !== null,
+        mode: root.querySelector("[data-stp-mode]") !== null,
+      };
+    });
+    assert(ready.main?.includes("Main") && ready.main.includes("idle"), `main preview: ${ready.main}`);
+    assertEq(ready.provider, false, "provider is irrelevant when reusing an agent");
+    assertEq(ready.mode, false, "permission mode is irrelevant when reusing an agent");
+
+    await page.locator("[data-stp-prompt]").fill("Continue the review");
+    await page.locator("[data-stp-send]").click();
+    await waitForPhase(page, "sent");
+
+    const sent = await page.evaluate(() => {
+      const root = document.querySelector("send-to-paseo-popover").shadowRoot;
+      return {
+        headline: root.querySelector("[data-stp-success]").textContent.trim(),
+        linkText: root.querySelector("[data-stp-deeplink]").textContent.trim(),
+      };
+    });
+    assertEq(sent.headline, "Message sent to main agent", "reuse gets a truthful success headline");
+    assertEq(sent.linkText, "Open in Paseo", "the existing agent deep link is not synthetic");
+
+    return [
+      `preview: ${ready.main}`,
+      "provider and mode selects hidden for reuse",
+      `success: ${sent.headline}`,
+    ];
+  } finally {
+    await bridgeConfig({ agentDispatch: "new" });
   }
 });
 

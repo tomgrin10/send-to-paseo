@@ -35,6 +35,7 @@ import type {
   HostSlice,
   MergedCandidate,
   MultiResolveResponse,
+  Result,
 } from "../shared/messages";
 import { sendIntent } from "./bridge";
 import { Combobox } from "./ui/combobox";
@@ -52,6 +53,65 @@ export interface PopoverContext {
 }
 
 let current: Popover | null = null;
+
+const WARM_RESOLVE_TTL_MS = 45_000;
+let warmResolve:
+  | {
+      key: string;
+      startedAt: number;
+      promise: Promise<Result<MultiResolveResponse>>;
+    }
+  | null = null;
+
+function resolveKey(pr: PrRef, stackPrNumbers: number[]): string {
+  return `${pr.forge}:${pr.owner}/${pr.repo}#${pr.number}:${[...stackPrNumbers].sort((a, b) => a - b).join(",")}`;
+}
+
+function resolveNow(pr: PrRef, stackPrNumbers: number[]): Promise<Result<MultiResolveResponse>> {
+  return sendIntent({ type: "resolve", pr, stackPrNumbers });
+}
+
+/** Begin resolution as soon as the PR button is mounted, before the user clicks it. */
+export function warmPopoverResolution(
+  ctx: Pick<PopoverContext, "pr" | "stackPrNumbers">,
+): void {
+  const key = resolveKey(ctx.pr, ctx.stackPrNumbers);
+  if (
+    warmResolve?.key === key &&
+    Date.now() - warmResolve.startedAt < WARM_RESOLVE_TTL_MS
+  ) {
+    return;
+  }
+  const promise = resolveNow(ctx.pr, ctx.stackPrNumbers);
+  warmResolve = {
+    key,
+    startedAt: Date.now(),
+    promise,
+  };
+  // A transient auth/network failure must not be sticky: opening the composer
+  // should retry after the user fixes it instead of replaying the warm-up.
+  void promise.then((result) => {
+    if (!result.ok && warmResolve?.promise === promise) warmResolve = null;
+  });
+}
+
+function warmedOrFreshResolve(
+  ctx: Pick<PopoverContext, "pr" | "stackPrNumbers">,
+): Promise<Result<MultiResolveResponse>> {
+  const key = resolveKey(ctx.pr, ctx.stackPrNumbers);
+  if (
+    warmResolve?.key === key &&
+    Date.now() - warmResolve.startedAt < WARM_RESOLVE_TTL_MS
+  ) {
+    return warmResolve.promise;
+  }
+  warmPopoverResolution(ctx);
+  return warmResolve!.promise;
+}
+
+function invalidateWarmResolve(ctx: Pick<PopoverContext, "pr" | "stackPrNumbers">): void {
+  if (warmResolve?.key === resolveKey(ctx.pr, ctx.stackPrNumbers)) warmResolve = null;
+}
 
 export function isPopoverOpen(): boolean {
   return current !== null;
@@ -190,14 +250,11 @@ class Popover {
     this.render();
 
     // Public settings only — the token stays in the service worker.
-    const settings = await sendIntent({ type: "getPublicSettings" });
+    const [settings, res] = await Promise.all([
+      sendIntent({ type: "getPublicSettings" }),
+      warmedOrFreshResolve(this.ctx),
+    ]);
     if (settings.ok) this.defaultProviderPref = settings.data.defaultProvider;
-
-    const res = await sendIntent({
-      type: "resolve",
-      pr: this.ctx.pr,
-      stackPrNumbers: this.ctx.stackPrNumbers,
-    });
 
     if (!this.host.isConnected) return; // closed while in flight
 
@@ -231,6 +288,15 @@ class Popover {
     const candidate = this.selectedCandidate();
     if (candidate === undefined) return undefined;
     return this.resolved?.hosts[candidate.hostIndex];
+  }
+
+  private willReuseMain(): boolean {
+    const candidate = this.selectedCandidate();
+    return (
+      candidate?.kind === "existing" &&
+      candidate.mainAgent !== undefined &&
+      this.selectedSlice()?.resolved?.agentDispatch === "main"
+    );
   }
 
   /** True once more than one host is configured, which is what turns on the
@@ -325,6 +391,10 @@ class Popover {
       return;
     }
     this.sendResult = res.data;
+    // A send may have created the first root agent in this workspace. Do not
+    // let “Send another” reuse the pre-send preview and claim it still needs a
+    // new agent when main-agent dispatch would now reuse that one.
+    invalidateWarmResolve(this.ctx);
     this.sentHostLabel = this.multiHost ? this.chipFor(candidate.hostIndex) : "";
     this.phase = "sent";
     this.render();
@@ -527,7 +597,7 @@ class Popover {
        fails or silently runs a different model. */
     const hostResolved = this.selectedSlice()?.resolved;
     const providers = hostResolved?.providers ?? [];
-    if (providers.length) {
+    if (!this.willReuseMain() && providers.length) {
       const providerSelect = el("select", {
         "data-stp-provider": "",
         "aria-label": "Provider",
@@ -558,7 +628,7 @@ class Popover {
 
     /* Mode — filtered to the selected provider, because mode ids are per-provider. */
     const providerModes = modesFor(hostResolved?.modes ?? [], this.providerId);
-    if (providerModes.length) {
+    if (!this.willReuseMain() && providerModes.length) {
       const modeSelect = el("select", {
         "data-stp-mode": "",
         "aria-label": "Permission mode",
@@ -680,6 +750,22 @@ class Popover {
     );
     box.append(sub);
 
+    if (hostResolved.agentDispatch === "main") {
+      if (c.kind === "existing" && c.mainAgent) {
+        box.append(
+          el("span", { class: "sub", "data-stp-main-agent": c.mainAgent.agentId }, [
+            `Message “${c.mainAgent.title}” · ${c.mainAgent.status}`,
+          ]),
+        );
+      } else {
+        box.append(
+          el("span", { class: "sub", "data-stp-main-agent": "new" }, [
+            "No reusable root agent; a new agent will start.",
+          ]),
+        );
+      }
+    }
+
     // One workspace per stack is normal, so the resolved target is often a
     // worktree on a *sibling* branch. Say so, rather than letting the branch on
     // the line above be mistaken for this PR's branch.
@@ -794,7 +880,12 @@ class Popover {
     const box = el("div", { class: dry ? "success dry" : "success" });
 
     const title = el("div", { class: "stitle", "data-stp-success": "" });
-    title.append(document.createTextNode(dry ? "Dry run — no agent created" : "Agent started"));
+    const reused = r.dispatch === "main" && r.agentCreated === false;
+    title.append(
+      document.createTextNode(
+        dry ? "Dry run — nothing sent" : reused ? "Message sent to main agent" : "Agent started",
+      ),
+    );
     if (dry) title.append(el("span", { class: "badge", "data-stp-dryrun": "true" }, ["DRY RUN"]));
     box.append(title);
 
@@ -802,7 +893,9 @@ class Popover {
       box.append(
         el("div", { class: "dry-note" }, [
           renderProse(
-            "The plugin is running with SEND_TO_PASEO_DRY_RUN=1. Resolution and validation ran, but no workspace or agent was created and the ids below are synthetic.",
+            reused
+              ? "The plugin is running with SEND_TO_PASEO_DRY_RUN=1. Resolution and validation ran, but no message was sent and the existing agent was unchanged."
+              : "The plugin is running with SEND_TO_PASEO_DRY_RUN=1. Resolution and validation ran, but no workspace or agent was created and the ids below are synthetic.",
           ),
         ]),
       );
@@ -834,7 +927,7 @@ class Popover {
         "data-stp-deeplink": r.deepLink,
         href: r.deepLink,
       },
-      [dry ? "Open in Paseo (synthetic id)" : "Open in Paseo"],
+      [dry && !reused ? "Open in Paseo (synthetic id)" : "Open in Paseo"],
     );
     box.append(link);
     box.append(el("div", { class: "deep-link-raw" }, [r.deepLink]));
@@ -846,9 +939,7 @@ class Popover {
     again.addEventListener("click", () => {
       this.draft = "";
       this.sendResult = null;
-      this.phase = "ready";
-      this.render();
-      this.textarea?.focus();
+      void this.loadResolve();
     });
     footerish.append(again);
     box.append(footerish);

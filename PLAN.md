@@ -1,8 +1,9 @@
 # Send to Paseo — plan
 
-Ship a "Send to Paseo" button on Graphite PR pages. Click it, type an instruction
-("Fix merge conflicts"), and a **new** Paseo agent starts in the workspace that belongs to
-that PR's branch — creating a worktree workspace for the PR if none exists.
+Ship a "Send to Paseo" button on Graphite and GitHub PR pages. Click it, type an instruction
+("Fix merge conflicts"), and dispatch it in the workspace that belongs to that PR's branch —
+either to a fresh agent or the workspace's main root agent, creating a worktree and agent if no
+workspace exists.
 
 Two deliverables:
 
@@ -96,7 +97,7 @@ Also confirmed: **`graphite.dev` is now `graphite.com`** — the extension must 
 
 `/Applications/Paseo.app/Contents/Info.plist` declares `CFBundleURLSchemes: [paseo]`
 ("Paseo agent link"). After a successful send we can hand back a deep link that jumps straight
-into the new agent in the desktop app.
+into the created or reused agent in the desktop app.
 
 ---
 
@@ -104,8 +105,10 @@ into the new agent in the desktop app.
 
 - **No workspace match → show a picker and confirm.** The popover states the resolved target
   and lets you pick something else before sending. Never silently creates a worktree.
-- **Always start a new agent.** Every send is a fresh agent with clean context.
-- **Provider/model: default in plugin settings, per-send override in the popover.**
+- **Agent destination is a plugin preference.** `new` keeps the original fresh-context behavior;
+  `main` reuses the best non-archived root agent in an existing workspace and falls back to a new
+  agent only when none exists. Delegated subagents are never candidates.
+- **Provider/model: default in plugin settings, per-send override in the popover for new agents.**
 
 ---
 
@@ -122,7 +125,8 @@ send-to-paseo-plugin/
   client/settings.tsx        status, token, defaults and recent sends surface
   server/bridge.ts           the HTTP server
   server/resolve.ts          PR → project → workspace resolution
-  server/send.ts             workspace ensure + agent create
+  server/send.ts             workspace ensure + agent create/reuse dispatch
+  server/main-agent.ts       root-agent discovery and deterministic main selection
   server/gh.ts               execFile wrapper around the gh binary
   server/git.ts              branch reads, cached
   server/settings.ts         token + config at $PASEO_HOME/plugin-data/send-to-paseo/
@@ -137,10 +141,11 @@ Bound to `127.0.0.1` only, default port `7788` (configurable). Endpoints, all ve
 | --- | --- |
 | `GET /v1/ping` | health + version + daemon reachability. Used by the options page's "Test connection". |
 | `POST /v1/resolve` | `{forge, owner, repo, number, stackPrNumbers[]}` → PR metadata + ranked workspace candidates + provider list + defaults. Drives the popover before you type. |
-| `POST /v1/send` | `{…prRef, prompt, target, provider?}` → creates the workspace if asked, creates the agent, returns `{agentId, workspaceId, deepLink, workspaceCreated}`. |
+| `POST /v1/send` | `{…prRef, prompt, target, provider?}` → creates the workspace if asked, then creates or messages the configured agent destination; returns `{agentId, workspaceId, deepLink, workspaceCreated, agentCreated?, dispatch?}`. |
 
-`/v1/resolve` existing as a separate call is what makes the confirm-picker UX feel instant: the
-popover fetches candidates the moment it opens, while you're still typing.
+`/v1/resolve` existing as a separate call is what makes the confirm-picker UX feel instant. The
+extension now starts it when the PR-page button mounts and briefly reuses that promise/result when
+the popover opens; provider/settings work runs in parallel with it.
 
 ### The resolution ladder (`server/resolve.ts`)
 
@@ -148,9 +153,11 @@ popover fetches candidates the moment it opens, while you're still typing.
    fall back to matching a project whose `origin` remote URL parses to the same `owner/repo`
    (covers SSH remotes and renamed repos).
 2. PR number → head branch, via `gh pr view --json headRefName,title,state,baseRefName`.
-   Fallback to the GitHub REST API using `gh auth token` if the CLI is missing.
-3. Resolve `stackPrNumbers` → their branches, batched, best-effort (a slow or failed lookup
-   degrades rank 2 to nothing; it never blocks a send).
+   If `gh` is missing or unavailable, keep the send path with unknown metadata rather than
+   guessing or blocking Paseo's own forge checkout.
+3. Build the stack from GitHub's PR base/head graph, supplemented by the page's
+   `stackPrNumbers`, merged/closed PR lookups when necessary, and local git ancestry for branches
+   GitHub has retargeted or which have no PR. Each widening pass is best-effort.
 4. List that project's workspaces, read each branch with `git -C <cwd> rev-parse --abbrev-ref HEAD`.
    Cache keyed on `cwd` + mtime of `.git/HEAD` so repeated opens are free.
 5. Rank candidates:
@@ -158,19 +165,29 @@ popover fetches candidates the moment it opens, while you're still typing.
    - **rank 2** — branch is another branch in the same Graphite stack → labelled `stack: #948`
    - **rank 3** — any other workspace in the project
    - **synthetic** — `Create worktree for PR #942` (`checkout-pr` mode)
-6. The default selection is rank 1 if present, otherwise the synthetic create option. The
-   popover shows that default and every alternative.
+6. The default selection is rank 1 if present, otherwise the best rank-2 stack workspace,
+   otherwise the synthetic create option. The popover shows that default and every alternative.
 
 ### Sending (`server/send.ts`)
 
-Ensure the workspace (existing, or create via `checkout-pr`), then
-`paseo.agents.create({ cwd, prompt, title, config: { provider }, labels })` with:
+Ensure the workspace (existing, or create via `checkout-pr`), then follow the plugin's agent
+destination preference:
+
+- `new`, a create target, or no eligible root agent: call
+  `paseo.agents.create({ cwd, prompt, title, config: { provider, modeId? }, labels })`;
+- `main` with an existing target: list that project's agents, exclude archived agents and anything
+  carrying `paseo.parent-agent-id`, then prefer an exact `Main` / `Main Agent` title, an open Paseo
+  tab, live status, and recent activity. Send to that agent with steering behavior so an active
+  turn is not interrupted.
+
+New agents use:
 
 - `title`: `PR #942 · Fix merge conflicts` — scannable in Paseo's agent list
 - `labels`: `{ "send-to-paseo/pr": "github:acmegizmos/gizmo-poc#942", "send-to-paseo/origin": "graphite" }`
 
-Labels cost nothing now and are surfaced on `PluginAgentSnapshot.labels`, so a future "show me
-every agent for this PR" or an opt-in reuse mode needs no migration.
+Labels remain surfaced on `PluginAgentSnapshot.labels`, so "show me every agent for this PR" can
+be added later without a migration. Root-agent reuse relies on Paseo's own parent/open-tab labels,
+not the PR label.
 
 The prompt sent to the agent is your text plus a short header giving the agent the PR URL, number,
 branch and title — so "Fix merge conflicts" is actionable without the agent having to guess what
@@ -255,7 +272,7 @@ Opens on click, anchored to the button:
 - one-line target summary from `/v1/resolve` — *"→ workspace `brawny-dodo` (giz-1133-…)"* or
   *"→ will create worktree for PR #942"*, with a dropdown to pick any other candidate
 - the instruction textarea, autofocused; ⌘↵ sends, Esc closes
-- provider dropdown, pre-set to your default
+- either a provider/mode picker for a new agent or the exact main agent that will be reused
 - on send: inline spinner, then a success state with an "Open in Paseo" `paseo://` deep link
 
 Errors surface in the popover with the actual reason (bridge unreachable, not paired, `gh` not

@@ -482,14 +482,14 @@ async function load(): Promise<void> {
   const simple = s.connectionMode === "simple";
   advancedDetails.open = !simple;
   useSimpleBtn.disabled = simple;
-  useSimpleBtn.textContent = simple ? "Using simple setup" : "Use simple setup";
+  useSimpleBtn.textContent = simple ? "Using automatic routing" : "Use automatic routing";
   useAdvancedBtn.disabled = !simple;
   useAdvancedBtn.textContent = simple
     ? "Use advanced direct connections"
     : "Using advanced direct connections";
-  hostsHeading.textContent = simple ? "Primary Paseo machine" : "Direct Paseo connections";
+  hostsHeading.textContent = simple ? "Connect to Paseo" : "Direct Paseo connections";
   hostsHelp.textContent = simple
-    ? "Copy the pairing token from Paseo on this browser machine. No Tailscale command, SSH tunnel, remote URL, or Chrome permission is needed here."
+    ? "Paste the pairing token shown by the Send to Paseo plugin on this machine."
     : "Chrome contacts every enabled machine directly. Each row needs that machine’s own private bridge address, pairing token, and Chrome permission.";
   testAllBtn.textContent = simple ? "Test connection" : "Test all connections";
   hostsBox.textContent = "";

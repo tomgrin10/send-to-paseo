@@ -204,7 +204,8 @@ here are the same shape as in `/v1/resolve`; `modes` follows exactly the same au
 
 ## `POST /v1/resolve`
 
-Called when the popover opens, before the user types. Must be fast; it may not create anything.
+Started when the PR-page button mounts, before the popover opens, and reused briefly when the user
+clicks. Must be fast; it may not create anything.
 
 **Request**
 ```json
@@ -267,7 +268,12 @@ that cannot answer returns fewer rank-2 entries, never an error.
       "isolation": "worktree",
       "rank": 1,
       "reason": "exact",
-      "agentCount": 2
+      "agentCount": 2,
+      "mainAgent": {
+        "agentId": "agt_main...",
+        "title": "Main",
+        "status": "idle"
+      }
     },
     {
       "kind": "existing",
@@ -299,7 +305,8 @@ that cannot answer returns fewer rank-2 entries, never an error.
     { "provider": "claude", "id": "auto", "label": "Auto mode", "isDefault": true, "colorTier": "moderate" },
     { "provider": "claude", "id": "bypassPermissions", "label": "Bypass", "isDefault": false, "isUnattended": true, "colorTier": "dangerous" }
   ],
-  "resolvedModeId": "auto"
+  "resolvedModeId": "auto",
+  "agentDispatch": "main"
 }
 ```
 
@@ -393,6 +400,20 @@ first entry would silently pick "Always Ask".
 popover, the extension must re-pick from `modes` filtered to the new provider — the resolved
 value from a different provider is not transferable.
 
+`agentDispatch` is additive and optional. Missing means the historical `"new"` behavior.
+`"new"` starts a fresh agent for every send. `"main"` asks the plugin to reuse the target
+workspace's selected root agent when possible. In that mode an existing candidate may carry an
+additive `mainAgent` preview (`agentId`, display `title`, and current `status`). Its absence means
+no eligible root agent was found, so sending to that candidate will start a new one. A create
+candidate always starts a new workspace and agent.
+
+The bridge selects a main agent only among non-archived agents in the exact workspace that do not
+carry a non-empty `paseo.parent-agent-id` label; delegated subagents are never eligible. It then
+prefers, in order: a title exactly `Main` or `Main Agent` (case-insensitive), an agent represented
+by a `paseo.open-agent-tab.* = "true"` label, a live runtime (`running`, then `idle`, then
+`initializing`, then `closed`), recent user activity, recent update/creation time, and finally id
+order for determinism.
+
 Per the product decision, the extension **always shows the picker and requires an explicit
 Send**; it never auto-creates silently, whatever the default is.
 
@@ -400,7 +421,7 @@ Send**; it never auto-creates silently, whatever the default is.
 
 ## `POST /v1/send`
 
-Creates the agent. This is the only mutating endpoint.
+Creates an agent or messages the selected main agent. This is the only mutating endpoint.
 
 **Request**
 ```json
@@ -455,6 +476,13 @@ the profile from supplying a `modeId`, and naming a `modeId` does not stop the p
 supplying the provider. But an explicit `provider` always beats the profile's provider: the
 popover's visible choice is never silently overridden.
 
+Provider/profile/mode resolution applies only when the plugin creates an agent. When
+`agentDispatch` is `"main"` and the target is an existing workspace with an eligible root agent,
+the plugin sends the composed prompt to that agent instead; request `provider` and `modeId` do not
+change an existing agent. The send uses steering behavior so an active turn is preserved rather
+than implicitly interrupted. If listing agents fails, the send fails rather than silently
+creating a duplicate; if listing succeeds but finds no eligible root, it falls back to creation.
+
 Before this existed the plugin sent `config: { provider }` and nothing else, so Claude's
 provider fell back to `modeId: "default"` — the UI's **"Always Ask"** — and every agent the
 plugin created came up in the strictest mode regardless of the user's own default.
@@ -470,13 +498,22 @@ plugin created came up in the strictest mode regardless of the user's own defaul
   "branch": "giz-1133-widget-backed-inventory-audit-rule",
   "deepLink": "paseo://h/srv_Ab3xY9pQ2mNt/agent/agt_...",
   "title": "PR #942 · Fix merge conflicts",
+  "agentCreated": true,
+  "dispatch": "new",
   "dryRun": false
 }
 ```
 
+`agentCreated` and `dispatch` are additive and optional. New bridges always return both;
+`dispatch: "main"` together with `agentCreated: false` means `agentId`, `title`, and `deepLink`
+name the reused agent. Every creation path, including fallback when no reusable root exists,
+returns `dispatch: "new"` and `agentCreated: true`. Consumers must treat missing fields as the
+legacy new-agent result.
+
 `dryRun` is always present. `true` only when the plugin is running with
-`SEND_TO_PASEO_DRY_RUN=1` (see "Test mode"), in which case nothing was created and
-`agentId`/`workspaceId` are synthetic.
+`SEND_TO_PASEO_DRY_RUN=1` (see "Test mode"), in which case nothing was created or sent. A
+new-agent dry run returns synthetic `agentId`/`workspaceId`; a main-agent dry run returns the real
+selected agent and workspace ids so its preview and deep link can still be verified.
 
 `branch` is the branch **actually checked out** in the target workspace, which is not always
 equal to `pr.headBranch`. When `target.kind` is `create` and a local branch of the PR head
@@ -576,7 +613,7 @@ form landed; the merged/closed wording was verified on the plugin side only (see
 With `pageUrl` absent the header is byte-for-byte the first form above. This is the only way
 `pageUrl` affects anything.
 
-### Agent metadata
+### Agent creation metadata
 
 - `config`: `{ provider, modeId?, thinkingOptionId? }`. `provider` is always the
   `provider/model` pair. `modeId` is omitted only when the resolution chain above ends at step 5.
@@ -589,7 +626,8 @@ With `pageUrl` absent the header is byte-for-byte the first form above. This is 
   send-to-paseo/origin = "graphite"
   ```
 
-Always creates a **new** agent — never reuses or messages an existing one.
+These fields apply when `dispatch` is `"new"`. With `dispatch: "main"`, the existing agent keeps
+its own title, provider, model and mode; only the composed prompt is sent to it.
 
 ---
 
@@ -637,9 +675,14 @@ Resolved after the first round of implementation, when both sides found these un
   candidate rather than merely documented as such; it was already declared optional, so nothing
   narrowed.
 
+  `agentDispatch` and candidate `mainAgent` on `/v1/resolve`, plus `agentCreated` and `dispatch`
+  on `/v1/send`, are additive under the same rule. Older bridges omit them and preserve the
+  new-agent behavior; older extensions ignore them. The contract therefore remains **1**.
+
 ## Test mode (how the extension is testable without Chrome)
 
 The plugin accepts `SEND_TO_PASEO_DRY_RUN=1` in its environment. When set, `POST /v1/send`
-performs full resolution and validation but creates nothing, returning the same 200 shape with
-`"dryRun": true` and synthetic `agentId`/`workspaceId`. This lets the extension's end-to-end
-test drive a real bridge without spawning agents.
+performs full resolution and validation but creates or sends nothing, returning the same 200
+shape with `"dryRun": true`. Creation paths use synthetic ids; reuse paths identify the real
+selected agent without messaging it. This lets the extension's end-to-end test drive a real
+bridge without spawning or changing agents.

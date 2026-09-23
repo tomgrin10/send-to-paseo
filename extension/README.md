@@ -412,7 +412,8 @@ search input and a `role="listbox"`.
   cannot read a stale list — it has to drive the real widget.
 
 Provider and Mode are still native `<select>`s. They are short, closed lists that nobody needs
-to search.
+to search, and render only when the selected target will start a new agent. In main-agent mode,
+the target summary names the existing root agent instead.
 
 ### Contract handling
 
@@ -433,14 +434,16 @@ Specific behaviours worth knowing:
   `machine` entirely, and that host is then labelled by its URL authority rather than treated as
   an error.
 - **`dryRun` is always present on a 200 send** and is surfaced distinctly: amber headline,
-  a `DRY RUN` badge, an explicit "nothing was created" note, and a relabelled deep link.
+  a `DRY RUN` badge, and an explicit "nothing was sent" note. A new-agent dry run labels its
+  synthetic deep link; a main-agent dry run links to the real, unchanged agent.
 - **`error.message` is plain prose; `hint` carries bare shell commands.** All code
   formatting happens client-side in `src/shared/format.ts`, against an exact-match list of
   known commands (`KNOWN_COMMANDS` in `src/shared/errors.ts`) rather than a regex that
   might mangle ordinary prose. Nothing from the bridge is ever parsed as HTML.
 - **`prompt` is 1..16000 Unicode code points** after trim, counted with `[...text].length`
   so an emoji counts as one. The 64 KiB body cap is separate and enforced by the bridge.
-- **Permission mode is a first-class field.** `/v1/ping` and `/v1/resolve` carry a flat
+- **Permission mode is a first-class field for newly created agents.** `/v1/ping` and
+  `/v1/resolve` carry a flat
   `modes[]` tagged with the provider each mode belongs to, `/v1/resolve` also carries
   `resolvedModeId`, and `/v1/send` carries `modeId`. Three rules follow from mode ids being
   **per provider**:
@@ -456,11 +459,19 @@ Specific behaviours worth knowing:
   dropdown with a `⚠` glyph, `data-stp-mode-danger="true"`, and the `--stp-warn` colour (which
   is defined for light and dark); selecting one renders a sentence saying the agent will not
   ask for permission. Hiding a dangerous option does not make it safer, it makes it invisible.
-- **Additive fields are ignored — in both directions.** `modes`, `resolvedModeId` and `modeId`
-  are all typed optional here, so a plugin that predates them simply omits them and the Mode
-  select does not render. Symmetrically, sending `modeId` to an older plugin is safe: the
+- **Main-agent reuse is additive.** `agentDispatch` and candidate `mainAgent` preview the reuse
+  decision; `agentCreated` and `dispatch` report what actually happened. All are optional in the
+  extension mirror, so an older plugin's absence is the original new-agent behavior.
+- **Additive fields are ignored — in both directions.** `modes`, `resolvedModeId`, `modeId`, and
+  the reuse fields are typed optional here. A plugin that predates modes simply omits them and the
+  Mode select does not render. Symmetrically, sending `modeId` to an older plugin is safe: the
   bridge's request schemas are non-strict, so an unknown field is stripped rather than
   rejected. Unknown error codes still render a specific headline naming the code.
+
+Resolution starts when the content script mounts the PR-page button and is reused for 45 seconds
+when the popover opens. This moves the project/workspace lookup off the click path. SPA navigation
+changes the cache key, and the uncached compatibility ping still runs inside every resolve/send
+intent; prewarming does not weaken the contract gate.
 
 ---
 

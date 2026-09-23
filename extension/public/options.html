@@ -195,6 +195,14 @@
       body[data-mode="simple"] .simple-only { display: block; }
       body[data-mode="simple"] .advanced-only { display: none !important; }
       body[data-mode="simple"] .hosts .host:not(:first-child) { display: none; }
+      body[data-mode="simple"] .host {
+        border: 0;
+        padding: 0;
+        background: transparent;
+      }
+      body[data-mode="simple"] .host > .simple-only,
+      body[data-mode="simple"] .hostClear { display: none; }
+      body[data-mode="simple"] .host .status { background: var(--bg); }
     </style>
   </head>
   <body>
@@ -206,29 +214,13 @@
         Send to Paseo
       </h1>
       <p class="sub">
-        The browser connects to one Primary Paseo machine. That machine can route sends to your
-        other Paseo machines without giving Chrome more network permissions.
+        Connect this browser once. Paseo discovers and routes to your other machines automatically.
       </p>
 
-      <section id="connectionMode">
-        <h2>Simple setup</h2>
-        <div class="row mode-choice">
-          <span>
-            <b>Browser machine → Primary Paseo machine</b>
-            <span class="help">
-              Recommended. The extension always uses <code>http://127.0.0.1:7788</code>. Add dev
-              VMs and other machines inside the Send to Paseo plugin on the Primary Paseo machine.
-            </span>
-          </span>
-          <button id="useSimple" class="primary" type="button">Use simple setup</button>
-        </div>
-      </section>
-
       <section id="hostsSection">
-        <h2 id="hostsHeading">Primary Paseo machine</h2>
+        <h2 id="hostsHeading">Connect to Paseo</h2>
         <span class="help" id="hostsHelp">
-          Copy the pairing token from Paseo on this browser machine. No Tailscale command, SSH
-          tunnel, remote URL, or Chrome permission is needed here.
+          Paste the pairing token shown by the Send to Paseo plugin on this machine.
         </span>
         <div class="hosts" id="hosts"></div>
         <div class="row">
@@ -246,7 +238,10 @@
             additional machine needs its own HTTPS private bridge address, pairing token, and exact
             Chrome site permission. Existing multi-machine setups remain here and keep working.
           </span>
-          <button id="useAdvanced" type="button">Use advanced direct connections</button>
+          <div class="row">
+            <button id="useAdvanced" type="button">Use advanced direct connections</button>
+            <button id="useSimple" type="button">Use automatic routing</button>
+          </div>
         </div>
       </details>
 
@@ -255,9 +250,7 @@
         <label class="field">
           <span class="lbl">Default provider</span>
           <span class="help">
-            The list comes from the bridges — <code>GET /v1/ping</code> with a valid token returns
-            every provider that Paseo host has configured. Run <b>Test all connections</b> to
-            refresh it. Applied to whichever host a send lands on, when that host offers it.
+            Optional. Leave this unchanged to follow the plugin&apos;s model choice.
           </span>
           <select id="defaultProvider" aria-label="Default provider">
             <option value="">(use the plugin's default)</option>
@@ -267,7 +260,7 @@
       </section>
 
       <footer>
-        Settings save as you type. Troubleshooting lives in <code>extension/README.md</code>.
+        Settings save automatically. Agent behavior and additional machines are configured in Paseo.
       </footer>
     </main>
 

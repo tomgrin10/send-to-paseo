@@ -174,6 +174,7 @@ export interface ResolvedProject {
 }
 
 export type CandidateReason = "exact" | "stack" | "project" | "create";
+export type AgentDispatch = "new" | "main";
 
 export interface Candidate {
   kind: "existing" | "create";
@@ -192,6 +193,8 @@ export interface Candidate {
    * missing value as "open" rather than as "unknown state".
    */
   stackPrState?: "open" | "merged" | "closed" | (string & {});
+  /** The root agent the bridge would reuse when main-agent dispatch is enabled. */
+  mainAgent?: { agentId: string; title: string; status: string };
 }
 
 export interface ResolveResponse {
@@ -207,6 +210,8 @@ export interface ResolveResponse {
    * own resolution chain. Null when it would omit the field entirely. Additive.
    */
   resolvedModeId?: string | null;
+  /** Additive plugin preference controlling whether sends create or reuse an agent. */
+  agentDispatch?: AgentDispatch;
   /** Additive router result returned by a primary Paseo machine. */
   routes?: ResolveRoute[];
 }
@@ -254,6 +259,10 @@ export interface SendResponse {
    */
   deepLink: string;
   title: string;
+  /** Additive; false when the message was dispatched to an existing agent. */
+  agentCreated?: boolean;
+  /** Additive; absent on plugins predating main-agent reuse. */
+  dispatch?: AgentDispatch;
   /**
    * ALWAYS present. `true` only when the plugin runs with
    * SEND_TO_PASEO_DRY_RUN=1, in which case nothing was created and

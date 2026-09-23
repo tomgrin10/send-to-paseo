@@ -542,6 +542,8 @@ export function SendToPaseoSettings({ theme, host, layout, navigation }: PluginS
   const [externalUrlDraft, setExternalUrlDraft] = useState<string | null>(null);
   const [connectionCodeDraft, setConnectionCodeDraft] = useState("");
   const [sharedCode, setSharedCode] = useState<string | null>(null);
+  const [showConnectionDetails, setShowConnectionDetails] = useState(false);
+  const [showAgentDefaults, setShowAgentDefaults] = useState(false);
   const [showAdvancedAccess, setShowAdvancedAccess] = useState(false);
   const [machineTests, setMachineTests] = useState<Record<string, string>>({});
   const [hostChecks, setHostChecks] = useState<Record<string, string>>({});
@@ -571,6 +573,16 @@ export function SendToPaseoSettings({ theme, host, layout, navigation }: PluginS
     onSuccess: () => {
       invalidate();
       toast.show("Default model saved", { variant: "success" });
+    },
+    onError: (error: unknown) => toast.error(error instanceof Error ? error.message : String(error)),
+  });
+
+  const saveDispatch = useMutation({
+    mutationFn: async (agentDispatch: "new" | "main") =>
+      update({ serverId: host.id, agentDispatch }),
+    onSuccess: () => {
+      invalidate();
+      toast.show("Agent destination saved", { variant: "success" });
     },
     onError: (error: unknown) => toast.error(error instanceof Error ? error.message : String(error)),
   });
@@ -752,12 +764,12 @@ export function SendToPaseoSettings({ theme, host, layout, navigation }: PluginS
       <View style={{ gap: 4 }}>
         <Text style={styles.title}>Send to Paseo</Text>
         <Text style={styles.muted}>
-          A local bridge that starts a Paseo agent in the workspace belonging to a pull request.
+          Send pull-request work to the right Paseo workspace.
         </Text>
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.heading}>Bridge</Text>
+        <Text style={styles.heading}>Connection</Text>
         {status === null ? (
           <Text style={styles.muted}>{query.isError ? "Status unavailable." : "Loading…"}</Text>
         ) : (
@@ -767,44 +779,59 @@ export function SendToPaseoSettings({ theme, host, layout, navigation }: PluginS
             </Text>
             {status.error === null ? null : <Text style={styles.danger}>{status.error}</Text>}
             <Text style={styles.muted}>
-              {status.paired ? "Paired" : "Not yet paired"} · {status.requestCount} request
-              {status.requestCount === 1 ? "" : "s"} · last {formatWhen(status.lastRequestAt)}
+              {hostDiscovery.hosts.length} Paseo machine
+              {hostDiscovery.hosts.length === 1 ? "" : "s"} discovered automatically.
             </Text>
-            <Text style={styles.muted}>
-              Daemon{" "}
-              {status.daemon.reachable
-                ? `reachable (${status.daemon.version ?? "unknown"})`
-                : "unreachable"}
-              {status.dryRun ? " · dry run enabled" : ""}
-            </Text>
-            <View style={styles.row}>
-              <Text style={styles.muted}>Port</Text>
-              <TextInput
-                value={portDraft ?? String(status.configuredPort)}
-                onChangeText={setPortDraft}
-                keyboardType="number-pad"
-                style={styles.input}
-                accessibilityLabel="Bridge port"
-              />
-              <Button
-                label="Save"
-                styles={styles}
-                primary
-                disabled={portDraft === null || savePort.isPending}
-                onPress={() => {
-                  const parsed = Number(portDraft);
-                  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
-                    toast.error("Enter a port between 1 and 65535.");
-                    return;
-                  }
-                  savePort.mutate(parsed);
-                }}
-              />
-            </View>
+            <Button
+              label={showConnectionDetails ? "Hide connection details" : "Advanced connection details"}
+              styles={styles}
+              onPress={() => setShowConnectionDetails(!showConnectionDetails)}
+            />
+            {showConnectionDetails ? (
+              <View style={{ gap: 8 }}>
+                <Text style={styles.muted}>
+                  {status.paired ? "Paired" : "Not yet paired"} · {status.requestCount} request
+                  {status.requestCount === 1 ? "" : "s"} · last {formatWhen(status.lastRequestAt)}
+                </Text>
+                <Text style={styles.muted}>
+                  Daemon{" "}
+                  {status.daemon.reachable
+                    ? `reachable (${status.daemon.version ?? "unknown"})`
+                    : "unreachable"}
+                  {status.dryRun ? " · dry run enabled" : ""}
+                </Text>
+                <View style={styles.row}>
+                  <Text style={styles.muted}>Port</Text>
+                  <TextInput
+                    value={portDraft ?? String(status.configuredPort)}
+                    onChangeText={setPortDraft}
+                    keyboardType="number-pad"
+                    style={styles.input}
+                    accessibilityLabel="Bridge port"
+                  />
+                  <Button
+                    label="Save"
+                    styles={styles}
+                    primary
+                    disabled={portDraft === null || savePort.isPending}
+                    onPress={() => {
+                      const parsed = Number(portDraft);
+                      if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
+                        toast.error("Enter a port between 1 and 65535.");
+                        return;
+                      }
+                      savePort.mutate(parsed);
+                    }}
+                  />
+                </View>
+              </View>
+            ) : null}
           </>
         )}
       </View>
 
+      {showConnectionDetails ? (
+        <>
       <View style={styles.card}>
         <Text style={styles.heading}>Paseo machines</Text>
         <Text style={styles.muted}>
@@ -999,12 +1026,15 @@ export function SendToPaseoSettings({ theme, host, layout, navigation }: PluginS
           </View>
         ) : null}
       </View>
+        </>
+      ) : null}
 
       {/*
         The most discoverable place to learn that gh is missing. Sending works
         without it, so this reads as information rather than as a failure — the
         card only turns loud for a dependency that is actually required.
       */}
+      {showConnectionDetails || dependencies.some((dependency) => dependency.state !== "ok") ? (
       <View style={styles.card}>
         <Text style={styles.heading}>Requirements</Text>
         {dependencies.length === 0 ? (
@@ -1020,6 +1050,7 @@ export function SendToPaseoSettings({ theme, host, layout, navigation }: PluginS
           ))
         )}
       </View>
+      ) : null}
 
       <View style={styles.card}>
         <Text style={styles.heading}>Pairing token</Text>
@@ -1048,6 +1079,56 @@ export function SendToPaseoSettings({ theme, host, layout, navigation }: PluginS
         </View>
       </View>
 
+      <View style={styles.card}>
+        <Text style={styles.heading}>Agent destination</Text>
+        <Text style={styles.muted}>
+          Choose whether each send starts fresh or continues the workspace&apos;s main agent.
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Start a new agent for every send"
+          onPress={() => saveDispatch.mutate("new")}
+          style={(status?.agentDispatch ?? "new") === "new" ? styles.selectedRow : undefined}
+        >
+          <View style={{ paddingVertical: 6 }}>
+            <Text style={styles.body}>
+              {(status?.agentDispatch ?? "new") === "new" ? "● " : "○ "}New agent
+            </Text>
+            <Text style={styles.muted}>Start a separate agent for every send.</Text>
+          </View>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Continue the main agent in the target workspace"
+          onPress={() => saveDispatch.mutate("main")}
+          style={status?.agentDispatch === "main" ? styles.selectedRow : undefined}
+        >
+          <View style={{ paddingVertical: 6 }}>
+            <Text style={styles.body}>
+              {status?.agentDispatch === "main" ? "● " : "○ "}Main workspace agent
+            </Text>
+            <Text style={styles.muted}>
+              Reuse the best root agent in that workspace. Prefers one named Main, then an open,
+              active, or recently used agent; subagents are ignored. Starts fresh if none exists.
+            </Text>
+          </View>
+        </Pressable>
+        {status?.agentDispatch === "main" ? (
+          <View style={{ gap: 6 }}>
+            <Text style={styles.muted}>
+              Profile, model, and permission defaults only apply if no main agent exists.
+            </Text>
+            <Button
+              label={showAgentDefaults ? "Hide fallback agent defaults" : "Fallback new-agent defaults"}
+              styles={styles}
+              onPress={() => setShowAgentDefaults(!showAgentDefaults)}
+            />
+          </View>
+        ) : null}
+      </View>
+
+      {(status?.agentDispatch ?? "new") === "new" || showAgentDefaults ? (
+        <>
       <View style={styles.card}>
         <Text style={styles.heading}>Agent profile</Text>
         <Text style={styles.muted}>
@@ -1112,6 +1193,8 @@ export function SendToPaseoSettings({ theme, host, layout, navigation }: PluginS
           />
         )}
       </View>
+        </>
+      ) : null}
 
       <View style={styles.card}>
         <View style={{ ...styles.row, justifyContent: "space-between" }}>

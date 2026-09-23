@@ -1,5 +1,20 @@
 # Verification log — `send-to-paseo` plugin
 
+## 2026-09-23 — configurable main-agent dispatch
+
+The worktree typechecks with `agentDispatch: "new" | "main"` kept additive on the HTTP boundary.
+Six focused tests cover root-agent eligibility, explicit Main titles, open tabs, runtime/activity
+fallbacks, deterministic ties, and display/provider helpers. The existing cache and dependency
+checks and host-client tests remain green.
+
+```text
+$ cd plugin && npm run verify
+74/74 server checks passed
+13/13 node tests passed (7 host-client + 6 main-agent)
+```
+
+No plugin reload, daemon restart, or real send was performed for this worktree verification.
+
 ## 2026-09-22 — Paseo 0.9 host discovery and explicit targeting
 
 The plugin now requires Paseo 0.9.0 and imports `useHosts()` plus
@@ -149,7 +164,7 @@ $ cd plugin && npm run typecheck
 > tsc --noEmit
 
 $ node check-deps.mjs
-54/54 checks passed
+55/55 checks passed
 
 $ cd extension && npm run typecheck && npm run build
 > send-to-paseo-extension@1.0.3 typecheck

@@ -1,21 +1,20 @@
 # send-to-paseo
 
 A Paseo plugin that runs a small local HTTP bridge so a browser extension can
-say "start an agent on this pull request" and have it happen in the workspace
-that actually belongs to that PR — creating a worktree checked out to the PR if
-none exists.
+send work from a pull request to the right workspace and agent — creating a
+worktree checked out to the PR if none exists.
 
-![The Send to Paseo composer open on a live github.com pull request — rails/rails #58627, state Open, merging Shopify:actionpack-singleton-class-attrs into rails:main — with the button anchored in GitHub's own PR header action row beside Code, and the popover below it showing the resolved target workspace, the target picker, the typed instruction "Fix the flaky test in this PR", the Provider and Mode selects, and the Cmd-Enter / Esc footer with Send enabled](../docs/screenshots/hero-github-pr-popover.png)
+![The Send to Paseo composer open on a live github.com pull request — rails/rails #58627, state Open, merging Shopify:actionpack-singleton-class-attrs into rails:main — with the button anchored in GitHub's own PR header action row beside Code, and the popover below it showing the resolved target workspace, the target picker, the typed instruction "Fix the flaky test in this PR", the Provider and Mode selects, and the Cmd-Enter / Esc footer with Send enabled](https://raw.githubusercontent.com/tomgrin10/send-to-paseo/main/docs/screenshots/hero-github-pr-popover.png)
 
 The extension never talks to the Paseo daemon. It talks only to this bridge,
-which speaks the frozen API in [`../CONTRACT.md`](../CONTRACT.md) and reaches
+which speaks the frozen API in [the repository contract](https://github.com/tomgrin10/send-to-paseo/blob/main/CONTRACT.md) and reaches
 Paseo through the supported SDK.
 
 - Bridge: `http://127.0.0.1:7788`, loopback only, bearer token required.
-- Surface: **Send to Paseo** in the Paseo sidebar — status, token, default model,
-  recent sends.
-- Verified behaviour, with real command output:
-  [`VERIFICATION.md`](VERIFICATION.md).
+- Surface: **Send to Paseo** in the Paseo sidebar — status, token, agent destination,
+  new-agent defaults, recent sends.
+- Verified behaviour, with real command output, is recorded in the
+  [repository](https://github.com/tomgrin10/send-to-paseo/blob/main/plugin/VERIFICATION.md).
 
 ---
 
@@ -110,19 +109,17 @@ Plugins are trusted, unsandboxed code: this one runs an HTTP server that can
 start agents which execute arbitrary code on the daemon machine. Read the source
 before installing it.
 
-One command, straight from the public repository. No clone, no `npm install`, no
-build step:
+One command from npm. No clone or build step:
 
 ```sh
-paseo plugin add tomgrin10/send-to-paseo --path plugin --ref v1.2.0
+paseo plugin install npm:send-to-paseo@1.3.0
 paseo plugin ls          # expect: send-to-paseo  running  yes
 paseo plugin logs send-to-paseo
 ```
 
-`paseo plugin add` clones the repo into `~/.paseo/plugins/`, compiles the plugin
-itself, and starts it. `--path plugin` points it at this directory inside the
-repo; `--ref <branch|tag|commit>` pins a revision. `pluginsEnabled` must already
-be `true` in the daemon's `config.json`.
+The same release is available directly from Git with
+`paseo plugin add tomgrin10/send-to-paseo --path plugin --ref v1.3.0`.
+`pluginsEnabled` must already be `true` in the daemon's `config.json`.
 
 There is nothing to install because the plugin imports nothing at runtime that
 the Paseo host does not already provide — see
@@ -203,6 +200,7 @@ All of it lives in the Paseo surface; there is no config file to hunt for.
 | Paseo host discovery | automatic | Paseo 0.9 supplies every configured host and live status, including offline hosts. “Check Paseo access” always calls `getPaseoClient(serverId)` for that exact row. |
 | Additional browser routes | none | Connections imported from `stp1_…` codes. These remain necessary only because host discovery exposes neither a private bridge URL nor its token; the Primary plugin resolves and sends through these bridges. |
 | Pairing token | generated on first run | 32 random bytes, base64url. |
+| Agent destination | `New agent` | Start a fresh agent, or reuse the best non-archived root agent in an existing target workspace. A create target and a workspace with no eligible root still start a new agent. |
 | Default model | the daemon's own default | `provider/model`, e.g. `claude/claude-opus-5`. A send may override it per request. |
 | Agent profile | none | One of your saved Paseo profiles (`daemon.agentProfiles`), followed by id. |
 | Default permission mode | follow Paseo | A mode id, e.g. `auto`. Mode ids are per provider. |
@@ -347,7 +345,7 @@ Claude's provider fall back to `modeId: "default"` — the app's **"Always Ask"*
 so every agent it started came up in the strictest mode no matter what the user's
 own default was.
 
-Now the mode is resolved on every send, in this order, with **every candidate
+When a send creates an agent, the mode is resolved in this order, with **every candidate
 validated against the chosen provider's advertised modes** before it is accepted:
 
 1. `modeId` on the `/v1/send` request (the popover's explicit choice);
@@ -389,7 +387,7 @@ Two precedence rules worth stating outright:
 
 | Variable | Effect |
 | --- | --- |
-| `SEND_TO_PASEO_DRY_RUN=1` | `POST /v1/send` resolves and validates everything but creates nothing, returning the same `200` shape with `"dryRun": true` and synthetic ids. |
+| `SEND_TO_PASEO_DRY_RUN=1` | `POST /v1/send` resolves and validates everything but creates or messages nothing, returning the same `200` shape with `"dryRun": true`. New-agent paths use synthetic ids; main-agent paths identify the real unchanged agent. |
 | `SEND_TO_PASEO_DAEMON_PASSWORD` | Password for a daemon that requires one. Checked before `PASEO_PASSWORD`, the VM secret file and `daemonPassword` in settings.json. See [A daemon that requires a password](#a-daemon-that-requires-a-password). |
 | `SEND_TO_PASEO_GH_PATH` | Absolute path to the `gh` binary, if it is somewhere unusual. Checked before `PATH`. |
 | `SEND_TO_PASEO_GIT_PATH` | Same for `git`. |
@@ -456,8 +454,8 @@ Full request and response schemas, error codes and CORS rules are in
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
 | `GET` | `/v1/ping` | optional | Health, version, daemon reachability. With a valid token it also validates that token and returns the provider and mode lists. |
-| `POST` | `/v1/resolve` | bearer | PR metadata, the Paseo project, ranked workspace candidates, provider list, mode list and the resolved mode. Creates nothing. |
-| `POST` | `/v1/send` | bearer | Ensures the workspace and starts a **new** agent. The only mutating endpoint. |
+| `POST` | `/v1/resolve` | bearer | PR metadata, the Paseo project, ranked workspace candidates, provider/mode defaults, dispatch preference, and optional main-agent previews. Creates nothing. |
+| `POST` | `/v1/send` | bearer | Ensures the workspace, then starts a new agent or messages the selected main agent. The only mutating endpoint. |
 
 `/v1/ping` is the only endpoint where auth is optional, and it is not ignored:
 
@@ -488,8 +486,9 @@ curl -s -X POST http://127.0.0.1:7788/v1/send \
        "modeId":"auto"}'
 ```
 
-`/v1/resolve` reports the mode a send would actually use, so the popover can
-preselect what will happen rather than guess:
+For a new-agent send, `/v1/resolve` reports the mode it would actually use, so the popover can
+preselect what will happen rather than guess. In main-agent mode the popover hides model/mode
+controls because they cannot change an existing agent:
 
 ```sh
 $ curl -s -X POST http://127.0.0.1:7788/v1/resolve \
@@ -655,9 +654,12 @@ branch is behind by construction. Establishing the state reuses the resolve
 path's caches, so it is normally a cache read rather than a `gh` call, and a null
 answer just keeps the generic wording.
 
-`target: {kind:"existing"}` starts the agent through that workspace's own handle,
-so it joins that workspace record rather than being given a fresh one for the
-same directory.
+`target: {kind:"existing"}` stays in that exact workspace. With **New agent**, creation goes
+through the workspace's own handle so it joins that workspace record. With **Main workspace
+agent**, the plugin considers only non-archived root agents in the workspace: an exact `Main` or
+`Main Agent` title wins, then an open Paseo tab, live status, and recent activity. A non-empty
+`paseo.parent-agent-id` marks a delegated subagent and excludes it. The composed prompt is sent
+with steering behavior so a running turn is preserved rather than interrupted.
 
 `target: {kind:"create"}` asks Paseo for a worktree checked out to the PR — the
 same request `paseo workspace create --isolation worktree --mode checkout-pr
@@ -682,18 +684,20 @@ paseo.workspaces.create({
 > reports the branch actually checked out, which is the truthful value to
 > display.
 
-Every send creates a brand new agent — never reuses or messages an existing one:
+When a send creates a new agent, it uses:
 
 - `title`: `PR #942 · <first line of the message, ≤60 chars>`
 - `labels`: `send-to-paseo/pr = "github:owner/repo#942"` and
   `send-to-paseo/origin = "graphite"`
 - `prompt`: the CONTRACT.md context header, then a blank line, then the user's
   text verbatim
-- `deepLink`: built with `buildAgentDeepLink` from
-  `@getpaseo/protocol/agent-deep-link`, giving
-  `paseo://h/<serverId>/agent/<agentId>`. `serverId` is read at runtime from the
-  daemon's `/api/status`.
+- `deepLink`: built by the plugin's local, protocol-compatible `buildAgentDeepLink`, giving
+  `paseo://h/<serverId>/agent/<agentId>`.
 - `dryRun`: always present, `false` on a real send.
+
+If main-agent mode finds no eligible root, it follows that same creation path. A successful reuse
+instead returns `agentCreated: false`, `dispatch: "main"`, and the existing agent's title and deep
+link. New-agent and fallback paths return `agentCreated: true`, `dispatch: "new"`.
 
 `prompt` is validated as 1..16000 **Unicode code points after trim**, so an emoji counts once.
 The 64 KiB byte cap on the body is independent and is applied first, so a prompt inside the
@@ -834,7 +838,8 @@ client/settings.tsx        the Paseo surface
 client/hosts.ts            discovered-host correlation and explicit client checks
 server/bridge.ts           HTTP server, security checks and routing
 server/resolve.ts          PR -> project -> workspace resolution and ranking
-server/send.ts             workspace ensure + agent create + prompt composition
+server/main-agent.ts       paginated root-agent discovery and deterministic selection
+server/send.ts             workspace ensure + agent create/reuse + prompt composition
 server/deps.ts             binary lookup, spawn wrapper, dependency self-check
 server/gh.ts               gh calls and their graceful degradation, cached
 server/git.ts              read-only branch, remote, trunk and ancestry reads
