@@ -43,14 +43,14 @@ Requires Paseo 0.9.0 or newer with plugins enabled, and `git`.
 **Plugin:**
 
 ```sh
-paseo plugin install npm:send-to-paseo@1.3.0
+paseo plugin install npm:send-to-paseo
 paseo plugin ls        # send-to-paseo must read `running` and `yes`
 ```
 
 Or install the same release directly from Git:
 
 ```sh
-paseo plugin add tomgrin10/send-to-paseo --path plugin --ref v1.3.0
+paseo plugin add tomgrin10/send-to-paseo --path plugin
 ```
 
 If plugins are disabled, turn them on in **Settings → Plugins** first.
@@ -156,8 +156,9 @@ which login user is allowed; a rejected user cannot be fixed by this plugin.
 - **A button on the pull-request page**, in the PR header next to the site's own actions. It
   re-targets as you navigate between PRs, so a stale PR number can never be sent.
 - **The composer popover**, with the resolved target, a searchable picker holding every
-  alternative — type a workspace name, a branch, a PR number, or a machine name. New-agent mode
-  also shows provider and mode pickers; main-agent mode shows the exact reusable agent instead.
+  alternative — type a workspace name, a branch, a PR number, or a machine name — plus an Agent
+  dropdown for choosing **Create a new agent** or **Use main agent** on this send. New-agent mode
+  shows provider and mode pickers; main-agent mode shows the exact reusable agent instead.
   With more than one host paired, every row names its machine and the resolved target line leads
   with it. ⌘↵ sends, Esc closes. Resolution begins when the page button appears, so opening
   the composer normally has no workspace lookup wait.
@@ -194,11 +195,11 @@ The default target is the exact match, else the nearest stack workspace — open
 merged ones — else create; across hosts, it is whichever host's own default ranks best, so a
 machine that would only create a worktree never beats one that already has it.
 
-In main-agent mode, the plugin considers only non-archived root agents in that exact workspace.
+For **Use main agent**, the plugin considers only non-archived root agents in that exact workspace.
 An agent explicitly titled **Main** wins, then one open in a Paseo tab, then a live and recently
 used root agent. If there is no eligible root agent — or the target is a newly created worktree —
-the plugin starts a fresh agent instead. Provider and permission settings apply only to those new
-agents.
+the dropdown allows only **Create a new agent**. The saved plugin preference initializes the
+dropdown but each send can override it. Provider and permission settings apply only to new agents.
 
 When the target sits on a sibling branch, the composer says so, says whether that branch has
 landed, and the agent's prompt names the branch the change belongs on.

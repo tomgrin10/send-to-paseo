@@ -400,12 +400,13 @@ first entry would silently pick "Always Ask".
 popover, the extension must re-pick from `modes` filtered to the new provider — the resolved
 value from a different provider is not transferable.
 
-`agentDispatch` is additive and optional. Missing means the historical `"new"` behavior.
-`"new"` starts a fresh agent for every send. `"main"` asks the plugin to reuse the target
-workspace's selected root agent when possible. In that mode an existing candidate may carry an
-additive `mainAgent` preview (`agentId`, display `title`, and current `status`). Its absence means
-no eligible root agent was found, so sending to that candidate will start a new one. A create
-candidate always starts a new workspace and agent.
+`agentDispatch` is additive and optional. Missing means the historical `"new"` default.
+It initializes the extension's per-send Agent dropdown: `"new"` starts fresh, while `"main"`
+prefers the target workspace's selected root agent. Independently of that default, an existing
+candidate may carry an additive `mainAgent` preview (`agentId`, display `title`, and current
+`status`) so the extension can offer reuse. Its absence means no eligible root agent was found,
+so the main option is unavailable and sending starts a new one. A create candidate always starts
+a new workspace and agent.
 
 The bridge selects a main agent only among non-archived agents in the exact workspace that do not
 carry a non-empty `paseo.parent-agent-id` label; delegated subagents are never eligible. It then
@@ -432,6 +433,7 @@ Creates an agent or messages the selected main agent. This is the only mutating 
   "number": 942,
   "prompt": "Fix merge conflicts",
   "target": { "kind": "existing", "workspaceId": "wks_4d1a8b7c2e0f9351" },
+  "agentDispatch": "main",
   "provider": "claude/claude-opus-5",
   "modeId": "auto",
   "pageUrl": "https://app.graphite.com/github/pr/acmegizmos/gizmo-poc/942/GIZ-1133-..."
@@ -449,8 +451,11 @@ value names an Additional Paseo machine configured on the Primary plugin; the Pr
 and proxies the send to that machine with `?local=1`. Unknown or disabled ids are rejected rather
 than silently falling back to the local machine.
 
-`prompt` is required, 1..16000 chars after trim. `provider` optional — falls back to the plugin's
-configured default. `modeId` optional, bounded exactly like `provider` (1..200 chars).
+`prompt` is required, 1..16000 chars after trim. `agentDispatch` is optional: `"new"` creates a
+fresh agent, `"main"` reuses the selected existing workspace's eligible root agent when present,
+and missing preserves the plugin's configured preference. A create target always creates an agent.
+`provider` optional — falls back to the plugin's configured default. `modeId` optional, bounded
+exactly like `provider` (1..200 chars).
 `pageUrl` optional, used only to enrich the agent's opening prompt.
 
 ### Permission mode resolution (`modeId`)
@@ -476,8 +481,9 @@ the profile from supplying a `modeId`, and naming a `modeId` does not stop the p
 supplying the provider. But an explicit `provider` always beats the profile's provider: the
 popover's visible choice is never silently overridden.
 
-Provider/profile/mode resolution applies only when the plugin creates an agent. When
-`agentDispatch` is `"main"` and the target is an existing workspace with an eligible root agent,
+Provider/profile/mode resolution applies only when the plugin creates an agent. When the request's
+effective `agentDispatch` (its per-send value, otherwise the plugin preference) is `"main"` and
+the target is an existing workspace with an eligible root agent,
 the plugin sends the composed prompt to that agent instead; request `provider` and `modeId` do not
 change an existing agent. The send uses steering behavior so an active turn is preserved rather
 than implicitly interrupted. If listing agents fails, the send fails rather than silently
@@ -675,9 +681,10 @@ Resolved after the first round of implementation, when both sides found these un
   candidate rather than merely documented as such; it was already declared optional, so nothing
   narrowed.
 
-  `agentDispatch` and candidate `mainAgent` on `/v1/resolve`, plus `agentCreated` and `dispatch`
-  on `/v1/send`, are additive under the same rule. Older bridges omit them and preserve the
-  new-agent behavior; older extensions ignore them. The contract therefore remains **1**.
+  `agentDispatch` and candidate `mainAgent` on `/v1/resolve`, the optional per-send
+  `agentDispatch` request field, plus `agentCreated` and `dispatch` on `/v1/send`, are additive
+  under the same rule. Older bridges strip the request override and use their saved preference;
+  older extensions ignore the response fields. The contract therefore remains **1**.
 
 ## Test mode (how the extension is testable without Chrome)
 

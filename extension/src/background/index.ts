@@ -271,6 +271,7 @@ async function handle(intent: Intent): Promise<Result<unknown>> {
         prompt,
         target: intent.target,
       };
+      if (intent.agentDispatch) body.agentDispatch = intent.agentDispatch;
       if (intent.provider) body.provider = intent.provider;
       if (intent.modeId) body.modeId = intent.modeId;
       if (intent.pageUrl) body.pageUrl = intent.pageUrl;

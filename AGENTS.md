@@ -381,7 +381,7 @@ fixture at a real repository — every screenshot in `docs/screenshots/` is comm
 | 11 | The bearer token is unreachable from the page — DOM, shadow roots, attributes, `window`, both storages, plus a static scan of the built bundles. |
 | 12 | Every bridge security rule: Origin on preflight and real request, Host, body cap, rate limit and its keying. |
 | 13 | The live bridge, read-only. The only test that proves the real plugin and the real extension agree. |
-| 17b | Main-agent dispatch previews the exact reusable root agent, hides new-agent-only provider/mode controls, and reports reuse truthfully after send. |
+| 17b | The Agent dropdown initializes from the plugin preference, switches both ways, previews the reusable root agent, toggles new-agent-only provider/mode controls, sends the per-request override, and reports both outcomes truthfully. |
 | 18 | No fixture host, test port or `dist-test` in a shipping artifact. The default required origin stays `127.0.0.1:7788`; loopback alternates and HTTPS proxy hosts appear only as optional permission patterns or user-entered examples. |
 | 18b2 | Simple routing: one stored Primary browser bridge expands two machine slices, and an Additional-machine target sends once to the Primary with the exact `routeId`. |
 | 19, 19b, 28, 28b | Keyboard containment on Graphite and on GitHub, with faithful stand-ins for both shortcut layers. `19b`/`28b` cover the Target combobox's own search input, which is a second text-entry surface inside the same shadow root and would otherwise be assumed covered rather than proved covered. |

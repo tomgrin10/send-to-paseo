@@ -1,7 +1,7 @@
 # Send to Paseo — Chrome extension (MV3)
 
 Puts a **Send to Paseo** button on Graphite **and github.com** PR pages. Click it, type an
-instruction, and a new Paseo agent starts in the workspace that belongs to that PR's branch —
+instruction, and choose whether a new Paseo agent starts or the workspace's main agent continues —
 creating a worktree workspace if none exists.
 
 | Site | Content-script match | Anchor |
@@ -411,9 +411,11 @@ search input and a `role="listbox"`.
   `data-stp-combo-empty`. Option rows exist **only while the dropdown is open**, so a test
   cannot read a stale list — it has to drive the real widget.
 
-Provider and Mode are still native `<select>`s. They are short, closed lists that nobody needs
-to search, and render only when the selected target will start a new agent. In main-agent mode,
-the target summary names the existing root agent instead.
+Agent, Provider and Mode are native `<select>`s. They are short, closed lists that nobody needs
+to search. Agent chooses **Create a new agent** or **Use main agent** for this send, initialized
+from the selected host's plugin preference. Provider and Mode render only when the selected
+target will start a new agent; when reusing main, the target summary names that root agent instead.
+Create targets and workspaces without a reusable root agent disable the unavailable main option.
 
 ### Contract handling
 
@@ -459,9 +461,10 @@ Specific behaviours worth knowing:
   dropdown with a `⚠` glyph, `data-stp-mode-danger="true"`, and the `--stp-warn` colour (which
   is defined for light and dark); selecting one renders a sentence saying the agent will not
   ask for permission. Hiding a dangerous option does not make it safer, it makes it invisible.
-- **Main-agent reuse is additive.** `agentDispatch` and candidate `mainAgent` preview the reuse
-  decision; `agentCreated` and `dispatch` report what actually happened. All are optional in the
-  extension mirror, so an older plugin's absence is the original new-agent behavior.
+- **Main-agent reuse is additive.** Resolve `agentDispatch` initializes the dropdown, candidate
+  `mainAgent` says whether reuse is available, and the optional send `agentDispatch` overrides the
+  saved preference for one request. `agentCreated` and response `dispatch` report what actually
+  happened. All are optional in the extension mirror, so an older plugin keeps its former behavior.
 - **Additive fields are ignored — in both directions.** `modes`, `resolvedModeId`, `modeId`, and
   the reuse fields are typed optional here. A plugin that predates modes simply omits them and the
   Mode select does not render. Symmetrically, sending `modeId` to an older plugin is safe: the

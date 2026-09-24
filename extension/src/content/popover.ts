@@ -20,6 +20,7 @@
  */
 
 import type {
+  AgentDispatch,
   Candidate,
   Mode,
   PrRef,
@@ -150,6 +151,7 @@ class Popover {
 
   private draft = "";
   private candidateIndex = 0;
+  private agentDispatch: AgentDispatch = "new";
   private providerId = "";
   private modeId = "";
   private defaultProviderPref = "";
@@ -291,12 +293,17 @@ class Popover {
   }
 
   private willReuseMain(): boolean {
+    return this.effectiveAgentDispatch() === "main";
+  }
+
+  /** A create target, or an existing workspace without a root agent, can only
+   *  start a new agent. Keep the user's preference in memory so switching back
+   *  to a reusable workspace restores it, but never send an impossible choice. */
+  private effectiveAgentDispatch(): AgentDispatch {
     const candidate = this.selectedCandidate();
-    return (
-      candidate?.kind === "existing" &&
-      candidate.mainAgent !== undefined &&
-      this.selectedSlice()?.resolved?.agentDispatch === "main"
-    );
+    return candidate?.kind === "existing" && candidate.mainAgent !== undefined
+      ? this.agentDispatch
+      : "new";
   }
 
   /** True once more than one host is configured, which is what turns on the
@@ -324,6 +331,7 @@ class Popover {
    */
   private syncProviderToSelectedHost(): void {
     const resolved = this.selectedSlice()?.resolved;
+    this.agentDispatch = resolved?.agentDispatch ?? "new";
     this.providerId = pickProvider(resolved?.providers ?? [], this.defaultProviderPref);
     this.modeId = pickMode(
       resolved?.modes ?? [],
@@ -377,6 +385,7 @@ class Popover {
       pr: this.ctx.pr,
       prompt,
       target,
+      agentDispatch: this.effectiveAgentDispatch(),
       provider: this.providerId || undefined,
       modeId: this.modeId || undefined,
       pageUrl: this.ctx.pageUrl,
@@ -569,6 +578,37 @@ class Popover {
     // the missing workspace had been deleted.
     for (const note of this.renderHostFailures(resolved)) body.append(note);
 
+    /* Agent destination — a per-send choice. The selected host's saved plugin
+       preference is only the initial value; changing this does not mutate it. */
+    const candidate = this.selectedCandidate();
+    const canReuseMain = candidate?.kind === "existing" && candidate.mainAgent !== undefined;
+    const agentSelect = el("select", {
+      "data-stp-agent-dispatch": "",
+      "aria-label": "Agent destination",
+    }) as HTMLSelectElement;
+    agentSelect.append(
+      el("option", { value: "new" }, ["Create a new agent"]),
+      el(
+        "option",
+        { value: "main", ...(canReuseMain ? {} : { disabled: "" }) },
+        [canReuseMain ? "Use main agent" : "Use main agent (none available)"],
+      ),
+    );
+    agentSelect.value = this.effectiveAgentDispatch();
+    agentSelect.addEventListener("change", () => {
+      this.agentDispatch = agentSelect.value === "main" ? "main" : "new";
+      this.draft = this.textarea?.value ?? this.draft;
+      this.render();
+      this.position();
+      this.textarea?.focus();
+    });
+    body.append(
+      el("label", { class: "field" }, [
+        el("span", { class: "lbl" }, ["Agent"]),
+        agentSelect,
+      ]),
+    );
+
     /* Instruction */
     const ta = el("textarea", {
       placeholder: "Fix merge conflicts",
@@ -750,7 +790,7 @@ class Popover {
     );
     box.append(sub);
 
-    if (hostResolved.agentDispatch === "main") {
+    if (this.effectiveAgentDispatch() === "main") {
       if (c.kind === "existing" && c.mainAgent) {
         box.append(
           el("span", { class: "sub", "data-stp-main-agent": c.mainAgent.agentId }, [

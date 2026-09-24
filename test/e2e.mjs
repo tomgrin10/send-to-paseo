@@ -840,11 +840,13 @@ await test("4. Resolution warms before open; popover renders target + candidates
       triggerPopup: trigger.getAttribute("aria-haspopup"),
       triggerExpanded: trigger.getAttribute("aria-expanded"),
       nativeSelects: [...root.querySelectorAll("select")].map((el) =>
-        el.getAttribute("data-stp-provider") !== null
-          ? "provider"
-          : el.getAttribute("data-stp-mode") !== null
-            ? "mode"
-            : el.outerHTML.slice(0, 40),
+        el.getAttribute("data-stp-agent-dispatch") !== null
+          ? "agent"
+          : el.getAttribute("data-stp-provider") !== null
+            ? "provider"
+            : el.getAttribute("data-stp-mode") !== null
+              ? "mode"
+              : el.outerHTML.slice(0, 40),
       ),
       panelHidden: root.querySelector("[data-stp-combo-panel]").hasAttribute("hidden"),
       optionsWhileClosed: root.querySelectorAll("[data-stp-combo-option]").length,
@@ -869,12 +871,12 @@ await test("4. Resolution warms before open; popover renders target + candidates
   assertEq(ui.prref, "acmegizmos/gizmo-poc #942", "header PR reference");
 
   /* The Target picker is non-native. Closed, it is a button — no <select>, no
-     <option>, nothing for the OS to draw — and Provider/Mode are still the two
+     <option>, nothing for the OS to draw. Agent, Provider and Mode are short
      native selects on the card. */
   assertEq(ui.triggerTag, "button", "the Target trigger must not be a <select>");
   assertEq(ui.triggerPopup, "listbox", "trigger must advertise its popup");
   assertEq(ui.triggerExpanded, "false", "trigger starts collapsed");
-  assertEq(ui.nativeSelects, ["provider", "mode"], "the only native selects left are Provider and Mode");
+  assertEq(ui.nativeSelects, ["agent", "provider", "mode"], "the native selects are Agent, Provider and Mode");
   assert(ui.panelHidden, "the dropdown panel is hidden until opened");
   assertEq(ui.optionsWhileClosed, 0, "no option rows exist while the dropdown is closed");
   assert(ui.trigger.includes("brawny-dodo"), `trigger shows the committed candidate: ${ui.trigger}`);
@@ -1005,6 +1007,7 @@ await test("6. Send posts a correctly-shaped /v1/send body; success shows the de
   assertEq(req.body.number, 942, "number");
   assertEq(req.body.prompt, prompt, "prompt is passed through verbatim");
   assertEq(req.body.target, { kind: "existing", workspaceId: "wks_4d1a8b7c2e0f9351" }, "target");
+  assertEq(req.body.agentDispatch, "new", "agent destination");
   assertEq(req.body.provider, "claude/claude-opus-5", "provider");
   // The bridge's resolvedModeId, preselected and sent back verbatim.
   assertEq(req.body.modeId, "auto", "modeId");
@@ -1012,7 +1015,7 @@ await test("6. Send posts a correctly-shaped /v1/send body; success shows the de
     req.body.pageUrl?.includes("/github/pr/acmegizmos/gizmo-poc/942/"),
     `pageUrl should be the Graphite page URL, got ${req.body.pageUrl}`,
   );
-  assertEq(Object.keys(req.body).sort(), ["forge", "modeId", "number", "owner", "pageUrl", "prompt", "provider", "repo", "target"], "send body keys");
+  assertEq(Object.keys(req.body).sort(), ["agentDispatch", "forge", "modeId", "number", "owner", "pageUrl", "prompt", "provider", "repo", "target"], "send body keys");
 
   const ui = await page.evaluate(() => {
     const root = document.querySelector("send-to-paseo-popover").shadowRoot;
@@ -1989,7 +1992,7 @@ await test("17. dryRun: true is surfaced distinctly from a real send", async () 
   }
 });
 
-await test("17b. Main-agent dispatch is previewed and reported without new-agent controls", async () => {
+await test("17b. Agent dropdown overrides the saved destination for each send", async () => {
   await bridgeReset();
   await bridgeConfig({ agentDispatch: "main" });
   try {
@@ -2001,15 +2004,49 @@ await test("17b. Main-agent dispatch is previewed and reported without new-agent
 
     const ready = await page.evaluate(() => {
       const root = document.querySelector("send-to-paseo-popover").shadowRoot;
+      const agent = root.querySelector("[data-stp-agent-dispatch]");
       return {
+        agentValue: agent?.value ?? null,
+        agentOptions: [...(agent?.options ?? [])].map((option) => ({
+          value: option.value,
+          text: option.textContent,
+          disabled: option.disabled,
+        })),
         main: root.querySelector("[data-stp-main-agent]")?.textContent.trim() ?? null,
         provider: root.querySelector("[data-stp-provider]") !== null,
         mode: root.querySelector("[data-stp-mode]") !== null,
       };
     });
+    assertEq(ready.agentValue, "main", "the plugin preference initializes the dropdown");
+    assertEq(
+      ready.agentOptions.map(({ value, text }) => ({ value, text })),
+      [
+        { value: "new", text: "Create a new agent" },
+        { value: "main", text: "Use main agent" },
+      ],
+      "both per-send destinations are offered",
+    );
     assert(ready.main?.includes("Main") && ready.main.includes("idle"), `main preview: ${ready.main}`);
     assertEq(ready.provider, false, "provider is irrelevant when reusing an agent");
     assertEq(ready.mode, false, "permission mode is irrelevant when reusing an agent");
+
+    await page.locator("[data-stp-agent-dispatch]").selectOption("new");
+    const fresh = await page.evaluate(() => {
+      const root = document.querySelector("send-to-paseo-popover").shadowRoot;
+      return {
+        value: root.querySelector("[data-stp-agent-dispatch]").value,
+        main: root.querySelector("[data-stp-main-agent]") !== null,
+        provider: root.querySelector("[data-stp-provider]") !== null,
+        mode: root.querySelector("[data-stp-mode]") !== null,
+      };
+    });
+    assertEq(fresh.value, "new", "the user can override the preference for this send");
+    assertEq(fresh.main, false, "new-agent choice removes the reuse preview");
+    assertEq(fresh.provider, true, "new-agent choice restores the provider picker");
+    assertEq(fresh.mode, true, "new-agent choice restores the permission picker");
+
+    await page.locator("[data-stp-agent-dispatch]").selectOption("main");
+    await shot(page, "popover-agent-destination-main", POPOVER_CLIP);
 
     await page.locator("[data-stp-prompt]").fill("Continue the review");
     await page.locator("[data-stp-send]").click();
@@ -2024,11 +2061,36 @@ await test("17b. Main-agent dispatch is previewed and reported without new-agent
     });
     assertEq(sent.headline, "Message sent to main agent", "reuse gets a truthful success headline");
     assertEq(sent.linkText, "Open in Paseo", "the existing agent deep link is not synthetic");
+    assertEq(
+      (await lastRequest("/v1/send")).body.agentDispatch,
+      "main",
+      "the main-agent choice reaches the bridge",
+    );
+
+    await page.locator("[data-stp-send-another]").click();
+    await waitForPhase(page, "ready");
+    await page.locator("[data-stp-agent-dispatch]").selectOption("new");
+    await page.locator("[data-stp-prompt]").fill("Start with fresh context");
+    await page.locator("[data-stp-send]").click();
+    await waitForPhase(page, "sent");
+    const freshSent = await page.evaluate(() =>
+      document
+        .querySelector("send-to-paseo-popover")
+        .shadowRoot.querySelector("[data-stp-success]")
+        .textContent.trim(),
+    );
+    assertEq(freshSent, "Agent started", "new-agent override gets a truthful success headline");
+    assertEq(
+      (await lastRequest("/v1/send")).body.agentDispatch,
+      "new",
+      "the new-agent choice reaches the bridge despite a main-agent plugin preference",
+    );
 
     return [
+      "dropdown: Create a new agent / Use main agent",
       `preview: ${ready.main}`,
-      "provider and mode selects hidden for reuse",
-      `success: ${sent.headline}`,
+      "provider and mode selects follow the per-send choice",
+      `successes: ${sent.headline}; ${freshSent}`,
     ];
   } finally {
     await bridgeConfig({ agentDispatch: "new" });
@@ -3950,6 +4012,7 @@ await test("27. GitHub: popover resolves and sends with the right payload", asyn
   assertEq(send.body.number, 942, "number");
   assertEq(send.body.prompt, prompt, "prompt is passed through verbatim");
   assertEq(send.body.target, { kind: "existing", workspaceId: "wks_4d1a8b7c2e0f9351" }, "target");
+  assertEq(send.body.agentDispatch, "new", "agent destination");
   assert(
     send.body.pageUrl?.includes("/acmegizmos/gizmo-poc/pull/942"),
     `pageUrl should be the GitHub page URL, got ${send.body.pageUrl}`,
@@ -3957,7 +4020,7 @@ await test("27. GitHub: popover resolves and sends with the right payload", asyn
   assertEq(send.body.modeId, "auto", "modeId (the bridge's resolvedModeId, preselected)");
   assertEq(
     Object.keys(send.body).sort(),
-    ["forge", "modeId", "number", "owner", "pageUrl", "prompt", "provider", "repo", "target"],
+    ["agentDispatch", "forge", "modeId", "number", "owner", "pageUrl", "prompt", "provider", "repo", "target"],
     "send body keys",
   );
 
@@ -4311,10 +4374,17 @@ await test("31. Target combobox: keyboard-only path — reach, filter, arrow, En
   await waitForPhase(page, "ready");
 
   /* From here on: no mouse. The textarea is autofocused, so type the
-     instruction first and then walk BACKWARD into the Target field, which sits
-     above it in the card. */
+     instruction first and then walk BACKWARD through Agent into Target. */
   const prompt = "Fix the merge conflict";
   await page.keyboard.type(prompt, { delay: 5 });
+  await page.keyboard.press("Shift+Tab");
+  const onAgent = await page.evaluate(
+    () =>
+      document.querySelector("send-to-paseo-popover").shadowRoot.activeElement?.hasAttribute(
+        "data-stp-agent-dispatch",
+      ) === true,
+  );
+  assert(onAgent, "Shift+Tab from the instruction box must land on the Agent dropdown");
   await page.keyboard.press("Shift+Tab");
   const onTrigger = await page.evaluate(
     () =>
@@ -4322,7 +4392,7 @@ await test("31. Target combobox: keyboard-only path — reach, filter, arrow, En
         "data-stp-candidates",
       ) === true,
   );
-  assert(onTrigger, "Shift+Tab from the instruction box must land on the Target trigger");
+  assert(onTrigger, "a second Shift+Tab must land on the Target trigger");
 
   /* ArrowDown opens the list on the committed option, and the list wraps. */
   await page.keyboard.press("ArrowDown");
@@ -4382,7 +4452,7 @@ await test("31. Target combobox: keyboard-only path — reach, filter, arrow, En
   assertEq(send.body.target, { kind: "create" }, "and the target picked with the keyboard");
 
   return [
-    "no mouse after the button click: Shift+Tab -> ArrowDown/ArrowUp/End/Home -> type -> ArrowDown -> Enter",
+    "no mouse after the button click: Shift+Tab through Agent to Target -> ArrowDown/ArrowUp/End/Home -> type -> ArrowDown -> Enter",
     `wrapping asserted at both ends; filtered arrowing stays inside the 2 matching rows`,
     `${chord} produced POST /v1/send ${JSON.stringify({ prompt: send.body.prompt, target: send.body.target })}`,
   ];

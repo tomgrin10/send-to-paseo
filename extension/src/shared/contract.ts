@@ -235,6 +235,8 @@ export type SendTarget =
 export interface SendRequest extends PrRef {
   prompt: string;
   target: SendTarget;
+  /** Per-send override. Missing preserves the plugin's saved preference. */
+  agentDispatch?: AgentDispatch;
   provider?: string;
   /**
    * Permission mode id, valid only for the provider this send resolves to. The

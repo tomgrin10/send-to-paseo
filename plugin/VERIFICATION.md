@@ -1,5 +1,20 @@
 # Verification log — `send-to-paseo` plugin
 
+## 2026-09-24 — per-send agent destination
+
+`POST /v1/send` accepts an additive optional `agentDispatch` override and falls back to the saved
+plugin preference when absent. Resolve now returns eligible root-agent previews independently of
+that preference so the extension can offer both choices. The existing plugin verification stayed
+green after the change.
+
+```text
+$ cd plugin && npm run verify
+74/74 server checks passed
+13/13 node tests passed (7 host-client + 6 main-agent)
+```
+
+Plugin reload and installed-package checks are recorded separately in the release handoff.
+
 ## 2026-09-23 — configurable main-agent dispatch
 
 The worktree typechecks with `agentDispatch: "new" | "main"` kept additive on the HTTP boundary.

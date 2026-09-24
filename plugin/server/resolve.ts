@@ -228,7 +228,6 @@ export async function buildCandidates(input: {
   stackBranches: Map<string, StackMember>;
   /** Non-null when `gh` could not be consulted; carried into the create label. */
   outage?: GhOutage | null;
-  agentDispatch?: "new" | "main";
   agents?: readonly ListedAgent[];
 }): Promise<{ candidates: Candidate[]; defaultCandidateIndex: number }> {
   const { counts, agents } = await workspaceAgents(
@@ -261,20 +260,18 @@ export async function buildCandidates(input: {
       cwd: workspace.workspaceDirectory,
       isolation: isolationOf(workspace),
       agentCount: counts.get(workspace.id) ?? 0,
-      ...(input.agentDispatch === "main"
-        ? (() => {
-            const main = selectMainAgent(agents, workspace.id);
-            return main === null
-              ? {}
-              : {
-                  mainAgent: {
-                    agentId: main.id,
-                    title: agentDisplayTitle(main),
-                    status: main.status,
-                  },
-                };
-          })()
-        : {}),
+      ...(() => {
+        const main = selectMainAgent(agents, workspace.id);
+        return main === null
+          ? {}
+          : {
+              mainAgent: {
+                agentId: main.id,
+                title: agentDisplayTitle(main),
+                status: main.status,
+              },
+            };
+      })(),
     };
     if (branch !== null && branch === input.pr.headBranch) {
       existing.push({ ...base, rank: 1, reason: "exact" });
@@ -1018,7 +1015,6 @@ export async function handleResolve(request: ResolveRequest): Promise<ResolveRes
       workspaces,
       stackBranches,
       outage,
-      agentDispatch: currentSettings.agentDispatch,
       agents: await agentsPromise,
     });
     const { providers } = await providersPromise;

@@ -223,7 +223,9 @@ export async function handleSend(request: SendRequest): Promise<SendResponse> {
     // title, the branches and the stack note in the prompt, not the send.
     const { pr, outage } = prLookup;
     const title = buildAgentTitle(ref.number, prompt);
-    const configuredDispatch = currentSettings.agentDispatch;
+    // The composer can override the saved preference for one send. Older
+    // extensions omit the field and keep the historical settings-driven path.
+    const agentDispatch = request.agentDispatch ?? currentSettings.agentDispatch;
 
     let workspaceId: string;
     let workspaceLabel: string;
@@ -302,7 +304,7 @@ export async function handleSend(request: SendRequest): Promise<SendResponse> {
     });
 
     let mainAgent: ListedAgent | null = null;
-    if (configuredDispatch === "main" && request.target.kind === "existing") {
+    if (agentDispatch === "main" && request.target.kind === "existing") {
       try {
         mainAgent = selectMainAgent(
           await listProjectAgents(paseo, project.projectId),

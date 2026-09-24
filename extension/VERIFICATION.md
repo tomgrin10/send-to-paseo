@@ -1,5 +1,21 @@
 # Verification record
 
+## Per-send agent destination — 2026-09-24
+
+The unpacked extension now renders an Agent dropdown initialized by the selected host's saved
+preference. Case 17b switches both ways, verifies provider/mode visibility follows the choice,
+and proves `main` and `new` each reach `/v1/send`. The keyboard-only path was updated to traverse
+the new native control. Wide and compact screenshots were inspected in light and dark themes.
+
+```text
+npm run typecheck            # clean
+STP_CHROMIUM=~/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome node ../test/e2e.mjs
+=== 64 passed, 0 failed, 0 skipped (of 64) ===
+```
+
+The first invocation without `STP_CHROMIUM` exited before Chromium launched because automatic
+discovery still checks a macOS cache path on Linux. No browser test performed a live send.
+
 ## Latest regression run — 2026-09-23
 
 The full unpacked extension suite now covers pre-resolving on button mount and main-agent reuse.

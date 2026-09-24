@@ -1,6 +1,6 @@
 {
   "name": "send-to-paseo-extension",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "description": "Chrome MV3 extension: send pull-request work to the right Paseo workspace and agent.",
   "type": "module",

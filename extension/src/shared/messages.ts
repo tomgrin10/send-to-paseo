@@ -11,6 +11,7 @@
  */
 
 import type {
+  AgentDispatch,
   Candidate,
   PingResponse,
   PrRef,
@@ -48,6 +49,7 @@ export interface IntentSend {
   pr: PrRef;
   prompt: string;
   target: SendTarget;
+  agentDispatch?: AgentDispatch;
   provider?: string;
   modeId?: string;
   pageUrl?: string;
