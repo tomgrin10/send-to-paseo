@@ -1080,13 +1080,13 @@ export function SendToPaseoSettings({ theme, host, layout, navigation }: PluginS
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.heading}>Agent destination</Text>
+        <Text style={styles.heading}>Default agent destination</Text>
         <Text style={styles.muted}>
-          Choose whether each send starts fresh or continues the workspace&apos;s main agent.
+          Sets the extension dropdown&apos;s initial choice. You can override it for each send.
         </Text>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Start a new agent for every send"
+          accessibilityLabel="Default each send to a new agent"
           onPress={() => saveDispatch.mutate("new")}
           style={(status?.agentDispatch ?? "new") === "new" ? styles.selectedRow : undefined}
         >
@@ -1099,7 +1099,7 @@ export function SendToPaseoSettings({ theme, host, layout, navigation }: PluginS
         </Pressable>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Continue the main agent in the target workspace"
+          accessibilityLabel="Default each send to the main agent in the target workspace"
           onPress={() => saveDispatch.mutate("main")}
           style={status?.agentDispatch === "main" ? styles.selectedRow : undefined}
         >

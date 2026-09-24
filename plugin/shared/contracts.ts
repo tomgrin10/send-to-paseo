@@ -9,7 +9,7 @@ import { z } from "zod";
 
 /** Advertised in `GET /v1/ping`. Keep in step with `package.json`. */
 export const PLUGIN_NAME = "send-to-paseo";
-export const PLUGIN_VERSION = "1.3.0";
+export const PLUGIN_VERSION = "1.4.0";
 /** Bumped only for an incompatible bridge API; the paths stay `/v1`. */
 export const CONTRACT_VERSION = 1;
 
@@ -131,6 +131,8 @@ export const SendRequestSchema = PrRefSchema.extend({
    */
   prompt: z.string(),
   target: SendTargetSchema,
+  /** Per-send override. Missing preserves the plugin's saved preference. */
+  agentDispatch: AgentDispatchSchema.optional(),
   provider: z.string().min(1).max(200).optional(),
   /**
    * Permission mode for the new agent, e.g. `auto` or `bypassPermissions`.

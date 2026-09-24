@@ -112,13 +112,13 @@ before installing it.
 One command from npm. No clone or build step:
 
 ```sh
-paseo plugin install npm:send-to-paseo@1.3.0
+paseo plugin install npm:send-to-paseo
 paseo plugin ls          # expect: send-to-paseo  running  yes
 paseo plugin logs send-to-paseo
 ```
 
-The same release is available directly from Git with
-`paseo plugin add tomgrin10/send-to-paseo --path plugin --ref v1.3.0`.
+The latest release is also available directly from Git with
+`paseo plugin add tomgrin10/send-to-paseo --path plugin`.
 `pluginsEnabled` must already be `true` in the daemon's `config.json`.
 
 There is nothing to install because the plugin imports nothing at runtime that
@@ -483,12 +483,15 @@ curl -s -X POST http://127.0.0.1:7788/v1/send \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"forge":"github","owner":"acmegizmos","repo":"gizmo-poc","number":942,
        "prompt":"Fix merge conflicts","target":{"kind":"create"},
-       "modeId":"auto"}'
+       "agentDispatch":"new","modeId":"auto"}'
 ```
 
 For a new-agent send, `/v1/resolve` reports the mode it would actually use, so the popover can
-preselect what will happen rather than guess. In main-agent mode the popover hides model/mode
-controls because they cannot change an existing agent:
+preselect what will happen rather than guess. The resolve response also supplies the saved
+agent-destination preference and reusable-agent previews. The popover initializes its Agent
+dropdown from that preference, then sends `agentDispatch` as a per-request override. When the
+user chooses **Use main agent**, it hides model/mode controls because they cannot change an
+existing agent:
 
 ```sh
 $ curl -s -X POST http://127.0.0.1:7788/v1/resolve \
@@ -695,9 +698,11 @@ When a send creates a new agent, it uses:
   `paseo://h/<serverId>/agent/<agentId>`.
 - `dryRun`: always present, `false` on a real send.
 
-If main-agent mode finds no eligible root, it follows that same creation path. A successful reuse
-instead returns `agentCreated: false`, `dispatch: "main"`, and the existing agent's title and deep
-link. New-agent and fallback paths return `agentCreated: true`, `dispatch: "new"`.
+If a request asks for main-agent reuse but no eligible root exists, it follows that same creation
+path. A successful reuse instead returns `agentCreated: false`, `dispatch: "main"`, and the
+existing agent's title and deep link. New-agent and fallback paths return `agentCreated: true`,
+`dispatch: "new"`. Omitting `agentDispatch` preserves the plugin's saved preference for older
+clients.
 
 `prompt` is validated as 1..16000 **Unicode code points after trim**, so an emoji counts once.
 The 64 KiB byte cap on the body is independent and is applied first, so a prompt inside the

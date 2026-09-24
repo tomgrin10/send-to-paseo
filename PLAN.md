@@ -105,9 +105,10 @@ into the created or reused agent in the desktop app.
 
 - **No workspace match → show a picker and confirm.** The popover states the resolved target
   and lets you pick something else before sending. Never silently creates a worktree.
-- **Agent destination is a plugin preference.** `new` keeps the original fresh-context behavior;
-  `main` reuses the best non-archived root agent in an existing workspace and falls back to a new
-  agent only when none exists. Delegated subagents are never candidates.
+- **Agent destination is chosen per send.** The plugin preference supplies the composer's initial
+  value; `new` keeps the original fresh-context behavior, while `main` reuses the best
+  non-archived root agent in an existing workspace. Create targets and workspaces without an
+  eligible root agent use a new agent. Delegated subagents are never candidates.
 - **Provider/model: default in plugin settings, per-send override in the popover for new agents.**
 
 ---
@@ -141,7 +142,7 @@ Bound to `127.0.0.1` only, default port `7788` (configurable). Endpoints, all ve
 | --- | --- |
 | `GET /v1/ping` | health + version + daemon reachability. Used by the options page's "Test connection". |
 | `POST /v1/resolve` | `{forge, owner, repo, number, stackPrNumbers[]}` → PR metadata + ranked workspace candidates + provider list + defaults. Drives the popover before you type. |
-| `POST /v1/send` | `{…prRef, prompt, target, provider?}` → creates the workspace if asked, then creates or messages the configured agent destination; returns `{agentId, workspaceId, deepLink, workspaceCreated, agentCreated?, dispatch?}`. |
+| `POST /v1/send` | `{…prRef, prompt, target, agentDispatch?, provider?}` → creates the workspace if asked, then creates or messages the selected agent destination; returns `{agentId, workspaceId, deepLink, workspaceCreated, agentCreated?, dispatch?}`. |
 
 `/v1/resolve` existing as a separate call is what makes the confirm-picker UX feel instant. The
 extension now starts it when the PR-page button mounts and briefly reuses that promise/result when
@@ -170,8 +171,8 @@ the popover opens; provider/settings work runs in parallel with it.
 
 ### Sending (`server/send.ts`)
 
-Ensure the workspace (existing, or create via `checkout-pr`), then follow the plugin's agent
-destination preference:
+Ensure the workspace (existing, or create via `checkout-pr`), then follow the request's agent
+destination choice, falling back to the plugin preference for older clients:
 
 - `new`, a create target, or no eligible root agent: call
   `paseo.agents.create({ cwd, prompt, title, config: { provider, modeId? }, labels })`;

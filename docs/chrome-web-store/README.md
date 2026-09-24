@@ -1,6 +1,6 @@
 # Chrome Web Store submission
 
-Submission values for **Send to Paseo 1.3.0**.
+Submission values for **Send to Paseo 1.4.0**.
 
 ## Listing
 
@@ -52,7 +52,7 @@ The extension executes no remotely hosted code.
 ## Reviewer instructions
 
 1. Install Paseo 0.9.0 or newer.
-2. Run `paseo plugin install npm:send-to-paseo@1.3.0`.
+2. Run `paseo plugin install npm:send-to-paseo`.
 3. In Paseo, open **Send to Paseo** and copy its pairing token.
 4. Open the extension's options page, paste the token, and confirm the paired state.
 5. Visit a GitHub pull request, open **Send to Paseo**, and observe the pre-resolved target list.
@@ -64,7 +64,7 @@ local Paseo installation.
 
 ## Assets
 
-- Package: the `send-to-paseo-extension.zip` asset attached to GitHub release `v1.3.0`
+- Package: the `send-to-paseo-extension.zip` asset attached to GitHub release `v1.4.0`
 - Store icon: `extension/dist/icons/icon-128.png`
 - Screenshot: `docs/screenshots/options-page-paired.png` (1280×800)
 - Small promotional tile: `docs/chrome-web-store/small-promo-440x280.png` (440×280)

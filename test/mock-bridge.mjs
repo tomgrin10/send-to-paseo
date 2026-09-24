@@ -214,15 +214,11 @@ function candidatesFor(number, stackPrNumbers) {
       rank: 1,
       reason: "exact",
       agentCount: 2,
-      ...(CONFIG.agentDispatch === "main"
-        ? {
-            mainAgent: {
-              agentId: "agt_mainmock",
-              title: "Main",
-              status: "idle",
-            },
-          }
-        : {}),
+      mainAgent: {
+        agentId: "agt_mainmock",
+        title: "Main",
+        status: "idle",
+      },
     });
   }
 
@@ -568,10 +564,16 @@ function handleSend(res, origin, body) {
   if (body.modeId !== undefined && !isNonEmptyString(body.modeId)) {
     return sendError(res, "bad_request", origin, { message: "modeId must be a non-empty string" });
   }
+  if (body.agentDispatch !== undefined && !["new", "main"].includes(body.agentDispatch)) {
+    return sendError(res, "bad_request", origin, {
+      message: 'agentDispatch must be "new" or "main"',
+    });
+  }
 
   const pr = prFor(body.number);
   const created = target.kind === "create";
-  const reusedMain = CONFIG.agentDispatch === "main" && target.kind === "existing";
+  const agentDispatch = body.agentDispatch ?? CONFIG.agentDispatch;
+  const reusedMain = agentDispatch === "main" && target.kind === "existing";
   const agentId = reusedMain
     ? "agt_mainmock"
     : `agt_mock${String(++state.agentSeq).padStart(4, "0")}`;
