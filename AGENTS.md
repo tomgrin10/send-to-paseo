@@ -418,7 +418,7 @@ deleting the record.
 
 ## Create a release
 
-Exercised through `v1.3.0`; all releases are published. `origin` is
+Exercised through `v1.4.0`; all releases are published. `origin` is
 `github.com/tomgrin10/send-to-paseo`, and tags live on `main`.
 
 - Release user-facing features, bug fixes, compatibility changes, or contract changes.
