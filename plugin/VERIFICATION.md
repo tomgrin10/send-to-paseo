@@ -13,7 +13,24 @@ $ cd plugin && npm run verify
 13/13 node tests passed (7 host-client + 6 main-agent)
 ```
 
-Plugin reload and installed-package checks are recorded separately in the release handoff.
+The published npm package then replaced the daemon's existing npm-managed v1.3.0 installation.
+Two explicit reloads completed without hanging, the plugin remained `running` with an empty error
+column, and the unauthenticated bridge ping reported version 1.4.0 with contract 1.
+
+```text
+$ paseo plugin update send-to-paseo --version 1.4.0 --yes
+send-to-paseo: 1.3.0 → 1.4.0
+
+$ time paseo plugin reload send-to-paseo   # twice
+real  0m2.215s
+real  0m2.991s
+
+$ curl -fsS http://127.0.0.1:7788/v1/ping | jq '{ok,name,version,contract}'
+{"ok":true,"name":"send-to-paseo","version":"1.4.0","contract":1}
+```
+
+The post-reload log contains the expected bridge-listening and dependency lines with no errors or
+stack traces. The daemon was not restarted.
 
 ## 2026-09-23 — configurable main-agent dispatch
 
