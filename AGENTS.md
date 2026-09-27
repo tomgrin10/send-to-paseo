@@ -430,10 +430,10 @@ Exercised through `v1.4.0`; all releases are published. `origin` is
   `PLUGIN_VERSION` in `plugin/shared/contracts.ts`, `extension/package.json`, and `version` in
   `extension/public/manifest.json`. Update the Paseo minimum in the README badge only when
   compatibility actually changes.
-- Before publishing, require a clean tree, passing typechecks on both halves, `node
-  check-deps.mjs` green, the full e2e suite green, a successful plugin reload with clean logs, and
-  a secret audit of the exact release snapshot — the pairing token and `settings.json` must never
-  be committed.
+- Before pushing the release tag, require a clean tree, passing typechecks on both halves, `node
+  check-deps.mjs` green, the full e2e suite green, a successful plugin reload with clean logs, and a
+  secret audit of the exact release snapshot — the pairing token and `settings.json` must never be
+  committed.
 - Tag the exact release commit as `vX.Y.Z` and push the tag. `.github/workflows/publish-npm.yml`
   verifies both halves, checks that the tag matches `plugin/package.json`, inspects the packed plugin,
   and publishes it through npm Trusted Publishing. Do not run `npm publish` manually except to
