@@ -434,7 +434,12 @@ Exercised through `v1.4.0`; all releases are published. `origin` is
   check-deps.mjs` green, the full e2e suite green, a successful plugin reload with clean logs, and
   a secret audit of the exact release snapshot — the pairing token and `settings.json` must never
   be committed.
-- Tag the exact release commit as `vX.Y.Z`.
+- Tag the exact release commit as `vX.Y.Z` and push the tag. `.github/workflows/publish-npm.yml`
+  verifies both halves, checks that the tag matches `plugin/package.json`, inspects the packed plugin,
+  and publishes it through npm Trusted Publishing. Do not run `npm publish` manually except to
+  recover from a diagnosed workflow failure.
+- Wait for the publish workflow and npm registry propagation before updating the installed plugin
+  and creating the GitHub release.
 - Attach `send-to-paseo-extension.zip`, built from `extension/dist` after a **shipping** build —
   the README tells users to download it. Check the zipped `manifest.json` before publishing: the
   right `version`, and a `name` without "(test build)".
