@@ -9,18 +9,20 @@ pull-request page to a Paseo agent that the user controls.
 
 The extension handles only the information needed to provide that workflow:
 
-- the repository owner, repository name, pull-request number, and related pull-request identifiers
-  read from the GitHub or Graphite page the user is viewing;
+- the repository owner, repository name, pull-request number, and related stack pull-request
+  links read from the GitHub or Graphite pull-request page the user is viewing;
+- the current pull-request page URL when the user chooses **Send**; the extension does not read
+  the browser's history of other pages;
 - instructions the user types into the Send to Paseo composer;
 - Paseo bridge addresses and pairing tokens supplied by the user;
 - extension preferences, agent-target choices, and limited recent-send state.
 
 ## How data is used and shared
 
-Pull-request context and the user's instruction are sent only when needed to resolve a destination
-or when the user chooses **Send**. They go directly to the Paseo bridge or bridges configured by the
-user. A configured bridge may in turn use the user's own Paseo and GitHub connections to resolve a
-workspace and dispatch the instruction.
+Pull-request identifiers are sent when needed to resolve a destination. The current pull-request
+URL and the user's instruction are sent when the user chooses **Send**. They go directly to the
+Paseo bridge or bridges configured by the user. A configured bridge may in turn use the user's own
+Paseo and GitHub connections to resolve a workspace and dispatch the instruction.
 
 The extension does not send this data to the extension developer. It contains no advertising,
 analytics, tracking, or telemetry, and it does not sell personal information. Data is not used for
