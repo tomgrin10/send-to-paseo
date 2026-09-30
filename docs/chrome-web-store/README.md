@@ -43,11 +43,29 @@ page to an agent in a user-controlled Paseo workspace.
   user-selected local port. Chrome prompts before the optional origin is granted.
 - Optional `https://*/*`: permits Chrome to grant one exact HTTPS origin selected by the user for
   an additional private Paseo bridge. The extension requests only that exact origin at runtime;
-  no remote origin is granted by default.
+  no remote origin is granted by default. Chrome notes that this broad declaration can lengthen
+  review; it supports Advanced direct connections to user-chosen HTTPS hosts.
 - GitHub and Graphite content scripts: add the Send to Paseo action to pull-request pages, read the
   PR identity needed for resolution, and survive each site's client-side navigation.
 
 The extension executes no remotely hosted code.
+
+## Privacy practices data usage
+
+Disclose the categories the extension actually handles, even when data is stored locally or sent
+only to the user's own bridge:
+
+- **Personally identifiable information:** a repository owner can be a person's username.
+- **Authentication information:** the plugin-generated bearer pairing token is a credential for
+  the user's bridge, even though it is not a Google or GitHub password.
+- **Personal communications:** the instruction written to a Paseo agent.
+- **Web history:** the current pull-request page URL is sent on **Send**. The extension does not
+  read the browser's history of other pages.
+- **Website content:** PR identity and Graphite stack links read from the current PR page.
+
+The extension does not handle health, financial, location, or user-activity monitoring data. The
+three limited-use certifications match `PRIVACY.md`: no sale or unrelated transfer, no unrelated
+purpose, and no creditworthiness or lending use.
 
 ## Reviewer instructions
 
