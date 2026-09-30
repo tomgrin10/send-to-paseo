@@ -65,6 +65,8 @@ local Paseo installation.
 ## Assets
 
 - Package: the `send-to-paseo-extension.zip` asset attached to GitHub release `v1.4.0`
-- Store icon: `extension/dist/icons/icon-128.png`
-- Screenshots: capture two 1280×800 images with the composer open on actual GitHub and Graphite PR pages in a signed-in browser. Use PRs whose visible details may be published. `docs/screenshots/options-page-paired.png` shows setup only and is not a store screenshot.
+- Store icon: `docs/chrome-web-store/icon-128.png`
+- Screenshots: `docs/chrome-web-store/github-pr-1280x800.png` and
+  `docs/chrome-web-store/graphite-pr-1280x800.png`. Both show the composer on actual PR pages;
+  local machine names and a reviewer's name and avatar are obscured.
 - Small promotional tile: `docs/chrome-web-store/small-promo-440x280.png` (440×280)
