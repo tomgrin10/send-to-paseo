@@ -2,6 +2,10 @@
 
 Submission values for **Send to Paseo 1.4.0**.
 
+Store item: [Send to Paseo](https://chromewebstore.google.com/detail/send-to-paseo/blflbbgkckbabbkoigpocilbkkmfijfg).
+Future package uploads and review submission use the [automated release pipeline](AUTOMATION.md)
+after the one-time Google account setup.
+
 ## Listing
 
 - Visibility: **Unlisted**

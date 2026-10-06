@@ -1,0 +1,92 @@
+name: Publish extension to Chrome Web Store
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag (required for publish)
+        type: string
+      operation:
+        description: Check account access or upload and submit a release
+        type: choice
+        options: [status, publish]
+        default: status
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: chrome-web-store-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: chrome-web-store
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      CWS_OPERATION: ${{ inputs.operation || 'publish' }}
+      CWS_PUBLISHER_ID: ${{ vars.CWS_PUBLISHER_ID }}
+      CWS_EXTENSION_ID: blflbbgkckbabbkoigpocilbkkmfijfg
+    steps:
+      # Use the current publisher tooling, including when retrying an older release.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Check publishing configuration
+        env:
+          CWS_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.CWS_WORKLOAD_IDENTITY_PROVIDER }}
+          CWS_SERVICE_ACCOUNT: ${{ vars.CWS_SERVICE_ACCOUNT }}
+        run: |
+          : "${CWS_PUBLISHER_ID:?Set CWS_PUBLISHER_ID; see docs/chrome-web-store/AUTOMATION.md}"
+          : "${CWS_WORKLOAD_IDENTITY_PROVIDER:?Run scripts/setup-chrome-publishing.sh}"
+          : "${CWS_SERVICE_ACCOUNT:?Run scripts/setup-chrome-publishing.sh}"
+      - name: Validate release tag and ancestry
+        if: env.CWS_OPERATION == 'publish'
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          git merge-base --is-ancestor "refs/tags/$RELEASE_TAG" origin/main
+      - name: Download the released extension package
+        if: env.CWS_OPERATION == 'publish'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist
+          gh release download "$RELEASE_TAG" --pattern send-to-paseo-extension.zip --dir dist
+          python3 - <<'PY'
+          import json, os, subprocess, zipfile
+          with zipfile.ZipFile('dist/send-to-paseo-extension.zip') as archive:
+              assert archive.testzip() is None, 'Corrupt release ZIP'
+              manifest = json.loads(archive.read('manifest.json'))
+          source = json.loads(subprocess.check_output([
+              'git', 'show', os.environ['RELEASE_TAG'] + ':extension/public/manifest.json'
+          ]))
+          assert manifest == source, 'Release ZIP manifest differs from tagged source'
+          assert 'v' + manifest['version'] == os.environ['RELEASE_TAG'], 'Release ZIP version mismatch'
+          assert manifest['name'] == 'Send to Paseo', 'Not a shipping build'
+          PY
+      - name: Authenticate to Google with GitHub OIDC
+        id: google
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.CWS_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.CWS_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/chromewebstore
+          create_credentials_file: false
+      - name: Upload and submit, or check status
+        env:
+          CWS_ACCESS_TOKEN: ${{ steps.google.outputs.access_token }}
+        run: node scripts/chrome-web-store.mjs

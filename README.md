@@ -55,13 +55,20 @@ paseo plugin add tomgrin10/send-to-paseo --path plugin
 
 If plugins are disabled, turn them on in **Settings → Plugins** first.
 
-**Extension:** download `send-to-paseo-extension.zip` from the
+**Extension:** install [Send to Paseo from the Chrome Web Store](https://chromewebstore.google.com/detail/send-to-paseo/blflbbgkckbabbkoigpocilbkkmfijfg).
+Chrome updates store installations automatically when a new version is approved.
+
+For an unpacked installation, download `send-to-paseo-extension.zip` from the
 [latest release](https://github.com/tomgrin10/send-to-paseo/releases/latest) and unzip it. Open
 `chrome://extensions` (or `edge://`, `brave://`, `arc://`), turn on **Developer mode**, press
 **Load unpacked**, and pick the unzipped folder.
 
 Keep that folder somewhere permanent — the extension ID comes from its path, and the pairing token
 is tied to the ID.
+
+Release tags automatically publish the npm plugin, create the GitHub release and extension ZIP,
+and submit the extension to Chrome for publication after approval. See
+[publishing setup and recovery](docs/chrome-web-store/AUTOMATION.md).
 
 <details>
 <summary>Building from source instead</summary>
