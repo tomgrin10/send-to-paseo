@@ -44,13 +44,13 @@ Detailed description (paste into the dashboard's Description field):
 >
 > GET STARTED
 >
-> This extension requires Paseo 0.9.0 or newer, the Send to Paseo plugin, and git on the
-> computer running Chrome.
+> This extension works with Paseo and the Send to Paseo plugin on the computer running Chrome.
+> Current requirements and full setup instructions are at https://github.com/tomgrin10/send-to-paseo.
 >
-> 1. Install Paseo from https://paseo.sh and enable plugins in Settings → Plugins.
+> 1. Install Paseo from https://paseo.sh and enable plugins.
 > 2. In a terminal, run: paseo plugin install npm:send-to-paseo
-> 3. In Paseo, open Send to Paseo and copy the pairing token. Open the extension from Chrome's
->    Extensions menu, paste the token, and click Test connection.
+> 3. Copy the pairing token from the Send to Paseo plugin in Paseo. Open the extension's settings,
+>    paste the token, and test the connection.
 >
 > Then open a GitHub or Graphite pull request and click Send to Paseo.
 >
@@ -62,6 +62,8 @@ Detailed description (paste into the dashboard's Description field):
 The detailed description can be updated in the Chrome Web Store dashboard. The upload API does
 not update listing text. The short summary shown on the store comes from the packaged manifest;
 changing it requires a new extension package.
+Keep version requirements in the repository's installation guide rather than the detailed store
+description, so future releases do not require manual listing edits for a version change.
 
 ## Single purpose
 
