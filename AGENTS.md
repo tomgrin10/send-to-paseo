@@ -435,14 +435,27 @@ Exercised through `v1.4.0`; all releases are published. `origin` is
   secret audit of the exact release snapshot — the pairing token and `settings.json` must never be
   committed.
 - Tag the exact release commit as `vX.Y.Z` and push the tag. `.github/workflows/publish-npm.yml`
-  verifies both halves, checks that the tag matches `plugin/package.json`, inspects the packed plugin,
-  and publishes it through npm Trusted Publishing. Do not run `npm publish` manually except to
-  recover from a diagnosed workflow failure.
-- Wait for the publish workflow and npm registry propagation before updating the installed plugin
-  and creating the GitHub release.
-- Attach `send-to-paseo-extension.zip`, built from `extension/dist` after a **shipping** build —
-  the README tells users to download it. Check the zipped `manifest.json` before publishing: the
-  right `version`, and a `name` without "(test build)".
+  verifies both halves, checks all four versions against the tag, inspects the packed plugin,
+  packages only the shipping extension, and publishes the plugin through npm Trusted Publishing.
+  It then creates the GitHub release with generated notes and attaches `send-to-paseo-extension.zip`.
+  Do not run `npm publish` manually except to recover from a diagnosed workflow failure.
+- The release then calls `.github/workflows/publish-chrome.yml` to upload that ZIP through API v2
+  and submit it for automatic publication after approval. This requires the one-time Google setup
+  in `docs/chrome-web-store/AUTOMATION.md`. Missing configuration fails the Chrome job explicitly;
+  it does not undo npm publication or the GitHub release.
+- Wait for the workflow and npm registry propagation before updating the installed plugin.
+  Google controls Chrome review timing. Store installations update through Chrome; unpacked
+  installations still need the new ZIP. The workflow preserves the store's existing visibility.
+- Retry a failed Chrome submission using `publish-chrome.yml`'s `workflow_dispatch` on `main`,
+  with `operation=publish` and the existing release tag. Do not republish npm. The publisher
+  checks store status, skips the same pending/published version, refuses stale releases or
+  replacing another active submission, and waits for asynchronous upload processing to succeed.
+
+Publisher regression tests: `node --test test/chrome-web-store.test.mjs`. Packaging verification:
+`RELEASE_TAG=vX.Y.Z node scripts/check-release.mjs` and
+`RELEASE_TAG=vX.Y.Z python3 scripts/package-extension.py` after a shipping build.
+Changing release tooling runs these checks and both existing verification suites; no daemon restart
+or product version bump is needed. Keep the Chrome service account in a personal Cloud project.
 
 Never move or rewrite a published tag. Ship corrections as a new patch release.
 

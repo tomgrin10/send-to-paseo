@@ -23,6 +23,8 @@ jobs:
       - name: Install plugin dependencies
         working-directory: plugin
         run: npm ci
+      - name: Test Chrome Web Store publishing
+        run: node --test test/chrome-web-store.test.mjs
       - name: Verify plugin
         working-directory: plugin
         run: npm run typecheck && node check-deps.mjs

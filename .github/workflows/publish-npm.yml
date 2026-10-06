@@ -1,4 +1,4 @@
-name: Publish plugin to npm
+name: Release plugin and extension
 
 on:
   push:
@@ -31,11 +31,12 @@ jobs:
           package-manager-cache: false
       - name: Use an npm version with trusted publishing support
         run: npm install --global npm@11.20.0
-      - name: Require the tag to match plugin package.json
-        working-directory: plugin
-        run: |
-          package_version="$(node -p "require('./package.json').version")"
-          test "$GITHUB_REF_NAME" = "v$package_version"
+      - name: Require the tag to match every release version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/check-release.mjs
+      - name: Test publishing failure and retry handling
+        run: node --test test/chrome-web-store.test.mjs
       - name: Install plugin dependencies
         working-directory: plugin
         run: npm ci
@@ -54,6 +55,48 @@ jobs:
       - name: Inspect plugin package
         working-directory: plugin
         run: npm pack --dry-run
+      - name: Package the shipping extension
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python3 scripts/package-extension.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: extension-release
+          path: dist/send-to-paseo-extension.zip
+          if-no-files-found: error
       - name: Publish plugin
         working-directory: plugin
         run: npm publish --access public
+
+  release:
+    name: Create GitHub release with extension ZIP
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: extension-release
+          path: dist
+      - name: Create release and attach verified package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --verify-tag --generate-notes
+          fi
+          gh release upload "$RELEASE_TAG" dist/send-to-paseo-extension.zip --clobber
+
+  chrome:
+    name: Submit extension to Chrome Web Store
+    needs: release
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/publish-chrome.yml
+    with:
+      tag: ${{ github.ref_name }}
