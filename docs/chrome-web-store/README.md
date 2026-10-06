@@ -19,19 +19,46 @@ Short description:
 
 > Send instructions from GitHub and Graphite pull requests to new or existing agents in your Paseo workspaces.
 
-Detailed description:
+Detailed description (paste into the dashboard's Description field):
 
-> Send to Paseo adds a focused action to GitHub and Graphite pull-request pages. From the PR, write
-> an instruction, choose the resolved Paseo workspace, and either start a new agent or dispatch to
-> that workspace's main agent.
+> Turn a pull request into a task for your AI coding agent.
 >
-> The extension discovers configured Paseo machines through your primary Send to Paseo plugin,
-> resolves likely workspaces before you open the composer, and keeps provider and permission-mode
-> choices scoped to the selected machine.
+> Send to Paseo adds a button to GitHub and Graphite pull requests. Ask an agent to fix failing
+> tests, address review feedback, or explain a change, then send your instruction with the
+> pull-request context to the right project in Paseo.
 >
-> Requires Paseo 0.9.0 or newer and the open-source `send-to-paseo` Paseo plugin. The extension has
-> no advertising, analytics, or telemetry. Pairing credentials stay in Chrome extension storage,
-> and requests go directly to bridges configured by the user.
+> New to Paseo? It's an open-source app for running and managing AI coding agents such as
+> Claude Code and Codex. Learn more and download it at https://paseo.sh.
+>
+> WHAT YOU CAN DO
+>
+> • Start a new agent or continue working with an existing agent.
+> • Use an existing project workspace or create a separate checkout for the pull request.
+> • Choose the model and permission mode when starting a new agent.
+> • Work with stacked pull requests on Graphite.
+> • Send work to your laptop or another Paseo machine you've connected.
+>
+> You choose the destination and review your instruction before pressing Send.
+>
+> GET STARTED
+>
+> Requires Paseo 0.9.0 or newer and git on the computer running Chrome.
+>
+> 1. Install Paseo from https://paseo.sh and enable plugins in Settings → Plugins.
+> 2. In a terminal, run: paseo plugin install npm:send-to-paseo
+> 3. In Paseo, open Send to Paseo and copy the pairing token. Open the extension from Chrome's
+>    Extensions menu, paste the token, and click Test connection.
+>
+> Then open a GitHub or Graphite pull request and click Send to Paseo.
+>
+> PRIVACY
+>
+> No ads, analytics, or telemetry. Pairing credentials stay in Chrome extension storage, and
+> requests go directly to the Paseo bridges you configure.
+
+The detailed description can be updated in the Chrome Web Store dashboard. The upload API does
+not update listing text. The short summary shown on the store comes from the packaged manifest;
+changing it requires a new extension package.
 
 ## Single purpose
 
