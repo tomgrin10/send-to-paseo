@@ -1,6 +1,7 @@
 # send-to-paseo
 
 [![Paseo](https://img.shields.io/badge/Paseo-%E2%89%A5%200.9.0-8A63D2?style=for-the-badge)](https://paseo.sh)
+[![Chrome Web Store](https://img.shields.io/badge/Chrome_Web_Store-Install-4285F4?style=for-the-badge)](https://chromewebstore.google.com/detail/send-to-paseo/blflbbgkckbabbkoigpocilbkkmfijfg)
 [![Release](https://img.shields.io/github/v/release/tomgrin10/send-to-paseo?display_name=tag&sort=semver&style=for-the-badge&label=release&color=6366f1)](https://github.com/tomgrin10/send-to-paseo/releases/latest)
 [![License](https://img.shields.io/github/license/tomgrin10/send-to-paseo?style=for-the-badge&color=2563eb)](LICENSE)
 
@@ -38,42 +39,38 @@ Works on github.com and on Graphite.
 
 ## Install
 
-Requires Paseo 0.9.0 or newer with plugins enabled, and `git`.
+Requires [Paseo](https://paseo.sh) 0.9.0 or newer and `git` on the computer running Chrome.
 
-**Plugin:**
+1. **Add the extension.** Open [Send to Paseo in the Chrome Web Store](https://chromewebstore.google.com/detail/send-to-paseo/blflbbgkckbabbkoigpocilbkkmfijfg)
+   and click **Add to Chrome**.
+2. **Install the Paseo plugin.** Enable plugins in Paseo's **Settings → Plugins**, then run:
 
-```sh
-paseo plugin install npm:send-to-paseo
-paseo plugin ls        # send-to-paseo must read `running` and `yes`
-```
+   ```sh
+   paseo plugin install npm:send-to-paseo
+   ```
 
-Or install the same release directly from Git:
+3. **Pair once.** In Paseo, open **Send to Paseo** and copy the **pairing token**. Click the
+   extension's icon in Chrome's Extensions menu, paste the token, and press **Test connection**.
+
+Open a GitHub or Graphite pull request, click **Send to Paseo**, type an instruction, and press
+**Send**. Chrome keeps the extension up to date automatically.
+
+<details>
+<summary>For developers: unpacked installation and building from source</summary>
+
+To load a release manually, download `send-to-paseo-extension.zip` from the
+[latest release](https://github.com/tomgrin10/send-to-paseo/releases/latest) and unzip it. Open
+`chrome://extensions`, enable **Developer mode**, click **Load unpacked**, and select the
+unzipped folder. Keep that folder in a permanent location so the extension ID and saved pairing
+remain stable. Unpacked installations need to be updated manually.
+
+You can also install the plugin directly from Git:
 
 ```sh
 paseo plugin add tomgrin10/send-to-paseo --path plugin
 ```
 
-If plugins are disabled, turn them on in **Settings → Plugins** first.
-
-**Extension:** install [Send to Paseo from the Chrome Web Store](https://chromewebstore.google.com/detail/send-to-paseo/blflbbgkckbabbkoigpocilbkkmfijfg).
-Chrome updates store installations automatically when a new version is approved.
-
-For an unpacked installation, download `send-to-paseo-extension.zip` from the
-[latest release](https://github.com/tomgrin10/send-to-paseo/releases/latest) and unzip it. Open
-`chrome://extensions` (or `edge://`, `brave://`, `arc://`), turn on **Developer mode**, press
-**Load unpacked**, and pick the unzipped folder.
-
-Keep that folder somewhere permanent — the extension ID comes from its path, and the pairing token
-is tied to the ID.
-
-Release tags automatically publish the npm plugin, create the GitHub release and extension ZIP,
-and submit the extension to Chrome for publication after approval. See
-[publishing setup and recovery](docs/chrome-web-store/AUTOMATION.md).
-
-<details>
-<summary>Building from source instead</summary>
-
-Only needed to work on the extension or run the test suite. Requires Node and npm.
+To build the extension from source, install Node and npm, then run:
 
 ```sh
 git clone https://github.com/tomgrin10/send-to-paseo
@@ -88,21 +85,13 @@ Load `extension/dist` instead of the unzipped release. For the plugin, `paseo pl
 `node test/e2e.mjs` from the repository root — it runs headless, and `STP_HEADED=1` shows the
 browser. [`AGENTS.md`](AGENTS.md) has the full verification procedure.
 
+Release tags automatically publish the npm plugin, create the GitHub release and extension ZIP,
+and submit the extension to Chrome for publication after approval. See
+[publishing setup and recovery](docs/chrome-web-store/AUTOMATION.md).
+
 </details>
 
-## Setup
-
-Pair the two halves once:
-
-1. In Paseo, open **Send to Paseo** in the sidebar and copy the **pairing token**.
-2. Click the extension's toolbar icon, or the **cog** in the composer's header.
-3. Paste the token and press **Test connection**.
-
-Then open a pull request and press **Send to Paseo**. There is no config file on either side.
-The Paseo surface's **Agent destination** setting chooses between a fresh agent on every send and
-the main agent already in the selected workspace.
-
-### Add another Paseo machine
+## Add another Paseo machine
 
 Every host already configured in the Paseo app appears automatically under **Paseo machines**, even
 while offline. The remaining setup below is only what lets the browser extension's local Primary
