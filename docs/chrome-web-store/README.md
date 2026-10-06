@@ -21,7 +21,7 @@ Short description:
 
 Detailed description (paste into the dashboard's Description field):
 
-> Turn a pull request into a task for your AI coding agent.
+> Send instructions from GitHub and Graphite pull requests directly to your Paseo agents.
 >
 > Send to Paseo adds a button to GitHub and Graphite pull requests. Ask an agent to fix failing
 > tests, address review feedback, or explain a change, then send your instruction with the
