@@ -30,6 +30,8 @@ Detailed description (paste into the dashboard's Description field):
 > New to Paseo? It's an open-source app for running and managing AI coding agents such as
 > Claude Code and Codex. Learn more and download it at https://paseo.sh.
 >
+> Source code and full installation guide: https://github.com/tomgrin10/send-to-paseo
+>
 > WHAT YOU CAN DO
 >
 > • Start a new agent or continue working with an existing agent.
@@ -42,7 +44,8 @@ Detailed description (paste into the dashboard's Description field):
 >
 > GET STARTED
 >
-> Requires Paseo 0.9.0 or newer and git on the computer running Chrome.
+> This extension requires Paseo 0.9.0 or newer, the Send to Paseo plugin, and git on the
+> computer running Chrome.
 >
 > 1. Install Paseo from https://paseo.sh and enable plugins in Settings → Plugins.
 > 2. In a terminal, run: paseo plugin install npm:send-to-paseo
