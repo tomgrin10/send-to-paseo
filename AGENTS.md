@@ -42,6 +42,12 @@ sync.
 
 ## Hard-won facts — do not re-derive
 
+- **This repository uses GitHub's immutable OIDC subject format.** Measured on 2026-10-06:
+  `repo:tomgrin10@17593920/send-to-paseo@1353553015:environment:chrome-web-store`.
+  The setup script formerly assumed `repo:tomgrin10/send-to-paseo:environment:chrome-web-store`,
+  and Google rejected authentication with `The given credential is rejected by the attribute
+  condition`. Read `actions/oidc/customization/sub` before building the exact subject condition;
+  keep the numeric repository/owner, environment, ref and event restrictions.
 - **The extension cannot talk to the Paseo daemon directly.** The daemon's API is a private
   WebSocket at `ws://127.0.0.1:6767/ws`; its HTTP surface is only `/api/health` and `/api/status`.
   The WebSocket enforces an Origin allowlist and returns `403 Origin not allowed` for any web

@@ -34,6 +34,16 @@ fi
 project_number="$(cloud projects describe "$publishing_project" --format='value(projectNumber)')"
 repo_id="$(gh api "repos/$publishing_repo" --jq '.id')"
 owner_id="$(gh api "repos/$publishing_repo" --jq '.owner.id')"
+# Newer repositories use owner/repository IDs in the subject's repo segment.
+# Keep an exact environment subject without changing GitHub's OIDC settings.
+if [ "$(gh api "repos/$publishing_repo/actions/oidc/customization/sub" --jq '.use_default')" != "true" ]; then
+  echo "Custom GitHub OIDC subject templates require a matching trust condition; refusing to guess." >&2
+  exit 1
+fi
+subject_prefix="repo:$publishing_repo"
+if [ "$(gh api "repos/$publishing_repo/actions/oidc/customization/sub" --jq '.use_immutable_subject')" = "true" ]; then
+  subject_prefix="repo:${publishing_repo%/*}@$owner_id/${publishing_repo#*/}@$repo_id"
+fi
 cloud services enable chromewebstore.googleapis.com iam.googleapis.com iamcredentials.googleapis.com sts.googleapis.com
 
 if ! cloud iam service-accounts describe "$service_email" >/dev/null 2>&1; then
@@ -43,7 +53,7 @@ if ! cloud iam workload-identity-pools describe "$pool_id" --location=global >/d
   cloud iam workload-identity-pools create "$pool_id" --location=global --display-name="Send to Paseo GitHub"
 fi
 mapping="google.subject=assertion.sub,attribute.repository_id=assertion.repository_id,attribute.repository_owner_id=assertion.repository_owner_id"
-condition="assertion.repository_id == '$repo_id' && assertion.repository_owner_id == '$owner_id' && assertion.sub == 'repo:$publishing_repo:environment:chrome-web-store' && (assertion.ref == 'refs/heads/main' || assertion.ref.startsWith('refs/tags/v')) && (assertion.event_name == 'push' || assertion.event_name == 'workflow_dispatch')"
+condition="assertion.repository_id == '$repo_id' && assertion.repository_owner_id == '$owner_id' && assertion.sub == '$subject_prefix:environment:chrome-web-store' && (assertion.ref == 'refs/heads/main' || assertion.ref.startsWith('refs/tags/v')) && (assertion.event_name == 'push' || assertion.event_name == 'workflow_dispatch')"
 if cloud iam workload-identity-pools providers describe "$provider_id" --workload-identity-pool="$pool_id" --location=global >/dev/null 2>&1; then
   cloud iam workload-identity-pools providers update-oidc "$provider_id" \
     --workload-identity-pool="$pool_id" --location=global \

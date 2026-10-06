@@ -51,6 +51,9 @@ and repository IDs, the `chrome-web-store` environment, and release-tag/main wor
 The service account gets `roles/iam.workloadIdentityUser` impersonation access, not project-wide
 administration permissions. Each Cloud command specifies its account and project without changing
 global gcloud configuration. Rerunning the setup script updates the dedicated provider and bindings.
+The script detects GitHub's immutable OIDC subject format, which includes numeric owner/repository
+IDs, and also supports the older name-only default. Custom subject templates require a matching
+trust condition and are rejected rather than guessed.
 
 **In the Chrome Web Store dashboard → Account, add the service account email printed by the
 script.** Chrome currently allows one linked service account per publisher. This is the one dashboard
@@ -67,6 +70,16 @@ Initial publication must have completed the Listing and Privacy fields, account 
 manual visibility publication requirement. Enable this automation before the next version tag.
 Missing account configuration fails the Chrome job with setup instructions; npm and the GitHub
 release will already have completed.
+
+### Activation verified
+
+On 2026-10-06, setup completed in personal project `send-to-paseo-1353553015` and the service
+account was linked to the publisher. The first status run failed because the trust condition used
+the older name-only OIDC subject. After detecting the repository's immutable subject format,
+[status run 37437046632](https://github.com/tomgrin10/send-to-paseo/actions/runs/37437046632)
+passed authentication and returned version `1.4.0` as `PUBLISHED` at 100% rollout, with no warning
+or takedown flag. Verification made no upload or publish request and created no release tag.
+Both verification suites, all nine publisher tests, and local release packaging checks passed.
 
 ## Release and recovery
 
@@ -99,3 +112,4 @@ the dashboard feedback before retrying or releasing a correction.
 - [Publish API and automatic publication after approval](https://developer.chrome.com/docs/webstore/api/reference/rest/v2/publishers.items/publish)
 - [GitHub OIDC authentication action](https://github.com/google-github-actions/auth)
 - [Google Workload Identity Federation setup](https://docs.cloud.google.com/iam/docs/workload-identity-federation-with-deployment-pipelines)
+- [GitHub immutable OIDC subject claims](https://docs.github.com/en/actions/reference/security/oidc#immutable-subject-claims)
