@@ -23,7 +23,7 @@ Requires [Paseo](https://paseo.sh) 0.9.0 or newer and `git` on the computer runn
 2. **Install the Paseo plugin.** Enable plugins in Paseo's **Settings → Plugins**, then run:
 
    ```sh
-   paseo plugin install npm:send-to-paseo
+   paseo plugin install send-to-paseo
    ```
 
 3. **Pair once.** In Paseo, open **Send to Paseo** and copy the **pairing token**. Click the
@@ -104,6 +104,15 @@ submission. [Publishing setup and recovery](docs/chrome-web-store/AUTOMATION.md)
 
 The extension uses Paseo's brand mark and Lucide's settings icon. Paseo is Apache-2.0,
 © 2025-present Mohamed Boudra; Lucide is ISC.
+
+## More Paseo plugins
+
+Also available from [Tom Gringauz](https://github.com/tomgrin10):
+
+- [Defer](https://github.com/tomgrin10/paseo-defer) — Schedule messages to agents for later delivery.
+- [Graphite](https://github.com/tomgrin10/paseo-graphite) — Monitor Graphite stacks and PR action state.
+- [Smart Session](https://github.com/tomgrin10/paseo-smart-session) — Context-aware compaction and usage insights for long-running agents.
+- [Vitals](https://github.com/tomgrin10/paseo-vitals) — Host, Paseo, agent, and Docker health in one dashboard.
 
 ## License
 
