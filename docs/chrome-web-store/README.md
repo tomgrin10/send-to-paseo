@@ -105,7 +105,7 @@ purpose, and no creditworthiness or lending use.
 
 ## Reviewer instructions
 
-1. Install Paseo 0.9.0 or newer.
+1. Install the latest Paseo release from https://paseo.sh.
 2. Run `paseo plugin install send-to-paseo`.
 3. In Paseo, open **Send to Paseo** and copy its pairing token.
 4. Open the extension's options page, paste the token, and confirm the paired state.
