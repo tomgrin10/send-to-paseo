@@ -25,9 +25,9 @@ except `git`** — with no `gh` at all you can still open the popover, pick a
 workspace and start an agent, because Paseo checks the pull request out itself
 through its own forge credentials. `gh` only supplies metadata.
 
-| | Required? | Minimum verified | What it is used for | What breaks without it |
+| | Required? | Version | What it is used for | What breaks without it |
 | --- | --- | --- | --- | --- |
-| **Paseo** | yes | `0.9.0` | Everything. The surface uses Paseo 0.9's configured-host discovery and host-targeted client APIs. | The plugin does not load. |
+| **Paseo** | yes | Latest release | Everything. The surface uses configured-host discovery and host-targeted client APIs. | The plugin does not load. |
 | **`git`** | yes | `2.51.2` | Reading the branch a workspace is on, and the repository's `origin`. Paseo itself needs it to create a worktree. | Creating a worktree fails with a message naming `git`. Workspace branches read as unknown, so nothing is ranked as an exact or stack match — everything falls back to "create". |
 | **`gh`** | **no** | `2.98.0` | PR title, head and base branch names, and stack discovery (`gh pr list` rebuilds the whole Graphite stack, including its merged and closed members). | Sending still works. You lose the PR title, the branch names, exact/stack candidate ranking, and the `Title:`/`Branch:` lines in the agent's prompt. Stack detection is lost **entirely**, local git ancestry included: that check proves "this branch is an ancestor of a branch in the stack", and without `gh` there is no stack and no PR head branch to compare against. The bridge says so in the target picker, in the agent's prompt and in the log. |
 
@@ -112,19 +112,17 @@ before installing it.
 One command from npm. No clone or build step:
 
 ```sh
-paseo plugin install npm:send-to-paseo
+paseo plugin install send-to-paseo
 paseo plugin ls          # expect: send-to-paseo  running  yes
 paseo plugin logs send-to-paseo
 ```
 
-The latest release is also available directly from Git with
-`paseo plugin add tomgrin10/send-to-paseo --path plugin`.
 `pluginsEnabled` must already be `true` in the daemon's `config.json`.
 
 There is nothing to install because the plugin imports nothing at runtime that
 the Paseo host does not already provide — see
-[No runtime dependencies, ever](#no-runtime-dependencies-ever). To upgrade a
-Git-managed install, run `paseo plugin update send-to-paseo`; for a checkout,
+[No runtime dependencies, ever](#no-runtime-dependencies-ever). To update an
+installed plugin, run `paseo plugin update send-to-paseo`; for a checkout,
 run `paseo plugin reload send-to-paseo`.
 
 ### From a checkout (contributors)
@@ -197,7 +195,7 @@ All of it lives in the Paseo surface; there is no config file to hunt for.
 | --- | --- | --- |
 | Port | `7788` | Saving rebinds the listener straight away. Bind address is always `127.0.0.1`. |
 | Private bridge address (`externalBridgeUrl`) | none | Optional HTTPS origin for a reverse proxy such as Tailscale Serve. Saving explicitly allowlists only that origin's Host header; the listener remains loopback-only. |
-| Paseo host discovery | automatic | Paseo 0.9 supplies every configured host and live status, including offline hosts. “Check Paseo access” always calls `getPaseoClient(serverId)` for that exact row. |
+| Paseo host discovery | automatic | Paseo supplies every configured host and live status, including offline hosts. “Check Paseo access” always calls `getPaseoClient(serverId)` for that exact row. |
 | Additional browser routes | none | Connections imported from `stp1_…` codes. These remain necessary only because host discovery exposes neither a private bridge URL nor its token; the Primary plugin resolves and sends through these bridges. |
 | Pairing token | generated on first run | 32 random bytes, base64url. |
 | Agent destination | `New agent` | Start a fresh agent, or reuse the best non-archived root agent in an existing target workspace. A create target and a workspace with no eligible root still start a new agent. |
@@ -832,11 +830,11 @@ endpoint and a wrong method on a known endpoint both return
 
 ## Layout
 
-Paseo 0.9 uses separate runtime entries and directory boundaries. Client code,
+Paseo uses separate runtime entries and directory boundaries. Client code,
 server code and shared contracts compile into their matching bundles.
 
 ```
-paseo-plugin.json          id and Paseo >=0.9.0 requirement
+paseo-plugin.json          id and Paseo version requirement
 index.client.tsx           client contribution wiring
 index.server.ts            RPC handlers and bridge lifecycle
 client/settings.tsx        the Paseo surface
@@ -882,3 +880,12 @@ assembled specifier.
 
 The listener cleanup and no-runtime-dependency rules are demonstrated in
 [`VERIFICATION.md`](VERIFICATION.md) §3, §10 and §18.
+
+## More Paseo plugins
+
+Also available from [Tom Gringauz](https://github.com/tomgrin10):
+
+- [Defer](https://github.com/tomgrin10/paseo-defer) — Schedule messages to agents for later delivery.
+- [Graphite](https://github.com/tomgrin10/paseo-graphite) — Monitor Graphite stacks and PR action state.
+- [Smart Session](https://github.com/tomgrin10/paseo-smart-session) — Context-aware compaction and usage insights for long-running agents.
+- [Vitals](https://github.com/tomgrin10/paseo-vitals) — Host, Paseo, agent, and Docker health in one dashboard.

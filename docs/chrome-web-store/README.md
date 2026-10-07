@@ -48,7 +48,7 @@ Detailed description (paste into the dashboard's Description field):
 > Current requirements and full setup instructions are at https://github.com/tomgrin10/send-to-paseo.
 >
 > 1. Install Paseo from https://paseo.sh and enable plugins.
-> 2. In a terminal, run: paseo plugin install npm:send-to-paseo
+> 2. In a terminal, run: paseo plugin install send-to-paseo
 > 3. Copy the pairing token from the Send to Paseo plugin in Paseo. Open the extension's settings,
 >    paste the token, and test the connection.
 >
@@ -105,8 +105,8 @@ purpose, and no creditworthiness or lending use.
 
 ## Reviewer instructions
 
-1. Install Paseo 0.9.0 or newer.
-2. Run `paseo plugin install npm:send-to-paseo`.
+1. Install the latest Paseo release from https://paseo.sh.
+2. Run `paseo plugin install send-to-paseo`.
 3. In Paseo, open **Send to Paseo** and copy its pairing token.
 4. Open the extension's options page, paste the token, and confirm the paired state.
 5. Visit a GitHub pull request, open **Send to Paseo**, and observe the pre-resolved target list.
