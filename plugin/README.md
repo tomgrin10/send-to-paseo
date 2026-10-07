@@ -112,7 +112,7 @@ before installing it.
 One command from npm. No clone or build step:
 
 ```sh
-paseo plugin install npm:send-to-paseo
+paseo plugin install send-to-paseo
 paseo plugin ls          # expect: send-to-paseo  running  yes
 paseo plugin logs send-to-paseo
 ```
