@@ -23,7 +23,7 @@ Requires [Paseo](https://paseo.sh) 0.9.0 or newer and `git` on the computer runn
 2. **Install the Paseo plugin.** Enable plugins in Paseo's **Settings → Plugins**, then run:
 
    ```sh
-   paseo plugin install npm:send-to-paseo
+   paseo plugin install send-to-paseo
    ```
 
 3. **Pair once.** In Paseo, open **Send to Paseo** and copy the **pairing token**. Click the
