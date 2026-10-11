@@ -269,6 +269,9 @@ probe and the self-check.
   fix the seam.
 - Injection is idempotent and must survive client-side navigation between PRs, on Graphite's
   router and on GitHub's Turbo alike.
+- Both scripts match all Graphite app routes so inbox-to-PR navigation loads the lifecycle
+  before the first PR. The adapter still gates mounting/resolution on PR URLs. Root replacement
+  must re-run injection as well as observation, even when the replacement makes no later mutations.
 - Every shadow host we attach to the page gets `containKeyboard()`. A new surface that accepts
   input and skips it will be silently unusable on both sites.
 - `mainworld.js` must stay a `world: "MAIN"` content script at `document_start`. An isolated-world
@@ -348,7 +351,7 @@ Require `running`, an empty `ERROR` column, and `bridge listening on http://127.
 cd extension
 npm run typecheck
 npm run build
-node ../test/e2e.mjs                     # 64 cases; builds dist/ and dist-test/ itself
+node ../test/e2e.mjs                     # 66 cases; builds dist/ and dist-test/ itself
 ```
 
 The suite runs Chromium **headless by default** (`--headless=new` loads MV3 extensions fine, so
@@ -382,6 +385,7 @@ fixture at a real repository — every screenshot in `docs/screenshots/` is comm
 | Test | Guards |
 | --- | --- |
 | 4 | Resolve prewarming: mounting the PR button reaches `/v1/resolve` before the user clicks, and the popover consumes that result. |
+| 8b, 8c | First PR opened from a full inbox load, cleanup on return to inbox, and recovery when Graphite replaces the populated app root without changing the URL. Test manifest paths mirror shipping registration. |
 | 8, 24 | SPA re-targeting. The MAIN-world `pushState` shim on Graphite's router and on GitHub's Turbo; a stale PR number can never reach `/v1/resolve`. |
 | 10g | Remote plain HTTP is rejected before Chrome permission is requested; an HTTPS proxy URL can request only its exact origin. |
 | 11 | The bearer token is unreachable from the page — DOM, shadow roots, attributes, `window`, both storages, plus a static scan of the built bundles. |

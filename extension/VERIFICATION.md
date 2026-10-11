@@ -1,5 +1,61 @@
 # Verification record
 
+## Release 1.4.2 validation — 2026-10-11
+
+The Graphite first-load fixes were applied to a clean checkout of current `origin/main`
+(release 1.4.1), leaving unrelated local plugin/display work out of this patch release.
+All four product version fields and both lockfiles agree on 1.4.2.
+
+```text
+plugin: npm ci && npm run verify       # typecheck, 74/74 checks, 13/13 tests passed
+extension: npm ci && npm run verify   # typecheck, 3/3 unit tests, shipping build,
+                                     # 66 passed, 0 failed, 0 skipped browser cases
+node --test test/chrome-web-store.test.mjs  # 9/9 passed
+RELEASE_TAG=v1.4.2 node scripts/check-release.mjs  # versions agree
+RELEASE_TAG=v1.4.2 python3 scripts/package-extension.py  # shipping ZIP validated
+```
+
+The installed bridge reload succeeded, stayed `running` with an empty error column, and
+logged clean dependency checks and the loopback bridge listener. The first CLI reload attempt
+hit a 30-second operator-side timeout under VM load; a retry completed in 3 seconds. The daemon
+was not restarted. The tracked release source and ZIP were scanned for the live pairing token,
+daemon password, private keys, GitHub credentials and npm tokens; no matches were found. The
+plugin's dry-run package contained 23 shipping files, with no settings, secrets or node_modules.
+
+## Graphite first-load recovery — 2026-10-11
+
+Both scripts now match all routes on `app.graphite.com` and `app.graphite.dev`. Previously,
+the PR-only manifest registration left them unloaded when an inbox document soft-navigated
+to its first PR. The adapter still mounts/resolves only on PR URLs. The location poll also
+re-injects when the app root is replaced or the button is detached; attaching an observer to
+an already-populated replacement alone used to leave the button absent.
+
+Cases 8b and 8c use the real unpacked extension to cover inbox-to-PR navigation without a
+document reload, cleanup on return to inbox, and replacement of a fully-rendered app root at
+the same URL. Test manifest paths now mirror each shipping script's paths, rather than
+maintaining an independent list that could hide a registration defect. Both new tests failed
+with a missing-button timeout before the fixes (64 passed, 2 failed, 0 skipped of 66).
+
+Validation against the user's live Graphite tab was not available; these reproductions use
+the captured Graphite DOM and real Chrome content-script registration.
+
+The first full run with the fixes finished with 65 passed, 1 failed, 0 skipped. Both new
+regressions passed; case 13 reported `bridge_unreachable` while testing the live bridge.
+A direct read-only `/v1/resolve` retry returned HTTP 404 / `project_not_found` in 796 ms.
+The full suite was then repeated to check the live integration again.
+
+```text
+npm run typecheck            # clean
+npm run test:unit            # 3/3 passed
+node plugin/check-deps.mjs   # from repository root: 74/74 checks passed
+STP_CHROMIUM=~/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome node test/e2e.mjs
+=== 66 passed, 0 failed, 0 skipped (of 66) ===
+```
+
+The final run built both shipping and test bundles and had no browser console errors. Case 13
+passed read-only against the live bridge. No live send or daemon restart was performed. Generated
+screenshot differences were discarded because the extension's appearance did not change.
+
 ## Per-send agent destination — 2026-09-24
 
 The unpacked extension now renders an Agent dropdown initialized by the selected host's saved
@@ -1013,7 +1069,7 @@ never constructed, never parsed, and asserted only by shape.
 cd extension && npm install
 npm run typecheck
 npm run build
-node ../test/e2e.mjs          # 64 cases, ~60 s, headless by default
+node ../test/e2e.mjs          # 66 cases, headless by default
                               # STP_HEADED=1 node ../test/e2e.mjs  to watch it
 ```
 

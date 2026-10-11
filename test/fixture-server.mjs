@@ -66,6 +66,14 @@ export function createFixtureServer({ port = 4173 } = {}) {
       return;
     }
 
+    // A full document load on a non-PR Graphite route, before its router
+    // opens a PR without reloading. PR fixtures are installed by the test.
+    if (url.pathname === "/" || url.pathname === "/inbox") {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+      res.end('<!doctype html><html><body><div data-testid="graphite-app-wrapper">Inbox</div></body></html>');
+      return;
+    }
+
     const route = routeFor(url.pathname);
     if (!route) {
       res.writeHead(404, { "Content-Type": "text/plain" });

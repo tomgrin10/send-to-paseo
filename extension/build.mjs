@@ -57,20 +57,6 @@ const extraHosts = isTest
   ? [`localhost:${testPort}`, `127.0.0.1:${testPort}`]
   : [];
 
-// One entry per (fixture host x site URL shape). The Graphite shape is
-// /github/pr/{owner}/{repo}/{n}/{slug}; the GitHub shape is
-// /{owner}/{repo}/pull/{n}[/{tab}] — see test/fixture-server.mjs. The two are
-// disjoint, so registering both adapters against the same localhost origin is
-// unambiguous.
-const extraMatches = isTest
-  ? [
-      `http://localhost:${testPort}/github/pr/*`,
-      `http://127.0.0.1:${testPort}/github/pr/*`,
-      `http://localhost:${testPort}/*/*/pull/*`,
-      `http://127.0.0.1:${testPort}/*/*/pull/*`,
-    ]
-  : [];
-
 /* -------------------------------------------------------------------------- */
 /* icons (generated, so no binaries live in the repo)                         */
 /* -------------------------------------------------------------------------- */
@@ -324,6 +310,12 @@ function writeStatic() {
   const manifest = JSON.parse(readFileSync(join(here, "public/manifest.json"), "utf8"));
   if (isTest) {
     for (const cs of manifest.content_scripts) {
+      // Mirror each shipping script's path coverage so a test-only match
+      // cannot hide a missing registration on Graphite's inbox/entry page.
+      const paths = [...new Set(cs.matches.map((match) => new URL(match).pathname))];
+      const extraMatches = extraHosts.flatMap((host) =>
+        paths.map((path) => `http://${host}${path}`),
+      );
       cs.matches = [...cs.matches, ...extraMatches];
     }
     for (const port of testBridgePorts) {
