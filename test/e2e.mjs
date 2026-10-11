@@ -1149,6 +1149,53 @@ await test("8. SPA navigation to another PR re-targets the button", async () => 
   ];
 });
 
+await test("8b. First PR opened from Graphite's inbox mounts without a reload", async () => {
+  await bridgeReset();
+  await page.goto(`http://localhost:${FIXTURE_PORT}/inbox`, { waitUntil: "load" });
+  await page.waitForTimeout(300);
+  assertEq(await page.locator(BUTTON).count(), 0, "no button on the inbox");
+  assertEq((await bridgeLog()).filter((r) => r.path === "/v1/resolve").length, 0, "inbox must not resolve a PR");
+
+  // Preserve a document marker to prove no reload occurred, then emulate
+  // the MAIN-world router and its asynchronous PR render.
+  await page.evaluate(async (prUrl) => {
+    window.__stpInboxDocument = true;
+    const html = await (await fetch(prUrl)).text();
+    history.pushState({}, "", new URL(prUrl).pathname);
+    const parsed = new DOMParser().parseFromString(html, "text/html");
+    document.querySelector('[data-testid="graphite-app-wrapper"]').replaceWith(
+      parsed.querySelector('[data-testid="graphite-app-wrapper"]'),
+    );
+  }, fixtures.url());
+  await waitForButton(page, 4000);
+  assert(await page.evaluate(() => window.__stpInboxDocument === true), "must stay in the inbox document");
+  assertEq(await page.locator(BUTTON).count(), 1, "exactly one button after the first PR navigation");
+  assertEq(await page.locator(BUTTON).getAttribute("data-stp-mode"), "anchored", "button finds the rendered PR header");
+  await openPopover(page);
+  await waitForPhase(page, "ready");
+  assertEq((await lastRequest("/v1/resolve")).body.number, 942, "first PR resolves the right number");
+
+  await page.evaluate(() => history.pushState({}, "", "/inbox"));
+  await page.waitForFunction((sel) => !document.querySelector(sel), BUTTON, { timeout: 4000 });
+  assertEq(await page.locator(POPOVER).count(), 0, "leaving the PR closes the composer");
+});
+
+await test("8c. Replacing Graphite's app root at the same URL restores the button", async () => {
+  await page.goto(fixtures.url(), { waitUntil: "load" });
+  await waitForButton(page);
+  // Removing a root is a mutation of its parent, invisible to an observer
+  // attached only to the old root. The replacement is already populated.
+  await page.evaluate(() => {
+    const root = document.querySelector('[data-testid="graphite-app-wrapper"]');
+    const replacement = root.cloneNode(true);
+    replacement.querySelector("send-to-paseo-button").remove();
+    root.replaceWith(replacement);
+  });
+  await waitForButton(page, 4000);
+  assertEq(await page.locator(BUTTON).count(), 1, "exactly one button after root replacement");
+  assertEq(await page.locator(BUTTON).getAttribute("data-stp-mode"), "anchored", "restored in the replacement header");
+});
+
 /* ---- 9. error paths ---------------------------------------------------- */
 await test("9a. Error path: bridge down -> bridge_unreachable", async () => {
   await bridge.close();
@@ -2118,8 +2165,8 @@ await test("18. Shipping build contains no test host or test bridge port", async
   assert(!manifest.name.includes("test build"), `shipping name must not be the test build: ${manifest.name}`);
 
   const expectedMatches = [
-    "https://app.graphite.com/github/pr/*",
-    "https://app.graphite.dev/github/pr/*",
+    "https://app.graphite.com/*",
+    "https://app.graphite.dev/*",
     "https://github.com/*/*/pull/*",
   ];
   for (const cs of manifest.content_scripts) {

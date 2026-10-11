@@ -6,11 +6,14 @@ creating a worktree workspace if none exists.
 
 | Site | Content-script match | Anchor |
 | --- | --- | --- |
-| Graphite | `https://app.graphite.com/github/pr/*`, `…graphite.dev…` | before **Review Changes** in the PR header |
+| Graphite | `https://app.graphite.com/*`, `https://app.graphite.dev/*` | before **Review Changes** in the PR header |
 | GitHub | `https://github.com/*/*/pull/*` | appended to the PR header action row, right of **Code** |
 
 The extension never talks to the Paseo daemon. It talks only to the `send-to-paseo`
 plugin's local HTTP bridge, over the frozen contract in [`../CONTRACT.md`](../CONTRACT.md).
+
+Both scripts load on every Graphite app route so opening a PR from the inbox works without
+reloading. The adapter mounts the button and resolves workspaces only on PR URLs.
 
 ---
 
@@ -94,7 +97,7 @@ Other scripts:
 | Script | What it does |
 | --- | --- |
 | `npm run build` | Shipping build into `extension/dist/`. |
-| `npm run build:test` | Test build into `extension/dist-test/` (adds the fixture-server host to the content-script matches, in both the Graphite `/github/pr/*` and the GitHub `/*/*/pull/*` path shapes — used only by the e2e suite). |
+| `npm run build:test` | Test build into `extension/dist-test/` (mirrors each shipping content script's path matches on the fixture-server host — used only by the e2e suite). |
 | `npm run watch` | Rebuild `dist/` on change. Reload the extension in `chrome://extensions` to pick changes up. |
 | `npm run typecheck` | `tsc --noEmit`. |
 | `npm run test:e2e` | Real Chromium end-to-end suite, headless by default — `STP_HEADED=1` to watch it (see [VERIFICATION.md](VERIFICATION.md)). |

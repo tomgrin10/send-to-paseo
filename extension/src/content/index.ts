@@ -161,6 +161,7 @@ function attachObserver(): void {
   const target = mounted?.adapter.observeTarget?.() ?? currentObserveTarget() ?? document.body;
   observedTarget = target;
   observer ??= new MutationObserver(() => schedule());
+  observer.disconnect();
   observer.observe(target, { childList: true, subtree: true });
 }
 
@@ -191,8 +192,12 @@ function start(): void {
     // if the MAIN-world shim was blocked by a page CSP)...
     onLocationChange();
     // ...and re-target if the observed root itself was replaced (route swap).
-    const want = currentObserveTarget();
-    if (want && want !== observedTarget) attachObserver();
+    const want = currentObserveTarget() ?? document.body;
+    if (want !== observedTarget || (mounted && !mounted.handle.host.isConnected)) {
+      // A replacement root may already contain the finished header. Merely
+      // observing future mutations would leave the button missing forever.
+      runInjection();
+    }
   }, LOCATION_POLL_MS);
 }
 

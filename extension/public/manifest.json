@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Send to Paseo",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "Send PR work from Graphite or GitHub to a new or existing Paseo agent on any of your machines.",
   "minimum_chrome_version": "111",
   "permissions": [
@@ -38,8 +38,8 @@
   "content_scripts": [
     {
       "matches": [
-        "https://app.graphite.com/github/pr/*",
-        "https://app.graphite.dev/github/pr/*",
+        "https://app.graphite.com/*",
+        "https://app.graphite.dev/*",
         "https://github.com/*/*/pull/*"
       ],
       "js": [
@@ -51,8 +51,8 @@
     },
     {
       "matches": [
-        "https://app.graphite.com/github/pr/*",
-        "https://app.graphite.dev/github/pr/*",
+        "https://app.graphite.com/*",
+        "https://app.graphite.dev/*",
         "https://github.com/*/*/pull/*"
       ],
       "js": [
