@@ -479,3 +479,7 @@ Each of these cost time on the v0.3.0 release and none of them is guessable:
 - **`node test/e2e.mjs` cannot be fully green on a machine without a password-free Paseo
   daemon.** Case 13 needs one. See "Testing against a live daemon" below, and do not read a
   red 13 as a broken build.
+
+## Automated publishing recovery
+
+The npm release workflow supports `workflow_dispatch` with an existing `tag` for recovery without rewriting tags. It checks that the checked-out tag is on `main` and matches package versions. Use Node 24 and npm 11.20.0 with GitHub OIDC; do not set `registry-url` on setup-node or configure token-placeholder authentication. Retrying an already-published package requires its registry integrity to match the packed snapshot. A new publish is verified against the registry before downstream release steps continue.
