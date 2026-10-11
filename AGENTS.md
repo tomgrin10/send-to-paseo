@@ -428,7 +428,8 @@ deleting the record.
 
 ## Create a release
 
-Exercised through `v1.4.1`; all releases are published. `origin` is
+Exercised through `v1.4.2`; npm and GitHub releases are published. Chrome publication follows
+Google approval; verify its version and rollout through the store status workflow. `origin` is
 `github.com/tomgrin10/send-to-paseo`, and tags live on `main`.
 
 - Release user-facing features, bug fixes, compatibility changes, or contract changes.
