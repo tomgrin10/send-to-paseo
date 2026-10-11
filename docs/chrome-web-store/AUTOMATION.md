@@ -81,6 +81,14 @@ passed authentication and returned version `1.4.0` as `PUBLISHED` at 100% rollou
 or takedown flag. Verification made no upload or publish request and created no release tag.
 Both verification suites, all nine publisher tests, and local release packaging checks passed.
 
+On 2026-10-11, [release 1.4.2](https://github.com/tomgrin10/send-to-paseo/releases/tag/v1.4.2)
+completed npm publication, release ZIP upload and Chrome submission through
+[run 38143643777](https://github.com/tomgrin10/send-to-paseo/actions/runs/38143643777).
+At 13:43 UTC, [status run 38144310043](https://github.com/tomgrin10/send-to-paseo/actions/runs/38144310043)
+confirmed the new version pending review with 100% deployment configured. It will publish
+automatically on approval; the successful workflow alone does not prove Chrome clients can
+download it yet.
+
 ## Release and recovery
 
 Follow the versioning and manual release checks in `AGENTS.md`, then push the release tag. Everything

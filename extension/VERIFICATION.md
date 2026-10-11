@@ -22,6 +22,18 @@ was not restarted. The tracked release source and ZIP were scanned for the live 
 daemon password, private keys, GitHub credentials and npm tokens; no matches were found. The
 plugin's dry-run package contained 23 shipping files, with no settings, secrets or node_modules.
 
+The tagged release [workflow 38143643777](https://github.com/tomgrin10/send-to-paseo/actions/runs/38143643777)
+completed successfully, published the npm package and GitHub release, and submitted the extension
+with `DEFAULT_PUBLISH`. CI passed 65 browser cases and skipped the local-only live bridge case.
+The released ZIP's SHA-256 matches the locally verified ZIP:
+`78337be28b60edc02c3278df71de28b975528fdc76fae0160df9223802677137`.
+The installed bridge was then updated to 1.4.2 and verified `running` with no error.
+
+As of 13:43 UTC, [store status run 38144310043](https://github.com/tomgrin10/send-to-paseo/actions/runs/38144310043)
+reported 1.4.2 `PENDING_REVIEW` with `deployPercentage: 100`; 1.4.1 remained published.
+Chrome's update service still advertised 1.4.1. Submission success is not a claim that 1.4.2
+is already available to Chrome clients. Publication is automatic after Google's approval.
+
 ## Graphite first-load recovery — 2026-10-11
 
 Both scripts now match all routes on `app.graphite.com` and `app.graphite.dev`. Previously,
