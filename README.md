@@ -1,9 +1,10 @@
 # send-to-paseo
 
+[![npm version](https://img.shields.io/npm/v/send-to-paseo?style=for-the-badge&color=cb3837)](https://www.npmjs.com/package/send-to-paseo)
+[![npm downloads](https://img.shields.io/npm/dm/send-to-paseo?style=for-the-badge&color=cb3837)](https://www.npmjs.com/package/send-to-paseo)
 [![Paseo](https://img.shields.io/badge/Paseo-%E2%89%A5%200.9.0-8A63D2?style=for-the-badge)](https://paseo.sh)
-[![Chrome Web Store](https://img.shields.io/badge/Chrome_Web_Store-Install-4285F4?style=for-the-badge)](https://chromewebstore.google.com/detail/send-to-paseo/blflbbgkckbabbkoigpocilbkkmfijfg)
-[![Release](https://img.shields.io/github/v/release/tomgrin10/send-to-paseo?display_name=tag&sort=semver&style=for-the-badge&label=release&color=6366f1)](https://github.com/tomgrin10/send-to-paseo/releases/latest)
 [![License](https://img.shields.io/github/license/tomgrin10/send-to-paseo?style=for-the-badge&color=2563eb)](LICENSE)
+[![Chrome Web Store](https://img.shields.io/badge/Chrome_Web_Store-Install-4285F4?style=for-the-badge)](https://chromewebstore.google.com/detail/send-to-paseo/blflbbgkckbabbkoigpocilbkkmfijfg)
 
 Send instructions from GitHub and Graphite pull requests to your [Paseo](https://paseo.sh) agents.
 Choose a workspace, start a new agent or continue with an existing one, and send.
@@ -105,15 +106,17 @@ submission. [Publishing setup and recovery](docs/chrome-web-store/AUTOMATION.md)
 The extension uses Paseo's brand mark and Lucide's settings icon. Paseo is Apache-2.0,
 © 2025-present Mohamed Boudra; Lucide is ISC.
 
-## More Paseo plugins
-
-Also available from [Tom Gringauz](https://github.com/tomgrin10):
-
-- [Defer](https://github.com/tomgrin10/paseo-defer) — Schedule messages to agents for later delivery.
-- [Graphite](https://github.com/tomgrin10/paseo-graphite) — Monitor Graphite stacks and PR action state.
-- [Smart Session](https://github.com/tomgrin10/paseo-smart-session) — Context-aware compaction and usage insights for long-running agents.
-- [Vitals](https://github.com/tomgrin10/paseo-vitals) — Host, Paseo, agent, and Docker health in one dashboard.
-
 ## License
 
 [MIT](LICENSE) © 2026 Tom Gringauz.
+
+## Other plugins
+
+- [Defer](https://github.com/tomgrin10/paseo-defer) — Schedule messages for later delivery.
+- [Graphite](https://github.com/tomgrin10/paseo-graphite) — Graphite stacks and PR status.
+- [Smart Session](https://github.com/tomgrin10/paseo-smart-session) — Context compaction and usage insights.
+- [Vitals](https://github.com/tomgrin10/paseo-vitals) — Host, agent, and Docker health.
+- [Session Guard](https://github.com/tomgrin10/paseo-session-guard) — Pause at session limits and continue after reset.
+- [Transfer](https://github.com/tomgrin10/paseo-transfer) — Copy or move workspaces between hosts.
+- [Transcript Search](https://github.com/tomgrin10/paseo-transcript-search) — Search conversations across connected hosts.
+- [Dispatch](https://github.com/tomgrin10/paseo-dispatch) — Route tasks to existing workspaces (development preview).

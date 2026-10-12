@@ -1,5 +1,10 @@
 # send-to-paseo
 
+[![npm version](https://img.shields.io/npm/v/send-to-paseo?style=for-the-badge&color=cb3837)](https://www.npmjs.com/package/send-to-paseo)
+[![npm downloads](https://img.shields.io/npm/dm/send-to-paseo?style=for-the-badge&color=cb3837)](https://www.npmjs.com/package/send-to-paseo)
+[![Paseo](https://img.shields.io/badge/Paseo-%E2%89%A5%200.9.0-8A63D2?style=for-the-badge)](https://paseo.sh)
+[![License](https://img.shields.io/github/license/tomgrin10/send-to-paseo?style=for-the-badge&color=2563eb)](LICENSE)
+
 A Paseo plugin that runs a small local HTTP bridge so a browser extension can
 send work from a pull request to the right workspace and agent — creating a
 worktree checked out to the PR if none exists.
@@ -15,6 +20,90 @@ Paseo through the supported SDK.
   new-agent defaults, recent sends.
 - Verified behaviour, with real command output, is recorded in the
   [repository](https://github.com/tomgrin10/send-to-paseo/blob/main/plugin/VERIFICATION.md).
+
+---
+
+## Install
+
+Plugins are trusted, unsandboxed code: this one runs an HTTP server that can
+start agents which execute arbitrary code on the daemon machine. Read the source
+before installing it.
+
+One command from npm. No clone or build step:
+
+```sh
+paseo plugin install send-to-paseo
+paseo plugin ls          # expect: send-to-paseo  running  yes
+paseo plugin logs send-to-paseo
+```
+
+`pluginsEnabled` must already be `true` in the daemon's `config.json`.
+
+There is nothing to install because the plugin imports nothing at runtime that
+the Paseo host does not already provide — see
+[No runtime dependencies, ever](#no-runtime-dependencies-ever). To update an
+installed plugin, run `paseo plugin update send-to-paseo`; for a checkout,
+run `paseo plugin reload send-to-paseo`.
+
+### From a checkout (contributors)
+
+Installing from a directory is the loop to use while editing, because
+`paseo plugin reload` picks up changes in place:
+
+```sh
+git clone https://github.com/tomgrin10/send-to-paseo.git
+cd send-to-paseo/plugin
+npm install              # devDependencies only — for `npm run typecheck`
+npm run verify
+paseo plugin add /absolute/path/to/send-to-paseo/plugin
+paseo plugin ls          # expect: send-to-paseo  running  yes
+```
+
+After editing the source:
+
+```sh
+npm run verify
+paseo plugin reload send-to-paseo
+```
+
+Never restart the daemon to pick up plugin changes — that kills running agents.
+
+### No runtime dependencies, ever
+
+`paseo plugin add` compiles the plugin **with no packages installed** — there is
+no `npm install` step in that path, and the daemon's bundler can only resolve the
+specifiers the host provides at runtime:
+
+```
+@getpaseo/plugin   @getpaseo/plugin/client   @getpaseo/plugin/server
+@getpaseo/plugin/client/react-native
+zod   react   react/jsx-runtime   react-native   @tanstack/react-query
+node:*  (built-ins, in the server bundle)
+```
+
+Everything in `plugin/package.json` is therefore a **devDependency**, present only
+so `npm run typecheck` works for contributors.
+
+> **Nothing may be added to `dependencies`.** A runtime import of anything outside
+> the list above fails `paseo plugin add` for every user with
+> `Build failed: Could not resolve "<pkg>"`, while still working perfectly on any
+> machine that has run `npm install` — so it will not be caught locally. Imports
+> from `@getpaseo/client` and `@getpaseo/protocol` must stay `import type` (erased
+> at build time) or be reimplemented locally; the one runtime use of the Paseo SDK
+> goes through the assembled-specifier `require` in `server/daemon.ts`, precisely
+> so the bundler cannot see it. Before changing an import, read
+> [`VERIFICATION.md`](VERIFICATION.md) §18, which includes the exact
+> no-`node_modules` build command that proves an install still works.
+
+### Pairing
+
+1. Open **Send to Paseo** in the Paseo sidebar.
+2. Under **Pairing token**, press **Copy** (or **Reveal** and copy by hand).
+3. Paste it into the extension's options page. Simple setup already uses the Primary Paseo
+   machine's loopback bridge URL.
+
+**Regenerate** issues a new token and immediately invalidates the old one, so any
+paired extension has to be re-paired.
 
 ---
 
@@ -100,90 +189,6 @@ paseo plugin logs send-to-paseo
 
 The same information is on the **Requirements** card in the Paseo surface, which
 is the place to look first if you have never opened a log file.
-
----
-
-## Install
-
-Plugins are trusted, unsandboxed code: this one runs an HTTP server that can
-start agents which execute arbitrary code on the daemon machine. Read the source
-before installing it.
-
-One command from npm. No clone or build step:
-
-```sh
-paseo plugin install send-to-paseo
-paseo plugin ls          # expect: send-to-paseo  running  yes
-paseo plugin logs send-to-paseo
-```
-
-`pluginsEnabled` must already be `true` in the daemon's `config.json`.
-
-There is nothing to install because the plugin imports nothing at runtime that
-the Paseo host does not already provide — see
-[No runtime dependencies, ever](#no-runtime-dependencies-ever). To update an
-installed plugin, run `paseo plugin update send-to-paseo`; for a checkout,
-run `paseo plugin reload send-to-paseo`.
-
-### From a checkout (contributors)
-
-Installing from a directory is the loop to use while editing, because
-`paseo plugin reload` picks up changes in place:
-
-```sh
-git clone https://github.com/tomgrin10/send-to-paseo.git
-cd send-to-paseo/plugin
-npm install              # devDependencies only — for `npm run typecheck`
-npm run verify
-paseo plugin add /absolute/path/to/send-to-paseo/plugin
-paseo plugin ls          # expect: send-to-paseo  running  yes
-```
-
-After editing the source:
-
-```sh
-npm run verify
-paseo plugin reload send-to-paseo
-```
-
-Never restart the daemon to pick up plugin changes — that kills running agents.
-
-### No runtime dependencies, ever
-
-`paseo plugin add` compiles the plugin **with no packages installed** — there is
-no `npm install` step in that path, and the daemon's bundler can only resolve the
-specifiers the host provides at runtime:
-
-```
-@getpaseo/plugin   @getpaseo/plugin/client   @getpaseo/plugin/server
-@getpaseo/plugin/client/react-native
-zod   react   react/jsx-runtime   react-native   @tanstack/react-query
-node:*  (built-ins, in the server bundle)
-```
-
-Everything in `plugin/package.json` is therefore a **devDependency**, present only
-so `npm run typecheck` works for contributors.
-
-> **Nothing may be added to `dependencies`.** A runtime import of anything outside
-> the list above fails `paseo plugin add` for every user with
-> `Build failed: Could not resolve "<pkg>"`, while still working perfectly on any
-> machine that has run `npm install` — so it will not be caught locally. Imports
-> from `@getpaseo/client` and `@getpaseo/protocol` must stay `import type` (erased
-> at build time) or be reimplemented locally; the one runtime use of the Paseo SDK
-> goes through the assembled-specifier `require` in `server/daemon.ts`, precisely
-> so the bundler cannot see it. Before changing an import, read
-> [`VERIFICATION.md`](VERIFICATION.md) §18, which includes the exact
-> no-`node_modules` build command that proves an install still works.
-
-### Pairing
-
-1. Open **Send to Paseo** in the Paseo sidebar.
-2. Under **Pairing token**, press **Copy** (or **Reveal** and copy by hand).
-3. Paste it into the extension's options page. Simple setup already uses the Primary Paseo
-   machine's loopback bridge URL.
-
-**Regenerate** issues a new token and immediately invalidates the old one, so any
-paired extension has to be re-paired.
 
 ---
 
@@ -881,11 +886,17 @@ assembled specifier.
 The listener cleanup and no-runtime-dependency rules are demonstrated in
 [`VERIFICATION.md`](VERIFICATION.md) §3, §10 and §18.
 
-## More Paseo plugins
+## License
 
-Also available from [Tom Gringauz](https://github.com/tomgrin10):
+[MIT](LICENSE) © 2026 Tom Gringauz.
 
-- [Defer](https://github.com/tomgrin10/paseo-defer) — Schedule messages to agents for later delivery.
-- [Graphite](https://github.com/tomgrin10/paseo-graphite) — Monitor Graphite stacks and PR action state.
-- [Smart Session](https://github.com/tomgrin10/paseo-smart-session) — Context-aware compaction and usage insights for long-running agents.
-- [Vitals](https://github.com/tomgrin10/paseo-vitals) — Host, Paseo, agent, and Docker health in one dashboard.
+## Other plugins
+
+- [Defer](https://github.com/tomgrin10/paseo-defer) — Schedule messages for later delivery.
+- [Graphite](https://github.com/tomgrin10/paseo-graphite) — Graphite stacks and PR status.
+- [Smart Session](https://github.com/tomgrin10/paseo-smart-session) — Context compaction and usage insights.
+- [Vitals](https://github.com/tomgrin10/paseo-vitals) — Host, agent, and Docker health.
+- [Session Guard](https://github.com/tomgrin10/paseo-session-guard) — Pause at session limits and continue after reset.
+- [Transfer](https://github.com/tomgrin10/paseo-transfer) — Copy or move workspaces between hosts.
+- [Transcript Search](https://github.com/tomgrin10/paseo-transcript-search) — Search conversations across connected hosts.
+- [Dispatch](https://github.com/tomgrin10/paseo-dispatch) — Route tasks to existing workspaces (development preview).
