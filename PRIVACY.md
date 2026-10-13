@@ -1,6 +1,6 @@
 # Send to Paseo privacy policy
 
-Effective date: September 23, 2026
+Effective date: October 13, 2026
 
 Send to Paseo is a developer tool that lets a user send an instruction from a GitHub or Graphite
 pull-request page to a Paseo agent that the user controls.
@@ -38,7 +38,7 @@ the services the user has connected to it.
 
 ## Permissions
 
-The extension runs only on supported GitHub and Graphite pull-request pages. It uses local storage
+The extension runs on supported GitHub pull-request pages and Graphite app pages. Graphite-wide registration supports PR navigation and the optional signed-in companion. It uses local storage
 for settings and credentials, connects by default to the local Send to Paseo bridge at
 `127.0.0.1:7788`, and requests an exact additional origin only when the user explicitly configures
 another bridge. Optional origin access is not granted until the user approves Chrome's prompt.
@@ -54,3 +54,7 @@ bridge addresses.
 Material changes to this policy will be published in this repository with an updated effective
 date. Questions and privacy requests can be filed at
 <https://github.com/tomgrin10/send-to-paseo/issues>.
+
+## Optional Follow-through browser connection
+
+When Follow-through is installed on a paired Paseo machine and a signed-in Graphite tab is open, the extension can carry PR status and explicit Merge when ready commands. The first-party Graphite tab uses its existing session; cookies remain in Chrome and are never read or exported. Only repository/PR identifiers, expected revisions, normalized status, command IDs and sanitized results travel to configured Paseo bridges. The connection does not send agent messages.

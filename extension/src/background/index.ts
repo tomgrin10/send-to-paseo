@@ -1,5 +1,5 @@
 /**
- * Service worker. Owns the bearer tokens and performs every fetch.
+ * Service worker. Owns the bearer tokens and performs every Paseo bridge fetch.
  *
  * The content script can only ask for an *intent* to be carried out; it never
  * receives a token and never sees a bridge URL it could authenticate against.
@@ -35,6 +35,8 @@ import {
   writeHost,
   type HostConfig,
 } from "./settings";
+import { startFollowThroughBridge } from "./follow-through";
+startFollowThroughBridge();
 
 async function publicSettings(): Promise<PublicSettings> {
   const s = await readSettings();

@@ -27,7 +27,7 @@ Two halves that meet at one frozen HTTP contract:
 - `extension/` — Chrome MV3 extension. Puts a "Send to Paseo" button on Graphite and github.com
   PR pages.
 
-`CONTRACT.md` is the only integration point. **It is frozen.** Changing it means changing both
+`CONTRACT.md` governs the Send workflow. The optional Follow-through browser connection is specified separately in [docs/follow-through-bridge.md](docs/follow-through-bridge.md), under `/follow-through/v1/exchange`; it does not modify `/v1/*` or introduce merge controls in Send to Paseo. **It is frozen.** Changing it means changing both
 halves and re-running both verification suites — do that deliberately, bump `contract`, and never
 unilaterally from one side. Additive optional fields, in requests as well as responses, are the
 one exception and do not bump `contract`; the clause spells out the mechanism that makes that
@@ -257,7 +257,7 @@ probe and the self-check.
 ### Extension
 
 - The bearer token lives **only** in the service worker (`chrome.storage`). The content script
-  posts intents via `chrome.runtime.sendMessage`; the service worker performs every `fetch`. A
+  posts intents via `chrome.runtime.sendMessage`; the service worker performs every Paseo bridge `fetch`. The isolated Graphite companion uses first-party cookie-bound reads/toggles on Graphite itself; cookies are never read, exported, or sent to Paseo. A
   daemon-controlling credential must never sit next to a host page's JS.
 - Button and popover render in a **shadow root**. No global CSS, ever.
 - `shared/merge.ts` is the only place that decides which machine a send defaults to. It is pure and
@@ -350,6 +350,7 @@ Require `running`, an empty `ERROR` column, and `bridge listening on http://127.
 ```sh
 cd extension
 npm run typecheck
+npm run test:unit                       # 7 pure merge/Graphite companion cases
 npm run build
 node ../test/e2e.mjs                     # 66 cases; builds dist/ and dist-test/ itself
 ```

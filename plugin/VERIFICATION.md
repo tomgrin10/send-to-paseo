@@ -1,3 +1,7 @@
+# Optional Follow-through addon — 2026-10-13
+
+The prepared 1.5.0 source adds the authenticated `/follow-through/v1/exchange` transport without changing the Send v1 contract or UI. Existing checks and node tests pass. The isolated native browser integration exercises the actual HTTP route and SDK connection; missing Follow-through returns no jobs. Settings schema and pairing tokens are preserved. Release version checks and packed-source inspection pass. Publication has not occurred.
+
 # Verification log — `send-to-paseo` plugin
 
 ## 2026-09-24 — per-send agent destination

@@ -1,3 +1,7 @@
+# Follow-through addon validation — 2026-10-13
+
+The 1.5.0 source passes both typechecks, seven unit cases and all 66 original Send browser cases. No existing Send UI was changed. Shipping bundles contain no injected test hosts/ports. The companion regression fails when the post-write read failure is incorrectly treated as a definite refusal, and passes with the fix. Cross-plugin native UI verification is recorded in Follow-through’s docs/ui-verification.md. This source version has not been published to npm, GitHub releases or Chrome Web Store.
+
 # Verification record
 
 ## Release 1.4.2 validation — 2026-10-11

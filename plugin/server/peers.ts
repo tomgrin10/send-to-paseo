@@ -203,7 +203,7 @@ export async function enableMachinePrivateAccess(): Promise<ConnectionCodeResult
   }
 }
 
-async function fetchJson(
+export async function fetchJson(
   machine: SavedMachine,
   path: string,
   init: RequestInit | undefined,

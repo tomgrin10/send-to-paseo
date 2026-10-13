@@ -31,6 +31,7 @@ import {
 import { handleSend, isDryRun, recordFailedSend } from "./send";
 import { previewToken, settings, tokenMatches } from "./settings";
 import { machineById, resolveOnMachine, sendToMachine } from "./peers";
+import { followThrough, followThroughExchange } from "./follow-through";
 
 /**
  * The local HTTP bridge the Chrome extension talks to.
@@ -357,6 +358,17 @@ async function route(
   localOnly: boolean,
 ): Promise<void> {
   const cors = corsHeaders(req.headers.origin);
+
+  if (path === "/follow-through/v1/exchange") {
+    if (req.method !== "POST") throw methodNotAllowed();
+    await requireToken(req);
+    const { body, tooLarge } = await readBody(req);
+    if (tooLarge) throw new BridgeError("payload_too_large", "The follow-through result exceeds the bridge body limit.");
+    const parsed = followThroughExchange.safeParse(parseJsonBody(body));
+    if (!parsed.success) throw badRequest(parsed.error.issues);
+    writeJson(res, 200, await followThrough(parsed.data, localOnly), cors);
+    return;
+  }
 
   if (path === "/v1/ping") {
     if (req.method !== "GET") throw methodNotAllowed();
