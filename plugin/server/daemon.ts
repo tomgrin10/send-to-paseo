@@ -136,6 +136,15 @@ async function resolvePassword(): Promise<string | undefined> {
   return resolveDaemonPassword(async () => (await settings.read()).daemonPassword);
 }
 
+export async function exchangeFollowThrough(input: unknown): Promise<unknown> {
+  const load = typeof require === "function" ? require : createRequire(join(process.cwd(), "noop.cjs"));
+  const { DaemonClient } = load(["@getpaseo", "client", "internal", "daemon-client"].join("/")) as { DaemonClient: new (options: Record<string, unknown>) => { connect(): Promise<void>; close(): Promise<void>; invokePluginRpc(plugin: string, method: string, input: unknown): Promise<unknown> } };
+  const password = await resolvePassword();
+  const client = new DaemonClient({ url: await resolveUrl(), clientId: "send-to-paseo-follow-through", clientType: "cli", reconnect: { enabled: false }, connectTimeoutMs: CONNECT_TIMEOUT_MS, suppressSendErrors: true, ...(password ? { password } : {}) });
+  try { await client.connect(); return await client.invokePluginRpc("follow-through", "follow.browser-exchange", input); }
+  finally { await client.close().catch(() => undefined); }
+}
+
 /** Runs `work` against an SDK connection that is always closed before returning. */
 export async function withPaseo<T>(work: (paseo: PaseoApi) => Promise<T>): Promise<T> {
   const { createPaseoClient } = loadClientModule();

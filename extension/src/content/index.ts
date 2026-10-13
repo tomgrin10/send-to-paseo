@@ -1,11 +1,14 @@
 /**
  * Content script (isolated world). Owns injection and the SPA lifecycle.
  *
- * Everything site-specific is behind the SiteAdapter seam; this file never names
- * Graphite. It also never touches a credential — see src/content/bridge.ts.
+ * Send injection uses the SiteAdapter seam. The optional Graphite companion uses
+ * the first-party session without exporting cookies. Paseo bearer tokens remain
+ * in the service worker — see src/content/bridge.ts.
  */
 
 import type { PrRef } from "../shared/contract";
+import { startGraphiteCompanion } from "./graphite-companion";
+startGraphiteCompanion();
 import { adapterFor } from "./adapters";
 import type { SiteAdapter } from "./adapters/types";
 import { closePopover, togglePopover, warmPopoverResolution } from "./popover";

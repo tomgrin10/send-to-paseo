@@ -1,6 +1,6 @@
 {
   "name": "send-to-paseo-extension",
-  "version": "1.4.2",
+  "version": "1.5.0",
   "private": true,
   "description": "Chrome MV3 extension: send pull-request work to the right Paseo workspace and agent.",
   "type": "module",
@@ -9,7 +9,7 @@
     "build:test": "node build.mjs --test",
     "watch": "node build.mjs --watch",
     "typecheck": "tsc -p tsconfig.json",
-    "test:unit": "node --test --experimental-strip-types ../test/merge.test.mjs",
+    "test:unit": "node --test --experimental-strip-types ../test/merge.test.mjs ../test/follow-through.test.mjs",
     "test:e2e": "node ../test/e2e.mjs",
     "verify": "npm run typecheck && npm run test:unit && npm run build && npm run test:e2e"
   },

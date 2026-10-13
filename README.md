@@ -46,6 +46,10 @@ Private access uses Tailscale Serve on the other computer. Keep connection codes
 See the [connection guide](plugin/README.md#connect-primary-and-additional-paseo-machines)
 for requirements and manual setup.
 
+## Optional Follow-through connection
+
+The 1.5.0 source adds a browser connection for Follow-through’s Merge when ready switch. Keep a signed-in Graphite tab open with the updated, paired extension; the tab may stay in the background. Merge controls and stack confirmations stay in Follow-through. Send to Paseo keeps its existing PR-to-agent workflow. This feature needs Follow-through on the connected Paseo machine and both updated Send components. See the [addon protocol](docs/follow-through-bridge.md).
+
 ## Troubleshooting
 
 - **No button:** check that the extension is enabled and refresh the GitHub or Graphite PR page.
