@@ -1,3 +1,4 @@
+import { displayPreferences } from "./shared/display";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import {
   addAdditionalMachine,
@@ -31,6 +32,7 @@ import {
 import { requireServerTarget } from "./server/target";
 
 export default function contribute(server: PluginServerContext) {
+  server.registerSettings(displayPreferences);
   server.handle(getStatus, async ({ serverId }, { paseo }) => {
     await requireServerTarget(serverId);
     const current = await settings.read();

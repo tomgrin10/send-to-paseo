@@ -1,9 +1,11 @@
+import { contributeDisplay } from "./client/display";
+import { withNavigation } from "./client/navigation";
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { SendToPaseoSettings } from "./client/settings";
 
 export default function contribute(client: PluginClientContext) {
-  client.addSurface("settings", SendToPaseoSettings);
-  client.addSidebarItem({
+  client.addSurface("settings", withNavigation(SendToPaseoSettings, client, "settings"));
+  const removeDisplay = contributeDisplay(client, {
     id: "send-to-paseo",
     title: "Send to Paseo",
     icon: "Send",
@@ -19,5 +21,5 @@ export default function contribute(client: PluginClientContext) {
       openSurface("settings");
     },
   });
-  return () => {};
+  return () => { removeDisplay(); };
 }
