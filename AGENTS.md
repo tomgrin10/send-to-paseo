@@ -37,7 +37,7 @@ unknown field rather than rejecting the body.
 `PLAN.md` records the design and, more importantly, the research that justifies it. Read it before
 proposing an architectural change; several obvious-looking alternatives were tested and rejected.
 
-Minimum supported Paseo is 0.9.0, which is also what the README badge claims. Keep the two in
+Minimum supported Paseo is 0.10.1, which is also what the README badge claims. Keep the two in
 sync.
 
 ## Hard-won facts — do not re-derive
@@ -248,7 +248,7 @@ One failure mode that has already cost time elsewhere in this codebase's lineage
 1. **A listening HTTP server wedges plugin reload.** It keeps the subprocess event loop alive and
    hangs Paseo's "Stopping plugin" step. Cleanup must await `server.close()` *and*
    `server.closeAllConnections()`.
-There are no `setInterval`s anywhere in the plugin, and there must not be: the rate-limit window
+There are no `setInterval`s in the plugin server, and there must not be: the rate-limit window
 is pruned lazily on each request precisely because a live timer in this subprocess is what hangs
 teardown. Every external command goes through `server/deps.ts`, which resolves a real executable
 and `execFile`s it with an argv array; a lookup that bypasses it also bypasses the well-known-path
