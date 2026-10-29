@@ -2,7 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/send-to-paseo?style=for-the-badge&color=cb3837)](https://www.npmjs.com/package/send-to-paseo)
 [![npm downloads](https://img.shields.io/npm/dm/send-to-paseo?style=for-the-badge&color=cb3837)](https://www.npmjs.com/package/send-to-paseo)
-[![Paseo](https://img.shields.io/badge/Paseo-%E2%89%A5%200.9.0-8A63D2?style=for-the-badge)](https://paseo.sh)
+[![Paseo](https://img.shields.io/badge/Paseo-%E2%89%A5%200.14.0-8A63D2?style=for-the-badge)](https://paseo.sh)
 [![License](https://img.shields.io/github/license/tomgrin10/send-to-paseo?style=for-the-badge&color=2563eb)](LICENSE)
 [![Chrome Web Store](https://img.shields.io/badge/Chrome_Web_Store-Install-4285F4?style=for-the-badge)](https://chromewebstore.google.com/detail/send-to-paseo/blflbbgkckbabbkoigpocilbkkmfijfg)
 
@@ -17,7 +17,7 @@ Choose a workspace, start a new agent or continue with an existing one, and send
 
 ## Install
 
-Requires [Paseo](https://paseo.sh) 0.9.0 or newer and `git` on the computer running Chrome.
+Requires [Paseo](https://paseo.sh) 0.14.0 or newer and `git` on the computer running Chrome.
 
 1. **Add the extension.** Open [Send to Paseo in the Chrome Web Store](https://chromewebstore.google.com/detail/send-to-paseo/blflbbgkckbabbkoigpocilbkkmfijfg)
    and click **Add to Chrome**.
