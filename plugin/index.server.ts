@@ -1,3 +1,4 @@
+import { contributeAgentTools } from "./server/native-tools";
 import { displayPreferences } from "./shared/display";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import {
@@ -32,6 +33,7 @@ import {
 import { requireServerTarget } from "./server/target";
 
 export default function contribute(server: PluginServerContext) {
+  const removeTools = contributeAgentTools(server);
   server.registerSettings(displayPreferences);
   server.handle(getStatus, async ({ serverId }, { paseo }) => {
     await requireServerTarget(serverId);
@@ -155,5 +157,6 @@ export default function contribute(server: PluginServerContext) {
     return enableMachinePrivateAccess();
   });
 
-  return runBridge();
+  const stopBridge = runBridge();
+  return async () => { removeTools(); await stopBridge(); };
 }
