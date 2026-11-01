@@ -1,3 +1,9 @@
+import { browserAccessIntent, startFollowUpBridge } from "./follow-up";
+
+// Content scripts do not need storage access. Keep pairing tokens and grants in trusted contexts.
+const storageReady = chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
+startFollowUpBridge();
+
 /**
  * Service worker. Owns the bearer tokens and performs every fetch.
  *
@@ -262,6 +268,9 @@ async function handle(intent: Intent): Promise<Result<unknown>> {
       // while the popover sits open.
       const gate = await requireCompatibleContract(host);
       if (!gate.ok) return gate;
+      if (intent.followUpAgentId && gate.data.capabilities?.followUpRouting !== true) {
+        return { ok: false, error: { code: "contract_mismatch", message: "Update the Send to Paseo plugin before sending to a registered Follow Up agent. Reopen the composer afterward." } };
+      }
 
       const body: SendRequest = {
         forge: intent.pr.forge,
@@ -272,6 +281,7 @@ async function handle(intent: Intent): Promise<Result<unknown>> {
         target: intent.target,
       };
       if (intent.agentDispatch) body.agentDispatch = intent.agentDispatch;
+      if (intent.followUpAgentId) body.followUpAgentId = intent.followUpAgentId;
       if (intent.provider) body.provider = intent.provider;
       if (intent.modeId) body.modeId = intent.modeId;
       if (intent.pageUrl) body.pageUrl = intent.pageUrl;
@@ -301,8 +311,16 @@ chrome.action.onClicked.addListener(() => {
   void chrome.runtime.openOptionsPage();
 });
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  handle(message as Intent)
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (sender.id !== chrome.runtime.id) return false;
+  const type = message && typeof message === "object" ? message.type : null;
+  if (typeof type !== "string") return false;
+  if (type.startsWith("browserAccess")) {
+    if (sender.url !== chrome.runtime.getURL("options.html")) return false;
+    void storageReady.then(() => browserAccessIntent(message)).then(data => sendResponse({ ok: true, data })).catch(() => sendResponse({ ok: false, error: { message: "Could not update Graphite access. Refresh machines and try again." } }));
+    return true;
+  }
+  storageReady.then(() => handle(message as Intent))
     .then(sendResponse)
     .catch((e: unknown) => {
       sendResponse({

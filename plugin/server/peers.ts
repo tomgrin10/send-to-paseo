@@ -381,7 +381,10 @@ export async function sendToMachine(
   timeoutMs = SEND_ROUTE_TIMEOUT_MS,
 ): Promise<SendResponse> {
   const deadline = Date.now() + timeoutMs;
-  await checkedPing(machine, deadline);
+  const ping = await checkedPing(machine, deadline);
+  if (request.followUpAgentId && ping.capabilities?.followUpRouting !== true) {
+    throw new BridgeError("bad_request", "Update Send to Paseo on the additional machine before sending to a registered Follow Up agent.");
+  }
   const target = { ...request.target };
   delete target.routeId;
   const json = await fetchJson(
@@ -401,4 +404,11 @@ export async function sendToMachine(
 
 export async function machineById(id: string): Promise<SavedMachine | null> {
   return (await settings.read()).additionalMachines.find((machine) => machine.id === id) ?? null;
+}
+
+/** Companion transport shares the same authenticated machine-identity check as sends. */
+export async function exchangeBrowserOnMachine(machine: SavedMachine, input: unknown): Promise<unknown> {
+  const deadline = Date.now() + 3_000;
+  await checkedPing(machine, deadline);
+  return fetchJson(machine, "/follow-up/v1/exchange?local=1", { method: "POST", body: JSON.stringify(input) }, remainingMs(deadline));
 }

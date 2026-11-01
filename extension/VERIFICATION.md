@@ -1090,3 +1090,18 @@ The suite regenerates `test/fixtures/graphite-pr-rotated.html` **and
 servers, and writes every screenshot in `docs/screenshots/`. It cleans
 up its Chrome profile and both servers on exit. If a previous run was killed mid-way, free
 ports 4173 and 7799 first.
+
+
+## Follow Up integration (2026-11-01, prepared 2.1.0)
+
+TypeScript, ten unit tests, shipping build and the 66-case Chromium suite pass. Case 17b also
+covers the registered-agent default, explicit new-agent override, recipient binding and refusing
+a downgraded plugin before POST /v1/send. Restoring the closed PR's unknown-as-off bug makes the
+new missing-state regression fail; corrected source was restored afterward.
+
+The packed Follow Up browser-control fixture passes with real Chrome and installed plugins:
+separate machine/repository grants, verified first-party state, Chrome confirmation, direct
+Follow Up toggles after separate consent, downstack scope, cancellation, revocation and one
+synthetic ordered merge. Permission settings were checked at 1440 and 390 pixels in both themes
+with no horizontal overflow. All Graphite responses and writes were synthetic. Release version
+checks and shipping ZIP packaging pass; no release has been published by these checks.

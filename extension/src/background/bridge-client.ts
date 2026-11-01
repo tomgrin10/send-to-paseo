@@ -166,6 +166,7 @@ async function request<T>(
       // No cookies, ever: the bridge does not send
       // Access-Control-Allow-Credentials and must not be reachable ambiently.
       credentials: "omit",
+      redirect: "error",
       cache: "no-store",
       signal: AbortSignal.timeout(init.timeoutMs),
     });

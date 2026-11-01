@@ -33,6 +33,21 @@ Requires [Paseo](https://paseo.sh) 0.14.0 or newer and `git` on the computer run
 Open a GitHub or Graphite pull request, click **Send to Paseo**, type an instruction, and press
 **Send**. Chrome keeps the extension up to date automatically.
 
+## Connect Follow Up
+
+When [Follow Up](https://github.com/tomgrin10/paseo-follow-up) is installed on a destination
+machine, the composer selects the agent registered for that PR. You can still choose a new agent.
+Without Follow Up, normal workspace and main-agent matching continue to work.
+
+To control Graphite’s **Merge when ready** from Follow Up, open Graphite in Chrome, then open
+this extension’s settings → **Graphite browser access**. Find the machine, enter an exact
+`owner/repository`, and check **Allow Follow Up to change Merge when ready directly** before
+allowing the repository. Leave it unchecked to confirm changes in Chrome instead. Revoke access
+there at any time. The setting applies to the PR, including later pushes.
+
+Send pairing alone grants no Graphite browser access. See the
+[integration and security contract](docs/follow-up-integration.md).
+
 ## Add another Paseo machine
 
 Configure the other computer as a host in Paseo and install the plugin there, then:

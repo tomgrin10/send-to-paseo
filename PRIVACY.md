@@ -1,6 +1,6 @@
 # Send to Paseo privacy policy
 
-Effective date: September 23, 2026
+Effective date: November 1, 2026
 
 Send to Paseo is a developer tool that lets a user send an instruction from a GitHub or Graphite
 pull-request page to a Paseo agent that the user controls.
@@ -15,7 +15,8 @@ The extension handles only the information needed to provide that workflow:
   the browser's history of other pages;
 - instructions the user types into the Send to Paseo composer;
 - Paseo bridge addresses and pairing tokens supplied by the user;
-- extension preferences, agent-target choices, and limited recent-send state.
+- extension preferences, agent-target choices, and limited recent-send state;
+- optional machine/repository Graphite grants and PR toggle observations.
 
 ## How data is used and shared
 
@@ -23,6 +24,13 @@ Pull-request identifiers are sent when needed to resolve a destination. The curr
 URL and the user's instruction are sent when the user chooses **Send**. They go directly to the
 Paseo bridge or bridges configured by the user. A configured bridge may in turn use the user's own
 Paseo and GitHub connections to resolve a workspace and dispatch the instruction.
+
+With optional Graphite browser access, commands are limited to reading and changing **Merge when
+ready** in explicitly allowed repositories on specified machines. The Chrome session makes
+first-party requests to Graphite; cookie values never leave Chrome. PR identifiers, head revisions,
+actual toggle state and bounded action results return to the authorized Paseo machine. Direct
+changes require their own browser grant; otherwise each change requires Chrome confirmation.
+The setting follows the PR across later pushes. Access is revocable in extension settings.
 
 The extension does not send this data to the extension developer. It contains no advertising,
 analytics, tracking, or telemetry, and it does not sell personal information. Data is not used for
@@ -45,7 +53,7 @@ another bridge. Optional origin access is not granted until the user approves Ch
 
 ## Security
 
-Pairing tokens remain in the extension service worker's storage and are not inserted into page
+Pairing tokens and browser grants remain in storage restricted to trusted extension contexts and are not inserted into page
 content. Bridge requests are authenticated, and the extension refuses insecure non-loopback remote
 bridge addresses.
 

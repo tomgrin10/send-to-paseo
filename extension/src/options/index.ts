@@ -1,3 +1,4 @@
+import { startBrowserAccessSettings } from "./browser-access";
 /**
  * Options page. Runs in an extension page (not a content script), so it is
  * allowed to read/write tokens directly — it never shares a world with a web
@@ -599,3 +600,5 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 void load();
+
+startBrowserAccessSettings();

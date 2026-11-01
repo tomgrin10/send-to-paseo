@@ -80,3 +80,11 @@ test("prefers an actionable total failure over an unreachable host", () => {
   assert.equal(primaryFailure([unreachable, unpaired]), unpaired);
   assert.equal(primaryFailure([]), null);
 });
+
+test("a Follow Up registration takes precedence over a branch match on another machine", () => {
+  const exact = host("laptop", [candidate("exact", 1)]);
+  const registered = host("vm", [{ ...candidate("registered", 3), followUpAgent: { agentId: "owner", title: "Owner", status: "idle" } }]);
+  const merged = mergeHostAnswers([exact, registered]);
+  assert.equal(merged.candidates[merged.defaultCandidateIndex].workspaceId, "registered");
+  assert.equal(merged.candidates[merged.defaultCandidateIndex].hostIndex, 1);
+});
