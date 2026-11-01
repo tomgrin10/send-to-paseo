@@ -400,6 +400,15 @@ first entry would silently pick "Always Ask".
 popover, the extension must re-pick from `modes` filtered to the new provider — the resolved
 value from a different provider is not transferable.
 
+An optional `followUpAgent` preview (`agentId`, `title`, `status`) identifies a live PR
+registration from Follow Up. Its workspace may be the default ahead of branch matching.
+The updated extension offers that agent as the initial destination; an explicit new-agent choice
+still wins. The optional `followUpAgentId` send field opts into this destination and binds the send
+to the registration shown in the composer. A missing or changed registration refuses that send.
+Omitting the field keeps the root-agent/new-agent semantics below. The additive ping capability
+`capabilities.followUpRouting` gates this opt-in before a send, including at proxy hops. See
+[Follow Up integration](docs/follow-up-integration.md) for the separate browser addon.
+
 `agentDispatch` is additive and optional. Missing means the historical `"new"` default.
 It initializes the extension's per-send Agent dropdown: `"new"` starts fresh, while `"main"`
 prefers the target workspace's selected root agent. Independently of that default, an existing

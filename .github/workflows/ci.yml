@@ -27,7 +27,7 @@ jobs:
         run: node --test test/chrome-web-store.test.mjs
       - name: Verify plugin
         working-directory: plugin
-        run: npm run typecheck && node check-deps.mjs
+        run: npm run verify
       - name: Install extension dependencies
         working-directory: extension
         run: npm ci

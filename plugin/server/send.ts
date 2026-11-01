@@ -29,6 +29,7 @@ import {
   resolveStackBranches,
 } from "./resolve";
 import { settings } from "./settings";
+import { lookupPrOwner, registeredAgent } from "./follow-up";
 import {
   agentDisplayTitle,
   agentProvider,
@@ -214,7 +215,9 @@ export async function handleSend(request: SendRequest): Promise<SendResponse> {
     // daemon status are the slow inputs; starting them together avoids paying
     // their latency in series after the already-prefetched resolve.
     const [project, prLookup, serverId, currentSettings] = await Promise.all([
-      resolveProject(paseo, ref),
+      request.target.kind === "existing"
+        ? paseo.workspaces.list().then(all => resolveProject(paseo, ref, all.entries.find(w => request.target.kind === "existing" && w.id === request.target.workspaceId && w.archivingAt === null)?.projectId))
+        : resolveProject(paseo, ref),
       lookupPr(ref),
       requireServerId(),
       settings.read(),
@@ -306,11 +309,17 @@ export async function handleSend(request: SendRequest): Promise<SendResponse> {
     let mainAgent: ListedAgent | null = null;
     if (agentDispatch === "main" && request.target.kind === "existing") {
       try {
-        mainAgent = selectMainAgent(
-          await listProjectAgents(paseo, project.projectId),
-          workspaceId,
-        );
+        const [agents, owner] = await Promise.all([
+          listProjectAgents(paseo, project.projectId),
+          request.followUpAgentId ? lookupPrOwner(ref.owner, ref.repo, ref.number) : Promise.resolve(null),
+        ]);
+        const registered = request.followUpAgentId ? registeredAgent(agents, owner, workspaceId) : null;
+        if (request.followUpAgentId && registered?.id !== request.followUpAgentId) {
+          throw new BridgeError("bad_request", "The Follow Up registration changed or is unavailable. Reopen the composer before sending.");
+        }
+        mainAgent = registered ?? selectMainAgent(agents, workspaceId);
       } catch (error) {
+        if (error instanceof BridgeError) throw error;
         throw new BridgeError(
           "agent_create_failed",
           `Paseo could not find the main agent in ${workspaceLabel}: ${

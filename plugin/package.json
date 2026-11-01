@@ -1,7 +1,7 @@
 {
   "name": "send-to-paseo",
   "type": "module",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "license": "MIT",
   "description": "Local HTTP bridge that dispatches PR work to the right Paseo workspace and agent.",
   "repository": {
@@ -33,7 +33,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node check-deps.mjs && node --test client/hosts.test.mjs server/main-agent.test.mjs",
+    "test": "node check-deps.mjs && node --test client/hosts.test.mjs server/main-agent.test.mjs server/follow-up.test.mjs",
     "verify": "npm run typecheck && npm test && node --test --experimental-strip-types agent-tools.test.mjs && node --test native-tools.test.mjs"
   },
   "devDependencies": {

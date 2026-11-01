@@ -2133,6 +2133,29 @@ await test("17b. Agent dropdown overrides the saved destination for each send", 
       "the new-agent choice reaches the bridge despite a main-agent plugin preference",
     );
 
+    await bridgeConfig({ agentDispatch: "new", followUpOwner: true });
+    await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
+    await waitForButton(page); await openPopover(page); await waitForPhase(page, "ready");
+    assertEq(await page.locator("[data-stp-agent-dispatch]").inputValue(), "main", "an explicit PR registration initializes reuse even with the new-agent plugin default");
+    assertEq(await page.locator("[data-stp-agent-dispatch] option:checked").textContent(), "Use registered Follow Up agent", "registered destination is labeled explicitly");
+    await page.locator("[data-stp-prompt]").fill("Continue the registered PR");
+    await page.locator("[data-stp-send]").click(); await waitForPhase(page, "sent");
+    assertEq((await lastRequest("/v1/send")).body.followUpAgentId, "agt_registeredmock", "send binds to the registration shown in the composer");
+    assertEq(await page.locator("[data-stp-success]").textContent(), "Message sent to registered agent", "registration reuse gets accurate success copy");
+    await page.locator("[data-stp-send-another]").click(); await waitForPhase(page, "ready");
+    await page.locator("[data-stp-agent-dispatch]").selectOption("new");
+    await page.locator("[data-stp-prompt]").fill("Explicit fresh agent for a registered PR");
+    await page.locator("[data-stp-send]").click(); await waitForPhase(page, "sent");
+    assertEq((await lastRequest("/v1/send")).body.followUpAgentId, undefined, "new-agent override does not carry registration authority");
+
+    await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
+    await waitForButton(page); await openPopover(page); await waitForPhase(page, "ready");
+    await page.locator("[data-stp-prompt]").fill("A downgraded bridge must not reroute this message");
+    const sendsBeforeDowngrade = (await bridgeLog()).filter(r => r.path === "/v1/send").length;
+    await bridgeConfig({ followUpRouting: false });
+    await page.locator("[data-stp-send]").click(); await waitForPhase(page, "error");
+    assertEq((await bridgeLog()).filter(r => r.path === "/v1/send").length, sendsBeforeDowngrade, "downgrade refuses before the old schema can strip the registration binding");
+
     return [
       "dropdown: Create a new agent / Use main agent",
       `preview: ${ready.main}`,
@@ -2140,7 +2163,7 @@ await test("17b. Agent dropdown overrides the saved destination for each send", 
       `successes: ${sent.headline}; ${freshSent}`,
     ];
   } finally {
-    await bridgeConfig({ agentDispatch: "new" });
+    await bridgeConfig({ agentDispatch: "new", followUpOwner: false, followUpRouting: true });
   }
 });
 

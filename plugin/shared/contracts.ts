@@ -9,7 +9,7 @@ import { z } from "zod";
 
 /** Advertised in `GET /v1/ping`. Keep in step with `package.json`. */
 export const PLUGIN_NAME = "send-to-paseo";
-export const PLUGIN_VERSION = "2.0.0";
+export const PLUGIN_VERSION = "2.1.0";
 /** Bumped only for an incompatible bridge API; the paths stay `/v1`. */
 export const CONTRACT_VERSION = 1;
 
@@ -133,6 +133,7 @@ export const SendRequestSchema = PrRefSchema.extend({
   target: SendTargetSchema,
   /** Per-send override. Missing preserves the plugin's saved preference. */
   agentDispatch: AgentDispatchSchema.optional(),
+  followUpAgentId: z.string().min(1).max(200).optional(),
   provider: z.string().min(1).max(200).optional(),
   /**
    * Permission mode for the new agent, e.g. `auto` or `bypassPermissions`.
@@ -203,6 +204,7 @@ export class BridgeError extends Error {
 }
 
 export interface PingResponse {
+  capabilities?: { followUpRouting?: boolean };
   ok: true;
   name: string;
   version: string;
@@ -284,6 +286,8 @@ export interface ExistingCandidate {
     title: string;
     status: "error" | "initializing" | "idle" | "running" | "closed";
   };
+  /** Explicit PR registration, independent of the workspace's root-agent heuristic. */
+  followUpAgent?: { agentId: string; title: string; status: string };
 }
 
 export interface CreateCandidate {
@@ -552,6 +556,7 @@ export const updateConfig = defineRpc({
     /** Null clears the override and falls back to the mode chain. */
     defaultModeId: z.string().max(200).nullable().optional(),
     agentDispatch: AgentDispatchSchema.optional(),
+  followUpAgentId: z.string().min(1).max(200).optional(),
     /** Null removes the declared reverse-proxy origin. */
     externalBridgeUrl: ExternalBridgeUrlSchema.nullable().optional(),
   }),

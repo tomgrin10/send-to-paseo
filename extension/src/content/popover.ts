@@ -331,7 +331,7 @@ class Popover {
    */
   private syncProviderToSelectedHost(): void {
     const resolved = this.selectedSlice()?.resolved;
-    this.agentDispatch = resolved?.agentDispatch ?? "new";
+    this.agentDispatch = this.selectedCandidate()?.mainAgent?.source === "follow-up" ? "main" : resolved?.agentDispatch ?? "new";
     this.providerId = pickProvider(resolved?.providers ?? [], this.defaultProviderPref);
     this.modeId = pickMode(
       resolved?.modes ?? [],
@@ -386,6 +386,7 @@ class Popover {
       prompt,
       target,
       agentDispatch: this.effectiveAgentDispatch(),
+      ...(this.willReuseMain() && candidate.mainAgent?.source === "follow-up" ? { followUpAgentId: candidate.mainAgent.agentId } : {}),
       provider: this.providerId || undefined,
       modeId: this.modeId || undefined,
       pageUrl: this.ctx.pageUrl,
@@ -591,7 +592,7 @@ class Popover {
       el(
         "option",
         { value: "main", ...(canReuseMain ? {} : { disabled: "" }) },
-        [canReuseMain ? "Use main agent" : "Use main agent (none available)"],
+        [candidate?.mainAgent?.source === "follow-up" ? "Use registered Follow Up agent" : canReuseMain ? "Use main agent" : "Use main agent (none available)"],
       ),
     );
     agentSelect.value = this.effectiveAgentDispatch();
@@ -923,7 +924,7 @@ class Popover {
     const reused = r.dispatch === "main" && r.agentCreated === false;
     title.append(
       document.createTextNode(
-        dry ? "Dry run — nothing sent" : reused ? "Message sent to main agent" : "Agent started",
+        dry ? "Dry run — nothing sent" : reused ? this.selectedCandidate()?.mainAgent?.source === "follow-up" ? "Message sent to registered agent" : "Message sent to main agent" : "Agent started",
       ),
     );
     if (dry) title.append(el("span", { class: "badge", "data-stp-dryrun": "true" }, ["DRY RUN"]));

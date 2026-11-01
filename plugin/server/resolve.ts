@@ -14,6 +14,7 @@ import {
   type StackPrState,
 } from "../shared/contracts";
 import { withPaseo } from "./daemon";
+import { lookupPrOwner, registeredAgent, type PrOwner } from "./follow-up";
 import {
   ANCESTRY_STACK_DISTANCE,
   UNKNOWN_STACK_DISTANCE,
@@ -74,9 +75,16 @@ function sameRepo(a: { owner: string; repo: string }, b: { owner: string; repo: 
 export async function resolveProject(
   paseo: PaseoApi,
   ref: Pick<PrRef, "owner" | "repo">,
+  preferredProjectId?: string,
 ): Promise<ProjectPayload> {
   const { projects } = await paseo.projects.list();
   const wanted = remoteProjectId(ref.owner, ref.repo).toLowerCase();
+  const preferred = projects.find(p => p.projectId === preferredProjectId);
+  if (preferred?.projectKind === "git" && preferred.projectRootPath) {
+    const fromId = /^remote:github\.com\/([^/]+)\/(.+)$/i.exec(preferred.projectId);
+    const identity = fromId?.[1] && fromId[2] ? { owner: fromId[1], repo: fromId[2] } : await readOriginOwnerRepo(preferred.projectRootPath);
+    if (identity && sameRepo(identity, ref)) return { projectId: preferred.projectId, name: preferred.projectDisplayName, path: preferred.projectRootPath };
+  }
 
   for (const project of projects) {
     if (project.projectId.toLowerCase() === wanted) {
@@ -229,6 +237,7 @@ export async function buildCandidates(input: {
   /** Non-null when `gh` could not be consulted; carried into the create label. */
   outage?: GhOutage | null;
   agents?: readonly ListedAgent[];
+  owner?: PrOwner | null;
 }): Promise<{ candidates: Candidate[]; defaultCandidateIndex: number }> {
   const { counts, agents } = await workspaceAgents(
     input.paseo,
@@ -261,16 +270,12 @@ export async function buildCandidates(input: {
       isolation: isolationOf(workspace),
       agentCount: counts.get(workspace.id) ?? 0,
       ...(() => {
+        const registered = registeredAgent(agents, input.owner ?? null, workspace.id);
         const main = selectMainAgent(agents, workspace.id);
-        return main === null
-          ? {}
-          : {
-              mainAgent: {
-                agentId: main.id,
-                title: agentDisplayTitle(main),
-                status: main.status,
-              },
-            };
+        return {
+          ...(main ? { mainAgent: { agentId: main.id, title: agentDisplayTitle(main), status: main.status } } : {}),
+          ...(registered ? { followUpAgent: { agentId: registered.id, title: agentDisplayTitle(registered), status: registered.status } } : {}),
+        };
       })(),
     };
     if (branch !== null && branch === input.pr.headBranch) {
@@ -972,14 +977,20 @@ export async function handleResolve(request: ResolveRequest): Promise<ResolveRes
     // These sources are independent. Starting them together removes several
     // daemon/network round trips from the click path (and the extension now
     // starts this work before the popover opens).
-    const [project, prLookup, currentSettings, profile, catalog, allWorkspaces] =
+    const workspacesPromise = paseo.workspaces.list();
+    const ownerPromise = lookupPrOwner(ref.owner, ref.repo, ref.number);
+    const projectPromise = Promise.all([workspacesPromise, ownerPromise]).then(([all, owner]) =>
+      resolveProject(paseo, ref, all.entries.find(w => w.id === owner?.workspaceId && w.archivingAt === null)?.projectId),
+    );
+    const [project, prLookup, currentSettings, profile, catalog, allWorkspaces, owner] =
       await Promise.all([
-        resolveProject(paseo, ref),
+        projectPromise,
         lookupPr(ref),
         settings.read(),
         resolveSelectedProfile(paseo),
         listModes(paseo),
-        paseo.workspaces.list(),
+        workspacesPromise,
+        ownerPromise,
       ]);
     // PR lookup degrades instead of failing when `gh` is unavailable: Paseo's
     // forge checkout still supports the create path.
@@ -1016,7 +1027,9 @@ export async function handleResolve(request: ResolveRequest): Promise<ResolveRes
       stackBranches,
       outage,
       agents: await agentsPromise,
+      owner,
     });
+    const ownerIndex = candidates.findIndex(c => c.kind === "existing" && c.followUpAgent !== undefined);
     const { providers } = await providersPromise;
     const effectiveProvider = providers.find((entry) => entry.isDefault)?.id ?? providers[0]?.id;
     const resolvedModeId =
@@ -1027,7 +1040,7 @@ export async function handleResolve(request: ResolveRequest): Promise<ResolveRes
       pr,
       project,
       candidates,
-      defaultCandidateIndex,
+      defaultCandidateIndex: ownerIndex >= 0 ? ownerIndex : defaultCandidateIndex,
       providers,
       modes: catalog.modes,
       resolvedModeId: resolvedModeId ?? null,
