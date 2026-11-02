@@ -75,3 +75,33 @@ test("read permission requires separate explicit permission for direct toggle ch
   assert.equal(allowsToggleChanges([{ ...grant, enable_toggle_changes: true }], route, command()), true);
   assert.equal(allowsToggleChanges([{ ...grant, enable_toggle_changes: true }], { ...route, routeId: "other" }, command()), false);
 });
+
+
+test("concurrent host edits preserve additions and removals; stale pings cannot label a new bridge", async () => {
+  const settings = await load("../extension/src/background/settings.ts");
+  let stored = { version: 2, hosts: [settings.makeHost({ id: "first", token: "old" })], connectionMode: "advanced", defaultProvider: "" };
+  const oldChrome = globalThis.chrome;
+  const oldNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  let tail = Promise.resolve();
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { locks: { request: (_key, task) => {
+    const next = tail.then(task); tail = next.catch(() => {}); return next;
+  } } } });
+  globalThis.chrome = { storage: { local: {
+    get: async () => { const copy = structuredClone(stored); await new Promise(r => setTimeout(r, 1)); return { settings: copy }; },
+    set: async ({ settings: next }) => { await new Promise(r => setTimeout(r, 1)); stored = structuredClone(next); },
+  } } };
+  try {
+    const original = structuredClone(stored.hosts[0]);
+    await Promise.all([settings.writeHost("first", { label: "Chosen" }), settings.addHost({ id: "second" }), settings.writeSettings({ defaultProvider: "provider" })]);
+    assert.equal(stored.hosts.length, 2); assert.equal(stored.hosts[0].label, "Chosen"); assert.equal(stored.defaultProvider, "provider");
+    await Promise.all([settings.removeHost("second"), settings.writeHost("first", { token: "replacement" })]);
+    assert.deepEqual(stored.hosts.map(h => h.id), ["first"]);
+    await settings.writeHost("first", { machineName: "stale" }, original);
+    assert.equal(stored.hosts[0].machineName, ""); assert.equal(stored.hosts[0].token, "replacement");
+    await settings.writeHost("missing", { label: "Do not resurrect" });
+    assert.equal(stored.hosts.length, 1);
+  } finally {
+    globalThis.chrome = oldChrome;
+    if (oldNavigator) Object.defineProperty(globalThis, "navigator", oldNavigator); else delete globalThis.navigator;
+  }
+});

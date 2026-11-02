@@ -174,38 +174,48 @@ function dedupeIds(hosts: HostConfig[]): HostConfig[] {
   });
 }
 
+/** Web Locks serialize read/modify/write across the worker and all options tabs. */
+async function updateSettings(
+  update: (current: StoredSettings) => Partial<StoredSettings>,
+): Promise<StoredSettings> {
+  return navigator.locks.request("send-to-paseo.settings", async () => {
+    const current = await readSettings();
+    const next: StoredSettings = { ...current, ...update(current), version: 2 };
+    next.hosts = dedupeIds(
+      next.hosts.map((h) => ({ ...h, bridgeUrl: normaliseBridgeUrl(h.bridgeUrl) })),
+    );
+    await chrome.storage.local.set({ [KEY]: next });
+    return next;
+  });
+}
+
 export async function writeSettings(
   patch: Partial<StoredSettings>,
 ): Promise<StoredSettings> {
-  const next: StoredSettings = { ...(await readSettings()), ...patch, version: 2 };
-  next.hosts = dedupeIds(
-    next.hosts.map((h) => ({ ...h, bridgeUrl: normaliseBridgeUrl(h.bridgeUrl) })),
-  );
-  await chrome.storage.local.set({ [KEY]: next });
-  return next;
+  return updateSettings(() => patch);
 }
 
-/** Applies a patch to one host by id. A missing id is a no-op, not a throw. */
+/** A stale ping cannot cache a name against a replacement URL or pairing token. */
 export async function writeHost(
   id: string,
   patch: Partial<Omit<HostConfig, "id">>,
+  expected?: Pick<HostConfig, "bridgeUrl" | "token">,
 ): Promise<StoredSettings> {
-  const current = await readSettings();
-  return writeSettings({
-    hosts: current.hosts.map((h) => (h.id === id ? { ...h, ...patch } : h)),
-  });
+  return updateSettings((current) => ({
+    hosts: current.hosts.map((h) => h.id === id &&
+      (!expected || h.bridgeUrl === expected.bridgeUrl && h.token === expected.token)
+      ? { ...h, ...patch } : h),
+  }));
 }
 
 export async function addHost(patch: Partial<HostConfig> = {}): Promise<HostConfig> {
   const host = makeHost(patch);
-  const current = await readSettings();
-  await writeSettings({ hosts: [...current.hosts, host] });
+  await updateSettings((current) => ({ hosts: [...current.hosts, host] }));
   return host;
 }
 
 export async function removeHost(id: string): Promise<StoredSettings> {
-  const current = await readSettings();
-  return writeSettings({ hosts: current.hosts.filter((h) => h.id !== id) });
+  return updateSettings((current) => ({ hosts: current.hosts.filter((h) => h.id !== id) }));
 }
 
 export async function hostById(id: string): Promise<HostConfig | null> {

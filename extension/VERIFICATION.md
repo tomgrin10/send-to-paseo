@@ -1094,7 +1094,7 @@ ports 4173 and 7799 first.
 
 ## Follow Up integration (2026-11-01, prepared 2.1.0)
 
-TypeScript, ten unit tests, shipping build and the 66-case Chromium suite pass. Case 17b also
+TypeScript, eleven unit tests, shipping build and the 66-case Chromium suite pass. Case 17b also
 covers the registered-agent default, explicit new-agent override, recipient binding and refusing
 a downgraded plugin before POST /v1/send. Restoring the closed PR's unknown-as-off bug makes the
 new missing-state regression fail; corrected source was restored afterward.
@@ -1105,3 +1105,16 @@ Follow Up toggles after separate consent, downstack scope, cancellation, revocat
 synthetic ordered merge. Permission settings were checked at 1440 and 390 pixels in both themes
 with no horizontal overflow. All Graphite responses and writes were synthetic. Release version
 checks and shipping ZIP packaging pass; no release has been published by these checks.
+
+
+## Release verification (2026-11-02)
+
+Extension verify passes TypeScript, 11 unit checks and all 66 real Chromium cases.
+The rerun exposed a settings read/modify/write race: delayed machine-name caching could
+replace a concurrent edit or host addition. Web Locks now serialize updates across the
+worker and options tabs; stale pings also check the bridge URL and pairing token before
+caching a name. The regression covers concurrent edits, additions, removals and stale
+pings. Connection testing stays disabled through the full check and marks a manual test
+busy before saving, preventing the automatic page-load check from racing a second click.
+Browser assertions wait for final connection states and actual CSS transition completion.
+The plugin verify suite separately passes all 74 dependency checks and 22 behavioral tests.

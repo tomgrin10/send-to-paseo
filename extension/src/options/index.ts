@@ -176,6 +176,11 @@ async function cachedProviders(): Promise<Provider[]> {
  */
 async function testConnection(row: HostRow, host: HostConfig): Promise<void> {
   row.test.disabled = true;
+  try { await checkConnection(row, host); }
+  finally { row.test.disabled = false; }
+}
+
+async function checkConnection(row: HostRow, host: HostConfig): Promise<void> {
   const hasToken = host.token.trim().length > 0;
 
   setStatus(
@@ -186,7 +191,6 @@ async function testConnection(row: HostRow, host: HostConfig): Promise<void> {
   );
 
   const res = await ping(host, { authenticated: hasToken });
-  row.test.disabled = false;
 
   if (!res.ok) {
     const p = presentError(res.error.code);
@@ -225,7 +229,7 @@ async function testConnection(row: HostRow, host: HostConfig): Promise<void> {
   // user has not named it — never overwrite a label someone typed.
   const machineName = (d.machine?.name ?? "").trim();
   if (machineName && machineName !== host.machineName) {
-    await writeHost(host.id, { machineName });
+    await writeHost(host.id, { machineName }, host);
     if (!host.label.trim()) row.label.placeholder = machineName;
   }
 
@@ -438,6 +442,8 @@ function buildRow(host: HostConfig, index: number, total: number): HostRow {
  * testing anything else would verify a configuration that does not exist.
  */
 async function flushAndTest(row: HostRow, hostId: string): Promise<void> {
+  row.test.disabled = true;
+  setStatus(row.status, "busy", "Contacting the bridge…");
   await writeHost(hostId, {
     label: row.label.value,
     bridgeUrl: row.url.value,

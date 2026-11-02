@@ -88,7 +88,7 @@ async function cacheProviders(hostId: string, providers: Provider[] | undefined)
 async function cacheMachineName(host: HostConfig, name: string | undefined): Promise<void> {
   const next = (name ?? "").trim();
   if (!next || next === host.machineName) return;
-  await writeHost(host.id, { machineName: next });
+  await writeHost(host.id, { machineName: next }, host);
 }
 
 /**

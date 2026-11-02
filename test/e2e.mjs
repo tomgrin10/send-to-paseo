@@ -239,8 +239,10 @@ async function seedSettings(context, _extensionId, patch = {}) {
   };
   const sw = await serviceWorker(context);
   const written = await sw.evaluate(async (s) => {
-    await chrome.storage.local.set({ settings: s });
-    return (await chrome.storage.local.get("settings")).settings;
+    return navigator.locks.request("send-to-paseo.settings", async () => {
+      await chrome.storage.local.set({ settings: s });
+      return (await chrome.storage.local.get("settings")).settings;
+    });
   }, settings);
   // Read back: a seeding helper that silently no-ops would invalidate every test
   // that depends on it.
@@ -648,6 +650,9 @@ const context = await chromium.launchPersistentContext(profile, {
     `--disable-extensions-except=${distTest}`,
     `--load-extension=${distTest}`,
     "--no-first-run",
+    "--disable-background-timer-throttling",
+    "--disable-renderer-backgrounding",
+    "--disable-backgrounding-occluded-windows",
     "--no-default-browser-check",
     "--disable-features=DialMediaRouteProvider",
   ],
@@ -1404,7 +1409,7 @@ async function runTestConnection(opt, index = 0) {
   await opt.waitForFunction(
     (i) => {
       const t = document.querySelectorAll(".host")[i].querySelector(".hostStatus").dataset.tone;
-      return t !== "pending" && t !== "idle";
+      return ["ok", "warn", "bad"].includes(t);
     },
     index,
     { timeout: 20000 },
@@ -3701,8 +3706,11 @@ await test("21a. GitHub: the button's colours come from GitHub's own Primer toke
   // interpolated mid-transition value. Test 21 leaves the page having just
   // flipped dark -> light, and without this the first read came back
   // rgb(89, 94, 101) — 26% of the way from #212830 to #f6f8fa.
-  const settle = () => new Promise((r) => setTimeout(r, 250));
-  await settle();
+  await page.bringToFront();
+  const settle = (expected) => page.waitForFunction(({ sel, expected }) =>
+    getComputedStyle(document.querySelector(sel).shadowRoot.querySelector("button")).backgroundColor === expected,
+    { sel: BUTTON, expected });
+  await settle("rgb(246, 248, 250)");
   const before = await page.evaluate(
     (sel) => getComputedStyle(document.querySelector(sel).shadowRoot.querySelector("button")).backgroundColor,
     BUTTON,
@@ -3713,7 +3721,10 @@ await test("21a. GitHub: the button's colours come from GitHub's own Primer toke
     document.documentElement.style.setProperty("--button-default-bgColor-rest", "rgb(1, 2, 3)");
     document.documentElement.style.setProperty("--button-default-fgColor-rest", "rgb(4, 5, 6)");
   });
-  await settle();
+  await page.waitForFunction((sel) => {
+    const cs = getComputedStyle(document.querySelector(sel).shadowRoot.querySelector("button"));
+    return cs.backgroundColor === "rgb(1, 2, 3)" && cs.color === "rgb(4, 5, 6)";
+  }, BUTTON);
   const after = await page.evaluate((sel) => {
     const cs = getComputedStyle(document.querySelector(sel).shadowRoot.querySelector("button"));
     return { background: cs.backgroundColor, color: cs.color };
@@ -3726,7 +3737,7 @@ await test("21a. GitHub: the button's colours come from GitHub's own Primer toke
     document.documentElement.style.removeProperty("--button-default-bgColor-rest");
     document.documentElement.style.removeProperty("--button-default-fgColor-rest");
   });
-  await settle();
+  await settle("rgb(246, 248, 250)");
   const restored = await page.evaluate(
     (sel) => getComputedStyle(document.querySelector(sel).shadowRoot.querySelector("button")).backgroundColor,
     BUTTON,
@@ -3734,13 +3745,13 @@ await test("21a. GitHub: the button's colours come from GitHub's own Primer toke
   assertEq(restored, "rgb(246, 248, 250)", "sentinel cleared, back to the light token");
 
   await page.emulateMedia({ colorScheme: "dark" });
-  await settle();
+  await settle("rgb(33, 40, 48)");
   const darkBg = await page.evaluate(
     (sel) => getComputedStyle(document.querySelector(sel).shadowRoot.querySelector("button")).backgroundColor,
     BUTTON,
   );
   await page.emulateMedia({ colorScheme: "light" });
-  await settle();
+  await settle("rgb(246, 248, 250)");
   assertEq(darkBg, "rgb(33, 40, 48)", "dark theme: Primer --button-default-bgColor-rest #212830");
 
   return [
