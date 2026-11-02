@@ -1,3 +1,4 @@
+import { startGraphiteCompanion } from "./graphite-companion";
 /**
  * Content script (isolated world). Owns injection and the SPA lifecycle.
  *
@@ -206,3 +207,5 @@ if (document.readyState === "loading") {
 } else {
   start();
 }
+
+startGraphiteCompanion();

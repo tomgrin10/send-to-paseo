@@ -62,7 +62,7 @@ export function mergeHostAnswers(hosts: HostSlice[]): MultiResolveResponse {
       const positionInRank = seenPerRank.get(rank) ?? 0;
       seenPerRank.set(rank, positionInRank + 1);
       entries.push({
-        candidate: { ...candidate, hostIndex },
+        candidate: { ...candidate, ...(candidate.followUpAgent ? { mainAgent: { ...candidate.followUpAgent, source: "follow-up" as const } } : {}), hostIndex },
         rank,
         positionInRank,
         hostIndex,
@@ -107,7 +107,8 @@ function pickDefault(hosts: HostSlice[], entries: Entry[]): number {
       resolved.defaultCandidateIndex,
       resolved.candidates.length,
     );
-    const rank = rankOf(resolved.candidates[sourceIndex]?.rank);
+    const c = resolved.candidates[sourceIndex];
+    const rank = c?.followUpAgent !== undefined ? 0 : rankOf(c?.rank);
     if (best === null || rank < best.rank) best = { hostIndex, sourceIndex, rank };
   });
 

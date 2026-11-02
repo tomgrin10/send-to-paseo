@@ -50,6 +50,7 @@ export interface IntentSend {
   prompt: string;
   target: SendTarget;
   agentDispatch?: AgentDispatch;
+  followUpAgentId?: string;
   provider?: string;
   modeId?: string;
   pageUrl?: string;

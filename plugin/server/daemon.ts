@@ -136,6 +136,26 @@ async function resolvePassword(): Promise<string | undefined> {
   return resolveDaemonPassword(async () => (await settings.read()).daemonPassword);
 }
 
+/** Optional companion RPCs always target this daemon, never a browser-selected host. */
+export async function callFollowUp(method: "follow.pr-owner" | "follow.browser-exchange", input: unknown): Promise<unknown> {
+  const load = typeof require === "function" ? require : createRequire(join(process.cwd(), "noop.cjs"));
+  const { DaemonClient } = load(["@getpaseo", "client", "internal", "daemon-client"].join("/")) as {
+    DaemonClient: new (options: Record<string, unknown>) => {
+      connect(): Promise<void>; close(): Promise<void>; invokePluginRpc(plugin: string, method: string, input: unknown): Promise<unknown>;
+    };
+  };
+  const password = await resolvePassword();
+  const client = new DaemonClient({ url: await resolveUrl(), clientId: "send-to-paseo-follow-up", clientType: "cli", reconnect: { enabled: false }, connectTimeoutMs: 2_000, suppressSendErrors: true, ...(password ? { password } : {}) });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await client.connect();
+    return await Promise.race([
+      client.invokePluginRpc("follow-through", method, input),
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Optional Follow Up request timed out.")), 2_000); timer.unref?.(); }),
+    ]);
+  } finally { if (timer) clearTimeout(timer); await client.close().catch(() => undefined); }
+}
+
 /** Runs `work` against an SDK connection that is always closed before returning. */
 export async function withPaseo<T>(work: (paseo: PaseoApi) => Promise<T>): Promise<T> {
   const { createPaseoClient } = loadClientModule();

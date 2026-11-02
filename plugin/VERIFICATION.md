@@ -3298,3 +3298,17 @@ remain compatible. Multi-host discovery is still owned by the extension's
 paired-host list: v0.8's public client plugin context exposes the selected
 host's API, not the local client's host registry, and a client-only plugin
 cannot host the loopback HTTP endpoint used by a browser extension.
+
+
+## Follow Up integration (2026-11-01, prepared 2.1.0)
+
+Plugin verification passes: TypeScript, 74 dependency/transport checks, 18 host/main-agent/integration
+unit tests, three agent-tool tests and one native-tool test. New coverage includes absent/old
+companions, explicit registration binding, the new-agent override, a second clone of the same
+repository, per-route browser scopes, one fair lease slot and refusing a downgraded Additional
+bridge before forwarding.
+
+`test/follow-up-install.mjs` passes against the separate synthetic Follow Up preview: both installed
+plugins choose the registering agent over a newer Main, deliver one message to the fixture provider,
+and preserve explicit new-agent dispatch. No real conversations were messaged. The main daemon
+was neither restarted nor reconfigured.

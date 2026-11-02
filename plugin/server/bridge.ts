@@ -31,6 +31,7 @@ import {
 import { handleSend, isDryRun, recordFailedSend } from "./send";
 import { previewToken, settings, tokenMatches } from "./settings";
 import { machineById, resolveOnMachine, sendToMachine } from "./peers";
+import { browserExchange, exchangeBrowser } from "./browser-bridge";
 
 /**
  * The local HTTP bridge the Chrome extension talks to.
@@ -342,6 +343,7 @@ async function ping(authenticated: boolean): Promise<PingResponse> {
     name: PLUGIN_NAME,
     version: PLUGIN_VERSION,
     contract: CONTRACT_VERSION,
+    capabilities: { followUpRouting: true },
     daemon,
     machine: { name: machineName() },
     paired: authenticated,
@@ -368,7 +370,7 @@ async function route(
     return;
   }
 
-  if (path === "/v1/resolve" || path === "/v1/send") {
+  if (path === "/v1/resolve" || path === "/v1/send" || path === "/follow-up/v1/exchange") {
     if (req.method !== "POST") throw methodNotAllowed();
     const { body, tooLarge } = await readBody(req);
     if (tooLarge) {
@@ -379,6 +381,12 @@ async function route(
     }
     await requireToken(req);
     const json = parseJsonBody(body);
+    if (path === "/follow-up/v1/exchange") {
+      const parsed = browserExchange.safeParse(json);
+      if (!parsed.success) throw badRequest(parsed.error.issues);
+      writeJson(res, 200, await exchangeBrowser(parsed.data, localOnly), cors);
+      return;
+    }
 
     if (path === "/v1/resolve") {
       const parsed = ResolveRequestSchema.safeParse(json);

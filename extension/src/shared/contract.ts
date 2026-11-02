@@ -120,6 +120,7 @@ export interface Mode {
  * "bad token", and is the PR-independent source for the provider picker.
  */
 export interface PingResponse {
+  capabilities?: { followUpRouting?: boolean };
   ok: true;
   name: string;
   version: string;
@@ -194,7 +195,8 @@ export interface Candidate {
    */
   stackPrState?: "open" | "merged" | "closed" | (string & {});
   /** The root agent the bridge would reuse when main-agent dispatch is enabled. */
-  mainAgent?: { agentId: string; title: string; status: string };
+  followUpAgent?: { agentId: string; title: string; status: string };
+  mainAgent?: { agentId: string; title: string; status: string; source?: "follow-up" };
 }
 
 export interface ResolveResponse {
@@ -212,6 +214,7 @@ export interface ResolveResponse {
   resolvedModeId?: string | null;
   /** Additive plugin preference controlling whether sends create or reuse an agent. */
   agentDispatch?: AgentDispatch;
+  followUpAgentId?: string;
   /** Additive router result returned by a primary Paseo machine. */
   routes?: ResolveRoute[];
 }
@@ -237,6 +240,7 @@ export interface SendRequest extends PrRef {
   target: SendTarget;
   /** Per-send override. Missing preserves the plugin's saved preference. */
   agentDispatch?: AgentDispatch;
+  followUpAgentId?: string;
   provider?: string;
   /**
    * Permission mode id, valid only for the provider this send resolves to. The
