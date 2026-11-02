@@ -91,6 +91,8 @@ const CONFIG = {
   routed: flag("routed"),
   /** Whether an existing workspace reuses its selected root agent. */
   agentDispatch: "new",
+  followUpOwner: false,
+  followUpRouting: true,
 };
 
 const MAX_BODY = 64 * 1024; // CONTRACT.md: 64 KiB
@@ -440,6 +442,7 @@ function handlePing(res, origin, authState) {
       name: "send-to-paseo",
       version: PLUGIN_VERSION,
       contract: CONFIG.contract,
+      capabilities: { followUpRouting: CONFIG.followUpRouting },
       daemon: CONFIG.daemonDown
         ? { reachable: false }
         : { reachable: true, version: DAEMON_VERSION, serverId: SERVER_ID },
@@ -499,6 +502,9 @@ function handleResolve(res, origin, body) {
       // Defaults to the legacy path; test 17b switches it to main-agent reuse.
       agentDispatch: CONFIG.agentDispatch,
     };
+  if (CONFIG.followUpOwner && payload.candidates[payload.defaultCandidateIndex]?.kind === "existing") {
+    payload.candidates[payload.defaultCandidateIndex].followUpAgent = { agentId: "agt_registeredmock", title: "Registered PR agent", status: "idle" };
+  }
   if (CONFIG.routed) {
     const additional = {
       ...payload,
@@ -575,7 +581,7 @@ function handleSend(res, origin, body) {
   const agentDispatch = body.agentDispatch ?? CONFIG.agentDispatch;
   const reusedMain = agentDispatch === "main" && target.kind === "existing";
   const agentId = reusedMain
-    ? "agt_mainmock"
+    ? body.followUpAgentId ?? "agt_mainmock"
     : `agt_mock${String(++state.agentSeq).padStart(4, "0")}`;
   const workspaceId = created ? "wks_created0000mock" : target.workspaceId;
   const firstLine = prompt.split("\n")[0].slice(0, 60);
@@ -631,6 +637,8 @@ async function handleControl(req, res, url, origin) {
     if (body.noGh !== undefined) CONFIG.noGh = Boolean(body.noGh);
     if (body.mergedStack !== undefined) CONFIG.mergedStack = Boolean(body.mergedStack);
     if (body.machineName !== undefined) CONFIG.machineName = String(body.machineName);
+    if (body.followUpRouting !== undefined) CONFIG.followUpRouting = Boolean(body.followUpRouting);
+    if (body.followUpOwner !== undefined) CONFIG.followUpOwner = Boolean(body.followUpOwner);
     if (body.routed !== undefined) CONFIG.routed = Boolean(body.routed);
     if (body.agentDispatch !== undefined) {
       CONFIG.agentDispatch = body.agentDispatch === "main" ? "main" : "new";
@@ -666,6 +674,8 @@ async function handleControl(req, res, url, origin) {
     CONFIG.machineName = "mock-machine";
     CONFIG.routed = false;
     CONFIG.agentDispatch = "new";
+    CONFIG.followUpOwner = false;
+    CONFIG.followUpRouting = true;
     return sendJson(res, 200, { ok: true }, null);
   }
   res.writeHead(404).end();

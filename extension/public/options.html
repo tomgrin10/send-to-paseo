@@ -49,6 +49,11 @@
         }
       }
       * { box-sizing: border-box; }
+      #graphitePending, #graphiteGrants { display: grid; gap: 12px; overflow-wrap: anywhere; }
+      #graphitePending p { max-width: 65ch; margin: 8px 0; }
+      #graphitePending .row, #graphiteGrants .row { flex-wrap: wrap; }
+      button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
       /* An author `display` rule beats the UA stylesheet's [hidden]{display:none},
          so .row below would otherwise defeat the hidden attribute. */
       [hidden] { display: none !important; }
@@ -257,6 +262,22 @@
           </select>
           <span class="help" id="providerHelp"></span>
         </label>
+      </section>
+
+      <section aria-labelledby="graphiteHeading">
+        <h2 id="graphiteHeading">Graphite browser access</h2>
+        <p class="help">Optional. Follow Up can read Merge when ready for repositories you allow here.
+          You can also allow Follow Up to change the toggle directly. Send pairing alone grants no Graphite access.</p>
+        <div id="graphitePending" aria-live="polite"></div>
+        <button type="button" id="graphiteRefresh">Find Follow Up machines</button>
+        <label class="field"><span class="lbl">Paseo machine</span><select id="graphiteMachine" aria-label="Graphite access machine"></select></label>
+        <label class="field"><span class="lbl">Repository</span><input id="graphiteRepo" type="text" placeholder="owner/repository" autocomplete="off" spellcheck="false" /></label>
+        <label class="toggle"><input type="checkbox" id="graphiteToggleChanges" /> Allow Follow Up to change Merge when ready directly</label>
+        <p class="help">This trusts the selected machine to change the PR setting for this repository, including later pushes.
+          Leave unchecked to confirm each change in Chrome.</p>
+        <button type="button" id="graphiteGrant">Allow this repository</button>
+        <p id="graphiteStatus" role="status" class="help">Browser access is off until you allow a machine and repository.</p>
+        <div id="graphiteGrants"></div>
       </section>
 
       <footer>

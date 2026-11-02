@@ -27,7 +27,8 @@ Two halves that meet at one frozen HTTP contract:
 - `extension/` — Chrome MV3 extension. Puts a "Send to Paseo" button on Graphite and github.com
   PR pages.
 
-`CONTRACT.md` is the only integration point. **It is frozen.** Changing it means changing both
+`CONTRACT.md` owns the Send wire contract. The optional Follow Up addon is specified in
+`docs/follow-up-integration.md` and does not change that contract. **It is frozen.** Changing it means changing both
 halves and re-running both verification suites — do that deliberately, bump `contract`, and never
 unilaterally from one side. Additive optional fields, in requests as well as responses, are the
 one exception and do not bump `contract`; the clause spells out the mechanism that makes that
@@ -37,7 +38,7 @@ unknown field rather than rejecting the body.
 `PLAN.md` records the design and, more importantly, the research that justifies it. Read it before
 proposing an architectural change; several obvious-looking alternatives were tested and rejected.
 
-Minimum supported Paseo is 0.10.1, which is also what the README badge claims. Keep the two in
+Minimum supported Paseo is 0.14.0, which is also what the README badge claims. Keep the two in
 sync.
 
 ## Hard-won facts — do not re-derive
@@ -200,7 +201,9 @@ sync.
   disposal, or plugin unload releases it. Acquire inside each action so a later action gets the
   replacement client. Every surface RPC also carries the surface `host.id` and the server rejects
   a mismatch, so a delayed callback cannot mutate whichever host became selected later.
-- **Main-agent reuse means root-agent reuse, not newest-agent reuse.** Subagents carry a non-empty
+- **Main-agent reuse means root-agent reuse, not newest-agent reuse. Explicit Follow Up
+  registrations are separate (`followUpAgent` / `followUpAgentId`); they may identify a
+  recovery agent and never change the root-agent heuristic.** Subagents carry a non-empty
   `paseo.parent-agent-id` label and are never eligible. An exact `Main` / `Main Agent` title is the
   strongest user signal, followed by an open-tab label, live status, and recent user activity.
   Keep that ordering deterministic; otherwise a delegated or stale agent can receive PR work.
