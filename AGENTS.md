@@ -27,7 +27,7 @@ Two halves that meet at one frozen HTTP contract:
 - `extension/` — Chrome MV3 extension. Puts a "Send to Paseo" button on Graphite and github.com
   PR pages.
 
-`CONTRACT.md` owns the Send wire contract. The optional Follow Up addon is specified in
+`CONTRACT.md` owns the Send wire contract. The Follow Up browser addon automatically reuses existing paired routes and advertised tracked repositories for reads. Toggle writes still require Chrome confirmation or an explicit remembered per-route/per-repository grant; never derive direct write authority from discovery. The optional Follow Up addon is specified in
 `docs/follow-up-integration.md` and does not change that contract. **It is frozen.** Changing it means changing both
 halves and re-running both verification suites — do that deliberately, bump `contract`, and never
 unilaterally from one side. Additive optional fields, in requests as well as responses, are the

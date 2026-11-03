@@ -65,7 +65,8 @@
         font: 400 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
         -webkit-font-smoothing: antialiased;
       }
-      main { max-width: 620px; margin: 0 auto; display: grid; gap: 18px; }
+      main { grid-template-columns: minmax(0, 1fr); max-width: 620px; margin: 0 auto; display: grid; gap: 18px; }
+      section, details.advanced, .hosts, .host { min-width: 0; }
       h1 { font-size: 19px; margin: 0; display: flex; align-items: center; gap: 9px; }
       h1 svg { width: 20px; height: 20px; color: var(--accent); }
       .sub { color: var(--muted); font-size: 13px; margin: -10px 0 0; }
@@ -103,8 +104,8 @@
         border-radius: 6px;
       }
       input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
-      .row { display: flex; gap: 8px; align-items: center; }
-      .row > input { flex: 1; }
+      .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+      .row > input { flex: 1; min-width: 0; }
       button {
         height: 32px;
         padding: 0 13px;
@@ -126,6 +127,7 @@
         font-size: 13px;
         display: grid;
         gap: 3px;
+        overflow-wrap: anywhere;
         border: 1px solid var(--border);
         background: var(--bg);
       }
@@ -162,6 +164,7 @@
       .host[data-enabled="0"] { opacity: 0.62; }
       .host-head { display: flex; gap: 8px; align-items: center; }
       .host-head > input.hostLabel {
+        min-width: 0;
         flex: 1;
         font: 600 13px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
       }
@@ -194,7 +197,7 @@
         font-weight: 600;
       }
       details.advanced > .advanced-body { padding: 0 16px 16px; display: grid; gap: 12px; }
-      .mode-choice { justify-content: space-between; align-items: flex-start; }
+      .mode-choice { flex-wrap: wrap; justify-content: space-between; align-items: flex-start; }
       .mode-choice > span { display: grid; gap: 2px; }
       .simple-only { display: none; }
       body[data-mode="simple"] .simple-only { display: block; }
@@ -265,19 +268,15 @@
       </section>
 
       <section aria-labelledby="graphiteHeading">
-        <h2 id="graphiteHeading">Graphite browser access</h2>
-        <p class="help">Optional. Follow Up can read Merge when ready for repositories you allow here.
-          You can also allow Follow Up to change the toggle directly. Send pairing alone grants no Graphite access.</p>
+        <h2 id="graphiteHeading">Follow Up</h2>
+        <p class="help">Uses your existing Send to Paseo connection to read Merge when ready for tracked PRs.
+          Keep Graphite open and signed in. Approve toggle changes in Chrome, with an option to remember permission.</p>
+        <label class="toggle"><input type="checkbox" id="graphiteEnabled" checked /> Use Graphite with Follow Up</label>
         <div id="graphitePending" aria-live="polite"></div>
-        <button type="button" id="graphiteRefresh">Find Follow Up machines</button>
-        <label class="field"><span class="lbl">Paseo machine</span><select id="graphiteMachine" aria-label="Graphite access machine"></select></label>
-        <label class="field"><span class="lbl">Repository</span><input id="graphiteRepo" type="text" placeholder="owner/repository" autocomplete="off" spellcheck="false" /></label>
-        <label class="toggle"><input type="checkbox" id="graphiteToggleChanges" /> Allow Follow Up to change Merge when ready directly</label>
-        <p class="help">This trusts the selected machine to change the PR setting for this repository, including later pushes.
-          Leave unchecked to confirm each change in Chrome.</p>
-        <button type="button" id="graphiteGrant">Allow this repository</button>
-        <p id="graphiteStatus" role="status" class="help">Browser access is off until you allow a machine and repository.</p>
+        <p id="graphiteStatus" role="status" class="help">Checking your Send to Paseo connection…</p>
+        <div id="graphiteConnections"></div>
         <div id="graphiteGrants"></div>
+        <button type="button" id="graphiteRefresh">Retry connection</button>
       </section>
 
       <footer>

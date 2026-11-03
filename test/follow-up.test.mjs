@@ -105,3 +105,68 @@ test("concurrent host edits preserve additions and removals; stale pings cannot 
     if (oldNavigator) Object.defineProperty(globalThis, "navigator", oldNavigator); else delete globalThis.navigator;
   }
 });
+
+test("tracked repository discovery permits reads but never grants direct toggle changes", async () => {
+  const { permits, allowsToggleChanges } = await load("../extension/src/background/browser-access.ts");
+  const route = { hostId: "primary", routeId: "vm", serverId: "daemon", binding: "binding", available: true, repositories: ["example/app"] };
+  assert.equal(permits([], route, command("read")), true);
+  assert.equal(permits([], route, { ...command("read"), repo: "other/repo" }), false);
+  assert.equal(allowsToggleChanges([], route, command()), false);
+  assert.equal(permits([], { ...route, available: false }, command("read")), false);
+  const grant = { ...route, repo: "example/app", enable_toggle_changes: true };
+  assert.equal(allowsToggleChanges([grant], route, command()), true);
+  assert.equal(allowsToggleChanges([grant], { ...route, binding: "new-pairing" }, command()), false);
+  assert.equal(allowsToggleChanges([grant], { ...route, serverId: "replacement-daemon" }, command()), false);
+});
+
+test("Follow Up discovers existing paired connections without manual grants and explains an old Primary", async () => {
+  const oldChrome = globalThis.chrome, oldFetch = globalThis.fetch;
+  const host = { id: "primary", bridgeUrl: "http://127.0.0.1:7788", token: "synthetic-pairing", enabled: true, label: "Fixture", machineName: "Fixture" };
+  const stored = { settings: { version: 2, hosts: [host], connectionMode: "simple", defaultProvider: "" } };
+  const calls = []; let status = 200;
+  globalThis.chrome = { storage: { local: { get: async key => ({ [key]: structuredClone(stored[key]) }), set: async patch => Object.assign(stored, patch) } }, permissions: { contains: async () => true } };
+  globalThis.fetch = async (url, options) => {
+    assert.equal(new URL(url).pathname, "/follow-up/v1/exchange");
+    assert.equal(options.headers.authorization, "Bearer synthetic-pairing");
+    assert.equal(options.redirect, "error");
+    calls.push(JSON.parse(options.body));
+    return Response.json({ routes: [{ routeId: "local", serverId: "daemon", label: "Fixture", available: true, repositories: ["example/app"], jobs: [], accepted: [] }] }, { status });
+  };
+  try {
+    const worker = await load("../extension/src/background/follow-up.ts");
+    const first = await worker.browserAccessIntent({ type: "browserAccessStatus" });
+    assert.equal(first.routes.length, 1); assert.equal(first.routes[0].available, true);
+    assert.deepEqual(first.routes[0].repositories, ["example/app"]); assert.deepEqual(first.grants, []);
+    await worker.browserAccessIntent({ type: "browserAccessRefresh" });
+    assert.deepEqual(calls.at(-1).routes, [{ routeId: "local", serverId: "daemon", repositories: ["example/app"] }]);
+    await worker.browserAccessIntent({ type: "browserAccessEnable", enabled: false });
+    assert.deepEqual(calls.at(-1).routes, []); assert.equal(calls.at(-1).ready, false); assert.equal(calls.at(-1).acceptJobs, false);
+    stored.settings.hosts[0].token = "replacement-pairing";
+    globalThis.fetch = async (_url, options) => { calls.push(JSON.parse(options.body)); return Response.json({ routes: [] }); };
+    await worker.browserAccessIntent({ type: "browserAccessEnable", enabled: true });
+    assert.deepEqual(calls.at(-1).routes, [], "re-pairing does not echo stale repository scopes");
+    globalThis.fetch = async () => Response.json({}, { status: 404 });
+    const old = await worker.browserAccessIntent({ type: "browserAccessRefresh" });
+    assert.deepEqual(old.routes, []); assert.match(old.errors[0].message, /Update Send to Paseo.*Primary/);
+  } finally { globalThis.chrome = oldChrome; globalThis.fetch = oldFetch; }
+});
+
+test("remembered permissions serialize concurrent changes so revocation is preserved", async () => {
+  const oldChrome = globalThis.chrome;
+  const grant = repo => ({ hostId: "primary", routeId: "local", serverId: "daemon", binding: "binding", repo, enable_toggle_changes: true });
+  let saved = [grant("example/revoked")];
+  globalThis.chrome = { storage: { local: {
+    get: async key => { const value = structuredClone(saved); await new Promise(r => setTimeout(r, 2)); return { [key]: value }; },
+    set: async patch => { await new Promise(r => setTimeout(r, 2)); saved = structuredClone(patch.graphiteBrowserGrants); },
+  } } };
+  try {
+    const { updateGrants } = await load("../extension/src/background/browser-access.ts");
+    await Promise.all([
+      updateGrants(grants => grants.filter(g => g.repo !== "example/revoked")),
+      updateGrants(grants => [...grants, grant("example/remembered")]),
+    ]);
+    assert.deepEqual(saved.map(g => g.repo), ["example/remembered"]);
+    await assert.rejects(updateGrants(() => { throw new Error("Synthetic storage refusal"); }));
+    await updateGrants(() => []); assert.deepEqual(saved, []);
+  } finally { globalThis.chrome = oldChrome; }
+});
