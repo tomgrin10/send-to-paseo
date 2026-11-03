@@ -129,7 +129,6 @@ The extension uses Paseo's brand mark and Lucide's settings icon. Paseo is Apach
 
 - [Defer](https://github.com/tomgrin10/paseo-defer) — Schedule messages for later delivery.
 - [Follow-up](https://github.com/tomgrin10/paseo-follow-up) — Track workspace PRs, remaining tasks and completion.
-- [Graphite](https://github.com/tomgrin10/paseo-graphite) — Graphite stacks and PR status.
 - [Session Guard](https://github.com/tomgrin10/paseo-session-guard) — Pause at session limits and continue after reset.
 - [Smart Session](https://github.com/tomgrin10/paseo-smart-session) — Context compaction and usage insights.
 - [Transcript Search](https://github.com/tomgrin10/paseo-transcript-search) — Search conversations across connected hosts.
