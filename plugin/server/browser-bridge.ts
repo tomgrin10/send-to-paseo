@@ -12,7 +12,7 @@ export const browserExchange = z.object({
 });
 type Exchange = z.infer<typeof browserExchange>;
 const turns = new Map<string, number>();
-type Route = { routeId: string; serverId: string | null; label: string; available: boolean; jobs: unknown[]; accepted: string[] };
+type Route = { routeId: string; serverId: string | null; label: string; available: boolean; repositories?: string[]; jobs: unknown[]; accepted: string[] };
 
 /** Each route gets its own consent scopes. A proxy can never widen them. */
 export async function exchangeBrowser(input: Exchange, localOnly: boolean) {
@@ -31,8 +31,9 @@ export async function exchangeBrowser(input: Exchange, localOnly: boolean) {
       clientId: `send:${input.clientId}`, ready: input.ready && !!localScope?.repositories.length,
       acceptJobs: input.acceptJobs && selected === "local", repositories: localScope?.repositories ?? [],
       results: input.results.filter(r => r.routeId === "local").map(({ routeId: _, ...r }) => r),
-    }) as { jobs?: unknown[]; accepted?: string[] };
+    }) as { jobs?: unknown[]; accepted?: string[]; repositories?: unknown };
     local.available = true;
+    if (Array.isArray(answer.repositories)) local.repositories = [...new Set(answer.repositories.filter((r): r is string => repo.safeParse(r).success).map(r => r.toLowerCase()))].slice(0, 100);
     local.jobs = Array.isArray(answer.jobs) ? answer.jobs : [];
     local.accepted = Array.isArray(answer.accepted) ? answer.accepted : [];
   } catch { /* Follow Up is optional, including older versions. */ }
@@ -43,7 +44,7 @@ export async function exchangeBrowser(input: Exchange, localOnly: boolean) {
       const scope = input.routes.find(r => r.routeId === machine.id);
       const response = await exchangeBrowserOnMachine(machine, { ...input, acceptJobs: input.acceptJobs && selected === machine.id, routes: scope ? [{ ...scope, routeId: "local" }] : [], results: input.results.filter(r => r.routeId === machine.id).map(r => ({ ...r, routeId: "local" })) }) as { routes?: Route[] };
       const remote = response.routes?.find(r => r.routeId === "local");
-      if (remote) { route.serverId = remote.serverId; route.available = remote.available; route.jobs = remote.jobs; route.accepted = remote.accepted; }
+      if (remote) { route.serverId = remote.serverId; route.available = remote.available; route.repositories = remote.repositories; route.jobs = remote.jobs; route.accepted = remote.accepted; }
     } catch { /* A sleeping peer cannot disable local sends. */ }
     return route;
   }));
