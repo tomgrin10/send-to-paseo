@@ -317,7 +317,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (typeof type !== "string") return false;
   if (type.startsWith("browserAccess")) {
     if (sender.url !== chrome.runtime.getURL("options.html")) return false;
-    void storageReady.then(() => browserAccessIntent(message)).then(data => sendResponse({ ok: true, data })).catch(() => sendResponse({ ok: false, error: { message: "Could not update Graphite access. Refresh machines and try again." } }));
+    void storageReady.then(() => browserAccessIntent(message)).then(data => sendResponse({ ok: true, data })).catch(() => sendResponse({ ok: false, error: { message: "Could not update Follow Up access. Retry the existing connection." } }));
     return true;
   }
   storageReady.then(() => handle(message as Intent))

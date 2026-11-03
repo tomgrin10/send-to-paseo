@@ -1,6 +1,6 @@
 # Follow Up integration
 
-Requires Send to Paseo plugin/extension 2.1+ and Follow Up 0.3+. All components also work
+Automatic browser connection requires Send to Paseo plugin/extension 2.2+ and Follow Up 0.3.4+. PR routing remains compatible with 2.1+/0.3+. All components also work
 independently. Neither plugin installs or enables the other. The installation id of Follow Up
 remains `follow-through`.
 
@@ -23,12 +23,20 @@ matching usable; a send already bound to a registration fails until refreshed.
 
 ## Browser authority
 
-In extension settings, find a paired machine, enter an exact `owner/repository`, and allow it.
-By default this permits reads and requires Chrome confirmation for each toggle. Checking **Allow
-Follow Up to change Merge when ready directly** also permits that machine to change the setting
-from Follow Up without another Chrome prompt. Both modes are revocable. A trusted machine with a
-direct grant can issue toggle commands for that repository; a compromised machine has the same
-granted authority. Do not grant direct changes to a machine you do not trust.
+Follow Up uses the existing Send to Paseo pairing, Primary and Additional machine routes, token,
+and Chrome origin permission. No separate machine finder, repository form or pairing is needed.
+The extension discovers companions automatically on opening settings or Graphite. Each companion
+advertises at most 100 repository identities from its active tracked PRs; the extension echoes
+those exact scopes on later polls. Pairing now permits reading Merge when ready for those tracked
+repositories while Graphite is open and signed in. **Use Graphite with Follow Up** turns browser
+access off without removing Send pairing or changing either plugin's tracking settings.
+
+Toggle changes still require explicit confirmation in the extension. That confirmation optionally
+remembers permission for future changes for the exact machine, daemon identity and repository.
+**Require confirmation** revokes that remembered permission. Existing explicit repository grants
+are preserved. Automatic discovery and reading never grant direct toggle authority. A trusted
+machine with a remembered direct grant can issue toggle commands for that repository; a
+compromised machine has the same granted authority.
 
 Grants bind the stored browser connection, its origin and pairing-token fingerprint, the exact
 route, daemon server id and repository. Re-pairing the browser, changing its bridge, changing the server id,
