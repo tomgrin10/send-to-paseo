@@ -1,5 +1,14 @@
 # Verification record
 
+## 2026-11-03 — automatic Follow Up connection
+
+Typecheck, unit tests and the shipping build passed. The full Chromium suite passed all
+66 cases. Focused regressions cover discovery without manual grants, an outdated Primary,
+exact route and pairing bindings, explicit toggle authority, disabling access, and concurrent
+permission revocation. The installed companion browser harness checks automatic reads, Chrome
+confirmation, remembered direct changes, revocation and four theme/window combinations using
+synthetic PRs and an isolated Paseo home. No real PR mutation or agent message is used.
+
 ## Release 1.4.2 validation — 2026-10-11
 
 The Graphite first-load fixes were applied to a clean checkout of current `origin/main`

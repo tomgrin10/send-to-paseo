@@ -39,14 +39,14 @@ When [Follow Up](https://github.com/tomgrin10/paseo-follow-up) is installed on a
 machine, the composer selects the agent registered for that PR. You can still choose a new agent.
 Without Follow Up, normal workspace and main-agent matching continue to work.
 
-To control Graphite’s **Merge when ready** from Follow Up, open Graphite in Chrome, then open
-this extension’s settings → **Graphite browser access**. Find the machine, enter an exact
-`owner/repository`, and check **Allow Follow Up to change Merge when ready directly** before
-allowing the repository. Leave it unchecked to confirm changes in Chrome instead. Revoke access
-there at any time. The setting applies to the PR, including later pushes.
+To control Graphite’s **Merge when ready** from Follow Up, use Send to Paseo 2.2+ and Follow Up
+0.3.4+, and keep Graphite open and signed in. Follow Up connects automatically through the
+existing Send to Paseo pairing and uses its tracked repositories. There is no second setup.
 
-Send pairing alone grants no Graphite browser access. See the
-[integration and security contract](docs/follow-up-integration.md).
+Toggle changes ask for confirmation in Chrome. You can allow future changes for that repository
+on the confirmation, then revoke that permission or turn off browser access in extension settings
+→ **Follow Up**. This controls the PR setting, including later pushes.
+See the [integration and security contract](docs/follow-up-integration.md).
 
 ## Add another Paseo machine
 

@@ -44,13 +44,15 @@ test("send steers the registering agent ahead of a newer main agent, and explici
 test("browser transport keeps repository grants and receipts on their exact route, with one fair lease slot", async () => {
   const calls = [];
   const m = await load("server/browser-bridge.ts", {
-    "./daemon": { readDaemonStatus: async () => ({ serverId: "local-server" }), callFollowUp: async (_method, input) => { calls.push({ route: "local", input }); return { jobs: [], accepted: input.results.map(r => r.id) }; } },
+    "./daemon": { readDaemonStatus: async () => ({ serverId: "local-server" }), callFollowUp: async (_method, input) => { calls.push({ route: "local", input }); return { jobs: [], accepted: input.results.map(r => r.id), repositories: ["example/local"] }; } },
     "./settings": { settings: { read: async () => ({ additionalMachines: [{ id: "vm", label: "VM", enabled: true }, { id: "other", label: "Other", enabled: true }] }) } },
-    "./peers": { exchangeBrowserOnMachine: async (machine, input) => { calls.push({ route: machine.id, input }); return { routes: [{ routeId: "local", serverId: machine.id + "-server", available: true, jobs: [], accepted: [] }] }; } },
+    "./peers": { exchangeBrowserOnMachine: async (machine, input) => { calls.push({ route: machine.id, input }); return { routes: [{ routeId: "local", serverId: machine.id + "-server", available: true, repositories: ["example/remote"], jobs: [], accepted: [] }] }; } },
   });
   const input = { clientId: "browser", ready: true, acceptJobs: true, routes: [{ routeId: "local", serverId: "local-server", repositories: ["example/local"] }, { routeId: "vm", serverId: "vm-server", repositories: ["example/remote"] }], results: [{ routeId: "vm", id: "receipt", nonce: "nonce", outcome: "failed", prs: [], applied: [], error: "cancelled" }] };
   const first = await m.exchangeBrowser(input, false);
   assert.deepEqual(first.routes.map(r => r.routeId), ["local", "vm", "other"]);
+  assert.deepEqual(first.routes[0].repositories, ["example/local"]);
+  assert.deepEqual(first.routes[1].repositories, ["example/remote"]);
   assert.equal(calls.filter(c => c.input.acceptJobs).length, 1); assert.equal(calls.find(c => c.input.acceptJobs).route, "local");
   assert.deepEqual(calls.find(c => c.route === "local").input.repositories, ["example/local"]);
   assert.equal(calls.find(c => c.route === "local").input.results.length, 0);

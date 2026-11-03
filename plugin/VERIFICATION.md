@@ -1,5 +1,12 @@
 # Verification log — `send-to-paseo` plugin
 
+## 2026-11-03 — existing Follow Up connection
+
+`npm run verify` passed: typecheck, 74 server checks, 18 host/routing/agent tests,
+three scoped-agent-tool tests and the native-tool test. The browser exchange forwards only
+bounded tracked repository identities on the exact local or Additional machine route. Existing
+pairing credentials, Send endpoints and contract version 1 are unchanged.
+
 ## 2026-09-24 — per-send agent destination
 
 `POST /v1/send` accepts an additive optional `agentDispatch` override and falls back to the saved
