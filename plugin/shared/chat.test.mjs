@@ -49,6 +49,7 @@ test("route line names workspace, branch and dispatch", () => {
   assert.equal(routeLine(card, send({ dispatch: "main", title: "Main" })).text, "Invoice retry backoff · on the PR's branch · sent to this agent");
   assert.equal(routeLine(card, send({ workspaceCreated: true, dispatch: "new" })).text, "New worktree for #421 · new agent");
   assert.equal(routeLine(card, null).text, "On the PR's branch");
+  assert.equal(routeLine(card, send({ workspaceLabel: "brawny-dodo" })).text, "brawny-dodo · on the PR's branch");
 });
 
 test("bridge tool rows", () => {

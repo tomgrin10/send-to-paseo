@@ -27,5 +27,7 @@ export function routeLine(card: Provenance, send: RecentSend | null): { text: st
   if (send?.dispatch === "main") parts.push("sent to this agent");
   else if (send?.dispatch === "new" || send?.workspaceCreated) parts.push("new agent");
   const text = parts.join(" · ");
-  return { text: text.charAt(0).toUpperCase() + text.slice(1), attention };
+  // Capitalise only our own leading phrase; a workspace name is shown as Paseo shows it.
+  const ours = send === null || send.workspaceCreated;
+  return { text: ours ? text.charAt(0).toUpperCase() + text.slice(1) : text, attention };
 }
