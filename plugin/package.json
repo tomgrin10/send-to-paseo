@@ -27,7 +27,8 @@
     "client/**/*.ts",
     "client/**/*.tsx",
     "server/**/*.ts",
-    "shared/**/*.ts"
+    "shared/**/*.ts",
+    "docs/media/"
   ],
   "publishConfig": {
     "access": "public"
