@@ -41,7 +41,18 @@ import type {
 import { sendIntent } from "./bridge";
 import type { ButtonState } from "./ui/button";
 import { Combobox } from "./ui/combobox";
-import { checkIcon, clear, cogIcon, el, externalIcon, renderProse } from "./ui/dom";
+import {
+  branchIcon,
+  checkIcon,
+  clear,
+  cogIcon,
+  copyIcon,
+  el,
+  externalIcon,
+  folderIcon,
+  folderPlusIcon,
+  renderProse,
+} from "./ui/dom";
 import { containKeyboard } from "./ui/keyboard";
 import { POPOVER_CSS } from "./ui/styles";
 
@@ -798,20 +809,27 @@ class Popover {
     const c = this.selectedCandidate();
     const slice = this.selectedSlice();
     const box = el("div", { class: "target-summary", "data-stp-target-summary": "" });
-    box.append(el("span", { class: "arrow" }, ["→ "]));
+    // The first line is "which workspace"; an icon instead of a text arrow, so
+    // it reads like the host's own UI (Primer and Paseo both lead rows with an
+    // outline icon) and is the same size on every font stack.
+    const head = el("div", { class: "thead" });
+    box.append(head);
 
     if (!c || !slice || !slice.resolved) {
-      box.append(document.createTextNode("no candidate selected"));
+      head.append(document.createTextNode("No candidate selected"));
       return box;
     }
     const hostResolved = slice.resolved;
+    head.append(el("span", { class: "ticon" }, [c.kind === "create" ? folderPlusIcon() : folderIcon()]));
+    const headText = el("span", { class: "ttext" });
+    head.append(headText);
 
     // The host comes first, and is a distinct element rather than part of the
     // sentence: which machine the agent starts on is the one fact this popover
     // could not tell you before, and it is the one that is expensive to get
     // wrong.
     if (this.multiHost) {
-      box.append(
+      headText.append(
         el("span", { class: "host", "data-stp-target-host": slice.hostId }, [
           this.chipFor(c.hostIndex),
         ]),
@@ -820,21 +838,28 @@ class Popover {
     }
 
     if (c.kind === "create") {
-      box.append(document.createTextNode(`will create worktree for PR #${hostResolved.pr.number}`));
+      headText.append(document.createTextNode(`will create worktree for PR #${hostResolved.pr.number}`));
     } else {
-      box.append(document.createTextNode("workspace "), el("code", {}, [c.label]));
+      headText.append(document.createTextNode("workspace "), el("code", {}, [c.label]));
       if (c.reason === "stack" && c.stackPrNumber) {
-        box.append(
+        headText.append(
           document.createTextNode(` · stack #${c.stackPrNumber}${stackStateSuffix(c)}`),
         );
       }
     }
-    const sub = el("span", { class: "sub" });
-    sub.append(
-      document.createTextNode(c.branch ? `${c.branch}` : hostResolved.pr.headBranch),
-      document.createTextNode(` · ${hostResolved.project.name}`),
+
+    // Why this target: the same words the Paseo card uses once the send lands,
+    // so the reason reads identically before and after.
+    const reason = routeReason(c, hostResolved.pr);
+    if (reason) box.append(reasonLine(reason));
+    // The branch goes on the sub-line unless the reason already named it.
+    const branch = c.branch || hostResolved.pr.headBranch;
+    const named = reason !== null && branch !== "" && reason.text.includes(branch);
+    box.append(
+      el("span", { class: "sub" }, [
+        named || !branch ? hostResolved.project.name : `${branch} · ${hostResolved.project.name}`,
+      ]),
     );
-    box.append(sub);
 
     if (this.effectiveAgentDispatch() === "main") {
       if (c.kind === "existing" && c.mainAgent) {
@@ -852,26 +877,6 @@ class Popover {
       }
     }
 
-    // One workspace per stack is normal, so the resolved target is often a
-    // worktree on a *sibling* branch. Say so, rather than letting the branch on
-    // the line above be mistaken for this PR's branch.
-    //
-    // `resolved.pr.headBranch` must be non-empty. When `gh` is unavailable the
-    // bridge deliberately never guesses it and sends "", and "any branch !== \"\""
-    // is true for every existing candidate — which asserted a mismatch nothing
-    // could actually know about. Unknown is not "different".
-    if (
-      c.kind === "existing" &&
-      c.branch &&
-      hostResolved.pr.headBranch &&
-      c.branch !== hostResolved.pr.headBranch
-    ) {
-      box.append(
-        el("span", { class: "mismatch", "data-stp-branch-mismatch": "" }, [
-          branchMismatchNote(c),
-        ]),
-      );
-    }
     return box;
   }
 
@@ -890,17 +895,24 @@ class Popover {
       .filter(({ slice }) => slice.error !== null)
       .map(({ slice, hostIndex }) => {
         const presented = presentError(slice.error!.code);
+        // The raw code is for support, so it lives in the tooltip and a data
+        // attribute, never in the visible sentence.
         return el(
           "div",
-          { class: "host-error", "data-stp-host-error": slice.hostId, role: "status" },
+          {
+            class: "host-error",
+            "data-stp-host-error": slice.hostId,
+            "data-stp-host-error-code": slice.error!.code,
+            title: `Error code ${slice.error!.code}`,
+            role: "status",
+          },
           [
             el("span", { class: "host" }, [chips[hostIndex] ?? slice.hostLabel]),
             // The headline is used verbatim. Lower-casing it to splice into a
             // sentence produced "chrome hasn't been given access…" — these
             // titles are sentences of their own, several starting with a proper
             // noun, so the row is a label and a sentence rather than one clause.
-            document.createTextNode(` — ${presented.title} · `),
-            el("span", { class: "hcode" }, [slice.error!.code]),
+            document.createTextNode(` — ${presented.title}`),
           ],
         );
       });
@@ -928,13 +940,29 @@ class Popover {
       });
       box.append(a);
     }
-    // The raw code is for support and bug reports, not for reading: small,
-    // muted, last.
-    box.append(
-      el("div", { class: "ecode", "data-stp-error-code": "" }, [
-        f.status ? `Error code ${f.code} · HTTP ${f.status}` : `Error code ${f.code}`,
-      ]),
-    );
+    // The raw code is for support and bug reports, not for reading. It is
+    // never visible copy: it sits in the button's tooltip and goes to the
+    // clipboard, together with the HTTP status and the message, on demand.
+    const details = [
+      `Send to Paseo error: ${f.code}`,
+      ...(f.status ? [`HTTP ${f.status}`] : []),
+      ...(f.message ? [f.message] : []),
+    ].join("\n");
+    const summary = f.status ? `Error code ${f.code} · HTTP ${f.status}` : `Error code ${f.code}`;
+    const copy = el(
+      "button",
+      { class: "copy-details", type: "button", "data-stp-error-code": summary, title: summary },
+      [copyIcon(), el("span", {}, ["Copy details"])],
+    ) as HTMLButtonElement;
+    copy.addEventListener("click", () => {
+      const label = copy.querySelector("span")!;
+      navigator.clipboard
+        .writeText(details)
+        .then(() => (label.textContent = "Copied"))
+        .catch(() => (label.textContent = "Couldn’t copy"))
+        .finally(() => setTimeout(() => (label.textContent = "Copy details"), 2000));
+    });
+    box.append(copy);
     return box;
   }
 
@@ -1044,6 +1072,14 @@ class Popover {
     }
     route.append(document.createTextNode(routeSentence(r, this.ctx.pr.number, this.selectedCandidate(), dry)));
     box.append(route);
+    // Why it landed there. Skipped for a new worktree, where the route line
+    // already says exactly that.
+    const sent = this.selectedCandidate();
+    const sentPr = this.selectedSlice()?.resolved?.pr;
+    if (!r.workspaceCreated && sent && sentPr) {
+      const reason = routeReason(sent, sentPr);
+      if (reason) box.append(reasonLine(reason));
+    }
 
     if (dry) {
       box.append(
@@ -1250,24 +1286,58 @@ function candidateOptionLabel(c: Candidate, hostLabel: string | null): string {
  * first — that is the field users actually remember.
  */
 /**
- * What to say about a target whose branch is not this PR's branch.
+ * Why a send goes (or went) to this workspace, in the Paseo card's words:
+ * "On the PR's branch", "On feat-x, another branch of this stack", "On feat-x,
+ * a merged branch of this stack", "New worktree for #942".
  *
- * Reason-aware, because a single sentence cannot be true of every case. It read
- * "another branch of this stack" for *every* existing candidate, which is a
- * false claim about a rank-3 "same project" workspace — that branch is not in
- * the stack at all, and saying it is invites the user to trust a target the
- * bridge deliberately refuses to default to. A merged branch gets its own
- * wording for the opposite reason: "another branch of this stack" reads as a
- * live sibling, and a worktree parked on a branch that has already landed is
- * the case this whole ranking path exists to recognise.
+ * Derived from what resolve already returned (reason, stack state, branch vs
+ * `pr.headBranch`), so no wire change. Reason-aware because one sentence is not
+ * true of every case: a rank-3 "same project" workspace is not in the stack,
+ * and a merged branch must not read as a live sibling. `mismatch` is set only
+ * when the branches are known to differ.
+ *
+ * `pr.headBranch` is "" when `gh` is unavailable: the bridge never guesses it,
+ * and "any branch !== \"\"" would assert a mismatch nothing can know about, so
+ * that case says the details are unavailable instead.
  */
-function branchMismatchNote(c: Candidate): string {
-  if (c.reason !== "stack") return "worktree is on a different branch";
-  const state = c.stackPrState;
-  if (state === "merged" || state === "closed") {
-    return `worktree is on a branch of this stack whose PR is ${state}`;
+interface RouteReason {
+  text: string;
+  /** Merged/closed branch: the user may not want this target. Amber. */
+  attention: boolean;
+  /** The workspace is known to be on a branch other than the PR's. */
+  mismatch: boolean;
+}
+
+function routeReason(c: Candidate, pr: { number: number; headBranch: string }): RouteReason | null {
+  if (c.kind === "create") return { text: `New worktree for #${pr.number}`, attention: false, mismatch: false };
+  if (!pr.headBranch) {
+    return c.branch
+      ? { text: `On ${c.branch} · PR details unavailable (gh)`, attention: false, mismatch: false }
+      : null;
   }
-  return "worktree is on another branch of this stack";
+  if (!c.branch || c.branch === pr.headBranch) {
+    return { text: "On the PR's branch", attention: false, mismatch: false };
+  }
+  if (c.reason === "stack") {
+    const state = c.stackPrState;
+    if (state === "merged" || state === "closed") {
+      return { text: `On ${c.branch}, a ${state} branch of this stack`, attention: true, mismatch: true };
+    }
+    return { text: `On ${c.branch}, another branch of this stack`, attention: false, mismatch: true };
+  }
+  return { text: `On ${c.branch}, a different branch`, attention: false, mismatch: true };
+}
+
+function reasonLine(reason: RouteReason): HTMLElement {
+  return el(
+    "span",
+    {
+      class: reason.attention ? "reason attention" : "reason",
+      "data-stp-route-reason": "",
+      ...(reason.mismatch ? { "data-stp-branch-mismatch": "" } : {}),
+    },
+    [branchIcon(), el("span", {}, [reason.text])],
+  );
 }
 
 function candidateSearchText(c: Candidate, slice: HostSlice | undefined): string {

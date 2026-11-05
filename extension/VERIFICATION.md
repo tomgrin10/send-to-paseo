@@ -1,5 +1,32 @@
 # Verification record
 
+## 2026-11-05 (round 2) — route reason, single-status options, no raw codes, Primer labels
+
+Finish-review fixes. No wire change: the route reason is derived from fields resolve already returns.
+
+- **Route reason** (`data-stp-route-reason`): the target box and the sent state say why the
+  send lands where it does, in the Paseo card's words: "On the PR's branch", "On <branch>,
+  another branch of this stack", "On <branch>, a merged branch of this stack" (amber), "On
+  <branch>, a different branch" (rank 3), "New worktree for #N". With `pr.headBranch === ""` it
+  says "On <branch> · PR details unavailable (gh)" and never claims a mismatch.
+  `data-stp-branch-mismatch` is now on that line only when the branches are known to differ;
+  20c, 33 and the stack-default case assert the new wording.
+- **No raw codes as copy**: the error card's code line became a small **Copy details** button
+  (code, HTTP status, message to the clipboard; the summary is in `title` and
+  `data-stp-error-code`). Host-failure rows carry the code in `title` and
+  `data-stp-host-error-code`. 9e asserts every error code is absent from the card's visible text.
+- **Labels**: popover field labels are sentence-case semibold (Primer FormControl), not
+  uppercase eyebrows. The text arrow before "workspace" is now a Lucide folder / folder-plus
+  icon built with `createElementNS`.
+- **Options**: Defaults and Follow Up are hidden in simple mode until Paseo has answered once.
+  The options page now writes the per-host provider cache itself after a successful Test
+  connection, because it pings directly rather than through the worker; before this, Defaults
+  kept saying "No providers known yet" after a successful test. Follow Up renders exactly one
+  status line, with no stale "Checking…" and no gaps from empty live regions (`section >
+  :empty`). Retry appears only when something is wrong. A host with no token is idle, not an
+  error (no duplicate "Pair Send to Paseo…" line), and recorded errors clear when settings change.
+- Unit tests: `follow-up.test.mjs` asserts the new 404 copy. 23/23.
+
 ## 2026-11-05 — UI polish: button states, setup card, success routing, pairing-first options
 
 Typecheck and the shipping build passed; `node --test test/*.test.mjs` 23/23. The full Chromium

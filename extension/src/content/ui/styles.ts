@@ -426,11 +426,11 @@ header {
    label wrapping its own control forwards clicks to it and would re-toggle the
    combobox trigger. */
 .field { display: grid; gap: 4px; }
+/* Sentence-case semibold, like Primer's FormControl labels and Graphite's
+   field labels. Uppercase tracked eyebrows read as a third design language. */
 .field > span.lbl {
-  font: 600 10px/1 var(--stp-font);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--stp-fg-muted);
+  font: 600 12px/1.3 var(--stp-font);
+  color: var(--stp-fg);
 }
 
 select, textarea {
@@ -574,10 +574,17 @@ select:focus, textarea:focus { outline: 2px solid var(--stp-accent); outline-off
   border-radius: var(--stp-radius);
   background: var(--stp-bg-subtle);
 }
-.target-summary .arrow { color: var(--stp-accent); font-weight: 700; }
+.target-summary .thead { display: flex; align-items: flex-start; gap: 6px; }
+.target-summary .ticon { display: inline-flex; flex: none; height: 17px; align-items: center; color: var(--stp-fg-muted); }
+.target-summary .ttext { min-width: 0; overflow-wrap: anywhere; }
+/* Why this target. Same words as the Paseo card; amber only when the branch
+   has merged or closed, i.e. when the user may not want this target. */
+.reason { display: flex; align-items: flex-start; gap: 5px; margin-top: 4px; font: 400 11.5px/1.4 var(--stp-font); color: var(--stp-fg); overflow-wrap: anywhere; }
+.reason > svg { flex: none; margin-top: 2px; color: var(--stp-fg-muted); }
+.reason.attention, .reason.attention > svg { color: var(--stp-warn); }
+.target-summary .reason, .target-summary .sub { margin-left: 20px; }
 .target-summary code { font: 500 11.5px/1 var(--stp-mono); }
 .target-summary .sub { display: block; margin-top: 3px; color: var(--stp-fg-muted); font-weight: 400; font-size: 11px; }
-.target-summary .mismatch { display: block; margin-top: 3px; color: var(--stp-warn); font-weight: 400; font-size: 11px; }
 
 /* Host name. Weighted like a tag rather than prose, because with two Paseo
    machines paired it is the first thing to read on the line — it says which
@@ -602,7 +609,6 @@ select:focus, textarea:focus { outline: 2px solid var(--stp-accent); outline-off
   background: var(--stp-warn-bg);
 }
 .host-error .host { color: inherit; }
-.host-error .hcode { font: 500 10.5px/1 var(--stp-mono); opacity: 0.8; }
 
 footer {
   display: flex;
@@ -682,7 +688,15 @@ kbd.sym {
 .error .emsg { font: 400 12px/1.45 var(--stp-font); color: var(--stp-fg); }
 .error .ehint { font: 400 11.5px/1.45 var(--stp-font); color: var(--stp-fg-muted); }
 .error .ehint code, .error .emsg code { font: 500 11.5px/1 var(--stp-mono); background: var(--stp-bg); padding: 1px 4px; border-radius: 3px; }
-.error .ecode { margin-top: 2px; font: 400 10.5px/1.3 var(--stp-mono); color: var(--stp-fg-muted); opacity: 0.85; }
+.error .copy-details {
+  justify-self: start;
+  display: inline-flex; align-items: center; gap: 4px;
+  margin-top: 2px; padding: 2px 6px; border-radius: 4px;
+  font: 500 11px/1.3 var(--stp-font); color: var(--stp-fg-muted);
+  background: transparent; border: 1px solid transparent; cursor: pointer;
+}
+.error .copy-details:hover { color: var(--stp-fg); border-color: var(--stp-border); background: var(--stp-bg); }
+.error .copy-details:focus-visible { outline: 2px solid var(--stp-accent); outline-offset: 1px; }
 .error a.link { color: var(--stp-accent); font: 500 11.5px/1.4 var(--stp-font); cursor: pointer; text-decoration: underline; }
 
 .success { display: grid; gap: 8px; padding: 4px 0 0; }
@@ -710,6 +724,7 @@ kbd.sym {
 .success .stitle { font: 600 13.5px/1.35 var(--stp-font); color: var(--stp-success); display: flex; align-items: center; gap: 6px; }
 .success .stitle svg { width: 15px; height: 15px; flex: none; }
 .success .route { font: 500 12.5px/1.45 var(--stp-font); color: var(--stp-fg); overflow-wrap: anywhere; }
+.success .reason { margin-top: -4px; }
 .success .sdetail { font: 400 12px/1.5 var(--stp-font); color: var(--stp-fg-muted); overflow-wrap: anywhere; }
 .success .sdetail code { font: 500 11.5px/1.3 var(--stp-mono); }
 a.btn { text-decoration: none; }

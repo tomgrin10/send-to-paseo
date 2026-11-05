@@ -503,7 +503,7 @@ intent; prewarming does not weaken the contract gate.
 | Popover says **Update required** | Plugin and extension are on different contract versions. Sends are blocked deliberately. Update whichever side is older; **Test connection** prints both numbers. |
 | Options page says **Token rejected** | The bridge is up and refused the token. Re-copy it from the Paseo plugin surface. Distinct from **Bridge not running**. |
 | Success state says **Dry run — nothing sent** | The plugin is running with `SEND_TO_PASEO_DRY_RUN=1`. Nothing was created and the ids are synthetic. Unset the env var and reload the plugin. |
-| **Default provider** dropdown is empty | Providers come from an authenticated ping. Paste a valid token and click **Test all connections**. |
+| **Default provider** dropdown is empty | Providers come from an authenticated ping. Paste a valid token and press **Test connection** (**Test all connections** in Advanced). Defaults and Follow Up stay hidden in simple mode until Paseo has answered once. |
 | "Chrome hasn't been given access to this bridge" | Only `127.0.0.1:7788` is permitted up front. Options → that host → **Grant access to this address**. |
 | A host is named in a warning row under the Target picker | That machine did not answer; the others did. The row carries its own error code — `bridge_unreachable` (proxy/tunnel down or Paseo not running there), `unauthorized` (wrong token for *that* machine), `contract_mismatch` (its plugin is a different version). |
 | A workspace you expect is missing from the Target list | Its host is disabled, has no token, or is in a warning row. The field label counts the hosts that answered: "4 candidates on 1 host" with two paired means one is missing. |
