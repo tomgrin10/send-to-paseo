@@ -27,7 +27,9 @@ export function lead(status: BridgeStatus, sends: RecentSend[], now = Date.now()
     return {
       kind: "down",
       text: "The bridge isn't running",
-      detail: status.error ?? `Nothing is listening on port ${status.configuredPort}. Reload the plugin, or pick another port under Connection details.`,
+      detail: status.error !== null && /already in use/i.test(status.error)
+        ? `Port ${status.configuredPort} is taken by another program. Choose another port under Connection details below, or quit the program using it.`
+        : status.error ?? `Nothing is listening on port ${status.configuredPort}. Reload the plugin, or pick another port under Connection details.`,
     };
   }
   if (status.state === "starting") return { kind: "ready", text: "Starting the bridge…", detail: "" };
@@ -44,8 +46,22 @@ export function lead(status: BridgeStatus, sends: RecentSend[], now = Date.now()
 }
 
 /** The second line of a send row: where it went and how. */
+/** A failed send's cause and the one thing that fixes it, instead of the raw upstream message. */
+export function failure(send: RecentSend): string {
+  const error = send.error ?? "";
+  const repo = send.prLabel.replace(/#\d+$/, "");
+  const number = /#(\d+)$/.exec(send.prLabel)?.[1] ?? "";
+  if (/could not create a worktree|Unable to resolve GitHub repository/i.test(error)) {
+    return `Paseo couldn't check out PR #${number}. Add ${repo} as a project in Paseo (a clone with its GitHub remote), then send again.`;
+  }
+  if (/not a registered Paseo project|project_not_found/i.test(error)) return `${repo} isn't a Paseo project yet. Add it in Paseo, then send again.`;
+  if (/no longer available/i.test(error)) return "That workspace was archived or removed. Reopen the composer to pick another one.";
+  if (/Follow Up registration changed/i.test(error)) return "The agent Follow Up registered for this PR changed. Reopen the composer and send again.";
+  return error === "" ? "Not sent." : error;
+}
+
 export function destination(send: RecentSend): string {
-  if (send.outcome === "failed") return send.error ?? "Failed";
+  if (send.outcome === "failed") return failure(send);
   const parts = [
     send.workspaceCreated ? `New worktree · ${send.workspaceLabel}` : send.workspaceLabel,
     send.dispatch === "main" ? `messaged ${send.title}` : "new agent",

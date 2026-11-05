@@ -74,3 +74,9 @@ test("overview lead and sidebar attention", () => {
   assert.equal(summaryAttention({ state: "running", paired: true, lastSendAt: null, lastSendFailed: false }), null);
   assert.equal(summaryAttention({ state: "failed", paired: true, lastSendAt: null, lastSendFailed: false })?.tone, "danger");
 });
+
+test("failed sends name the cause and the fix", async () => {
+  const { failure } = await import("./overview.ts");
+  assert.match(failure(send({ outcome: "failed", prLabel: "acme/web-app#81", error: "Paseo could not create a worktree for PR #81: Unable to resolve GitHub repository for pull request checkout" })), /^Paseo couldn't check out PR #81\. Add acme\/web-app as a project in Paseo/);
+  assert.equal(failure(send({ outcome: "failed", error: "Something new" })), "Something new");
+});

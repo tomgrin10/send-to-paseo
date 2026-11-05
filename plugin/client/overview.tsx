@@ -134,7 +134,7 @@ function SendRow({ send, first, colors, compact, onOpen }: { send: RecentSend; f
           <Text style={{ color: colors.foregroundMuted, fontSize: 12, ...tabular }}>{ago(send.at)}</Text>
         </View>
         {title === null || title === "" ? null : <Text numberOfLines={2} style={{ color: colors.foreground, fontSize: 13, lineHeight: 18 }}>{title}</Text>}
-        <Text numberOfLines={failed ? 3 : 1} style={{ color: failed ? colors.statusDanger : colors.foregroundMuted, fontSize: 12, lineHeight: 17 }}>{failed ? `Not sent · ${destination(send)}` : destination(send)}</Text>
+        <Text numberOfLines={failed ? 3 : 1} style={{ color: failed ? colors.statusDanger : colors.foregroundMuted, fontSize: 12, lineHeight: 17 }}>{failed ? `Not sent. ${destination(send)}` : destination(send)}</Text>
       </View>
       <View style={{ width: 14, justifyContent: "center" }}>{openable ? <Icon name="ChevronRight" size={14} color={colors.foregroundMuted} /> : null}</View>
     </View>
