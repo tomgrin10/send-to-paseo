@@ -81,3 +81,42 @@ export function sendIcon(): SVGElement {
   svg.append(path);
   return svg as unknown as SVGElement;
 }
+
+/** Shared builder for the 24-unit Lucide-style outline icons below. */
+function lucide(paths: string[], size = 16, strokeWidth = "2"): SVGElement {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", String(size));
+  svg.setAttribute("height", String(size));
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  for (const d of paths) {
+    const path = document.createElementNS(NS, "path");
+    path.setAttribute("d", d);
+    path.setAttribute("stroke", "currentColor");
+    path.setAttribute("stroke-width", strokeWidth);
+    path.setAttribute("stroke-linecap", "round");
+    path.setAttribute("stroke-linejoin", "round");
+    svg.append(path);
+  }
+  return svg as unknown as SVGElement;
+}
+
+/** Lucide `check`: the button's "Sent" state and the success headline. */
+export function checkIcon(size = 16): SVGElement {
+  return lucide(["M20 6 9 17l-5-5"], size, "2.2");
+}
+
+/** Lucide `loader-circle`: an open arc that the stylesheet rotates. */
+export function spinnerIcon(size = 16): SVGElement {
+  const svg = lucide(["M21 12a9 9 0 1 1-6.219-8.56"], size, "2.2");
+  svg.setAttribute("class", "spin");
+  return svg;
+}
+
+/** Lucide `external-link`, for the "Open in Paseo" deep link. */
+export function externalIcon(size = 14): SVGElement {
+  return lucide(["M15 3h6v6", "M10 14 21 3", "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"], size, "2");
+}

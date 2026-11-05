@@ -63,6 +63,56 @@ const TOKENS = `
   }
 }
 
+/* GitHub can pin its theme with html[data-color-mode] regardless of the OS
+   setting. The page button already follows (it reads Primer's own tokens);
+   without these two blocks the popover would open light on a page pinned dark,
+   and vice versa. :host-context() is Chromium-only, which is fine for an MV3
+   extension, and no page but github.com sets this attribute. */
+:host-context(html[data-color-mode="dark"]) {
+    --stp-bg: #1d2025;
+    --stp-bg-subtle: #24282e;
+    --stp-bg-hover: #2c3138;
+    --stp-fg: #e7e9ec;
+    --stp-fg-muted: #98a0ab;
+    --stp-border: #383e46;
+    --stp-border-strong: #4a515b;
+    --stp-accent: #7d78ff;
+    --stp-accent-hover: #8f8bff;
+    --stp-accent-fg: #12131a;
+    --stp-danger: #ff9b92;
+    --stp-danger-bg: #2e1c1a;
+    --stp-danger-border: #57302c;
+    --stp-success: #6ddba2;
+    --stp-success-bg: #14261e;
+    --stp-success-border: #2b4d3a;
+    --stp-warn: #f2c169;
+    --stp-warn-bg: #2a2213;
+    --stp-warn-border: #524126;
+    --stp-shadow: 0 10px 34px rgba(0, 0, 0, 0.55), 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+:host-context(html[data-color-mode="light"]) {
+  --stp-bg: #ffffff;
+  --stp-bg-subtle: #f6f7f9;
+  --stp-bg-hover: #eef0f3;
+  --stp-fg: #16181d;
+  --stp-fg-muted: #676e79;
+  --stp-border: #d7dae0;
+  --stp-border-strong: #c2c7d0;
+  --stp-accent: #5b57e0;
+  --stp-accent-hover: #4a46d4;
+  --stp-accent-fg: #ffffff;
+  --stp-danger: #b42318;
+  --stp-danger-bg: #fef3f2;
+  --stp-danger-border: #fbcfc9;
+  --stp-success: #0b7a4b;
+  --stp-success-bg: #eefaf3;
+  --stp-success-border: #b8e6cd;
+  --stp-warn: #92500e;
+  --stp-warn-bg: #fff8eb;
+  --stp-warn-border: #f5dda6;
+  --stp-shadow: 0 8px 28px rgba(16, 18, 23, 0.16), 0 1px 2px rgba(16, 18, 23, 0.08);
+}
+
 * { box-sizing: border-box; }
 `;
 
@@ -94,7 +144,7 @@ button {
   height: 28px;
   padding: 0 10px;
   margin: 0;
-  font: 500 13px/1 var(--stp-font);
+  font: 500 12.5px/1 var(--stp-font);
   color: var(--stp-fg);
   /* Transparent on purpose: the button sits inside Graphite's own action row,
      whose surface colour we do not know and cannot read through Shadow DOM.
@@ -123,7 +173,72 @@ button[aria-expanded="true"] { background: rgba(127, 133, 145, 0.2); border-colo
 }
 :host([data-stp-floating="true"]) button:hover { background: var(--stp-bg-hover); }
 
-svg { width: 14px; height: 14px; flex: none; color: var(--stp-accent); }
+/* ---- icon slot and state ----------------------------------------------- */
+:host {
+  --stp-btn-icon: 14px;
+  --stp-dot-warn: #b45309;
+  --stp-dot-bad: #d1242f;
+  --stp-dot-ring: var(--stp-bg);
+  --stp-ok-icon: var(--stp-success);
+}
+@media (prefers-color-scheme: dark) {
+  :host {
+    --stp-dot-warn: #e3a008;
+    --stp-dot-bad: #f85149;
+  }
+}
+
+.icon {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  width: var(--stp-btn-icon);
+  height: var(--stp-btn-icon);
+}
+.glyph { display: inline-flex; width: 100%; height: 100%; }
+svg { width: 100%; height: 100%; flex: none; color: var(--stp-accent); }
+
+/* The status dot sits on the icon's top-right corner, ringed in the button's
+   own surface colour so it reads as a badge rather than a smudge on the glyph.
+   Colour only, no text: the state is also in the button's title. */
+.dot {
+  display: none;
+  position: absolute;
+  top: -2px;
+  right: -3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1.5px var(--stp-dot-ring);
+}
+:host([data-stp-state="unpaired"]) .dot { display: block; background: var(--stp-dot-warn); }
+:host([data-stp-state="failed"]) .dot { display: block; background: var(--stp-dot-bad); }
+
+:host([data-stp-state="sending"]) svg { color: var(--stp-fg-muted); }
+:host([data-stp-state="sending"]) button { cursor: progress; }
+:host([data-stp-state="sent"]) svg { color: var(--stp-ok-icon); }
+
+.spin { animation: stp-spin 800ms linear infinite; }
+@keyframes stp-spin { to { transform: rotate(360deg); } }
+:host([data-stp-state="sent"]) .glyph { animation: stp-pop 180ms ease-out; }
+@keyframes stp-pop { from { transform: scale(0.6); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .spin { animation-duration: 2.4s; }
+  :host([data-stp-state="sent"]) .glyph { animation: none; }
+  button { transition: none; }
+}
+
+/* Width lock. The idle label is laid into the same grid cell, invisibly, so
+   "Sent" occupies exactly the width "Send to Paseo" did and the host page's
+   action row never shifts. */
+.label { display: inline-grid; text-align: left; }
+.label > .text, .label::after { grid-area: 1 / 1; }
+.label::after {
+  content: "Send to Paseo";
+  visibility: hidden;
+  height: 0;
+  overflow: hidden;
+}
 
 /* Per-site visual language, selected by the adapter's styleHint().
    Graphite: 28px / 6px radius / 13px text, matching their action-row buttons.
@@ -227,7 +342,13 @@ svg { width: 14px; height: 14px; flex: none; color: var(--stp-accent); }
   padding: 0 12px;
   box-shadow: var(--stp-shadow);
 }
-:host([data-stp-style="github"]) svg { width: 16px; height: 16px; }
+:host([data-stp-style="github"]) {
+  --stp-btn-icon: 16px;
+  --stp-dot-ring: var(--stp-gh-bg);
+  --stp-dot-warn: var(--bgColor-attention-emphasis, #9a6700);
+  --stp-dot-bad: var(--bgColor-danger-emphasis, #cf222e);
+  --stp-ok-icon: var(--fgColor-success, #1a7f37);
+}
 `;
 
 /** The composer popover. Lives in its own shadow root attached to <body>. */
@@ -561,7 +682,7 @@ kbd.sym {
 .error .emsg { font: 400 12px/1.45 var(--stp-font); color: var(--stp-fg); }
 .error .ehint { font: 400 11.5px/1.45 var(--stp-font); color: var(--stp-fg-muted); }
 .error .ehint code, .error .emsg code { font: 500 11.5px/1 var(--stp-mono); background: var(--stp-bg); padding: 1px 4px; border-radius: 3px; }
-.error .ecode { font: 500 10px/1 var(--stp-mono); color: var(--stp-fg-muted); }
+.error .ecode { margin-top: 2px; font: 400 10.5px/1.3 var(--stp-mono); color: var(--stp-fg-muted); opacity: 0.85; }
 .error a.link { color: var(--stp-accent); font: 500 11.5px/1.4 var(--stp-font); cursor: pointer; text-decoration: underline; }
 
 .success { display: grid; gap: 8px; padding: 4px 0 0; }
@@ -586,26 +707,39 @@ kbd.sym {
   padding: 8px 9px;
 }
 .success .dry-note code { font: 500 11px/1 var(--stp-mono); }
+.success .stitle { font: 600 13.5px/1.35 var(--stp-font); color: var(--stp-success); display: flex; align-items: center; gap: 6px; }
+.success .stitle svg { width: 15px; height: 15px; flex: none; }
+.success .route { font: 500 12.5px/1.45 var(--stp-font); color: var(--stp-fg); overflow-wrap: anywhere; }
+.success .sdetail { font: 400 12px/1.5 var(--stp-font); color: var(--stp-fg-muted); overflow-wrap: anywhere; }
+.success .sdetail code { font: 500 11.5px/1.3 var(--stp-mono); }
+a.btn { text-decoration: none; }
+.deep-link svg { width: 13px; height: 13px; flex: none; opacity: 0.85; }
 .deep-link.muted { background: var(--stp-bg-hover); color: var(--stp-fg); border: 1px solid var(--stp-border-strong); }
 .deep-link.muted:hover { background: var(--stp-bg-subtle); }
-.success .stitle { font: 600 13px/1.35 var(--stp-font); color: var(--stp-success); display: flex; align-items: center; gap: 6px; }
-.success .sdetail { font: 400 12px/1.5 var(--stp-font); color: var(--stp-fg-muted); }
-.success .sdetail code { font: 500 11.5px/1 var(--stp-mono); }
-.deep-link {
+
+/* Footer variant whose buttons all sit on the right, secondary then primary. */
+footer.actions { justify-content: flex-end; }
+
+/* ---- setup card: first run, or a token Paseo no longer accepts ---------- */
+.setup { display: grid; gap: 10px; padding: 2px 0; }
+.setup-title { font: 600 13.5px/1.35 var(--stp-font); color: var(--stp-fg); }
+.setup-why { margin: -4px 0 0; font: 400 12px/1.5 var(--stp-font); color: var(--stp-fg-muted); }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; counter-reset: none; }
+.steps li { display: grid; grid-template-columns: 20px 1fr; gap: 8px; align-items: start; font: 400 12.5px/1.45 var(--stp-font); color: var(--stp-fg); }
+.steps .n {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 30px;
-  padding: 0 12px;
-  border-radius: var(--stp-radius);
-  background: var(--stp-accent);
-  color: var(--stp-accent-fg);
-  font: 600 12.5px/1 var(--stp-font);
-  text-decoration: none;
-  width: fit-content;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-top: -1px;
+  border-radius: 50%;
+  border: 1px solid var(--stp-border-strong);
+  background: var(--stp-bg-subtle);
+  color: var(--stp-fg-muted);
+  font: 600 11px/1 var(--stp-font);
+  font-variant-numeric: tabular-nums;
 }
-.deep-link:hover { background: var(--stp-accent-hover); }
-.deep-link-raw { font: 400 10.5px/1.4 var(--stp-mono); color: var(--stp-fg-muted); word-break: break-all; }
 
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 `;

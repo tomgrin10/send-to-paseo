@@ -162,14 +162,18 @@ async function cachedProviders(): Promise<Provider[]> {
 
 /**
  * The user needs to be able to tell these apart, so each gets its own tone and
- * headline:
+ * a headline in plain words:
  *
- *   1. bridge unreachable        -> bad   "Can't reach the Paseo bridge"
+ *   1. bridge unreachable        -> bad   "Bridge not running"
  *   2. token rejected (401)      -> bad   "Token rejected"
- *   3. no token stored           -> warn  "Bridge reachable, not paired yet"
- *   4. paired                    -> ok    "Paired with Paseo"
+ *   3. no token stored           -> warn  "Paste your token to finish"
+ *   4. paired                    -> ok    "Connected to <machine>"
  *   5. contract mismatch         -> bad   "Update required"
- *   6. bridge up, daemon down    -> warn  "Bridge up, Paseo daemon unreachable"
+ *   6. bridge up, daemon down    -> warn  "Paseo isn't responding"
+ *
+ * Versions a user can act on (Paseo, plugin) are in the detail line; protocol
+ * facts that only matter for a bug report (contract, serverId) are in the
+ * status box's tooltip, so they are still one hover away for support.
  *
  * `host` is passed by value, not re-read: the caller has just flushed what is on
  * screen, and re-reading would race the debounced autosave.
@@ -180,14 +184,24 @@ async function testConnection(row: HostRow, host: HostConfig): Promise<void> {
   finally { row.test.disabled = false; }
 }
 
+function isLoopback(url: string): boolean {
+  const authority = authorityOf(url);
+  return /^(127\.0\.0\.1|localhost|\[::1\])(:|$)/.test(authority);
+}
+
+function isSimpleMode(): boolean {
+  return document.body.dataset.mode === "simple";
+}
+
 async function checkConnection(row: HostRow, host: HostConfig): Promise<void> {
   const hasToken = host.token.trim().length > 0;
+  row.status.removeAttribute("title");
 
   setStatus(
     row.status,
     "busy",
-    "Contacting the bridge…",
-    `GET ${host.bridgeUrl}/v1/ping${hasToken ? " with your token" : " (no token stored)"}`,
+    "Checking the connection…",
+    `${host.bridgeUrl}${hasToken ? "" : " · no token yet"}`,
   );
 
   const res = await ping(host, { authenticated: hasToken });
@@ -202,8 +216,22 @@ async function checkConnection(row: HostRow, host: HostConfig): Promise<void> {
         row.status,
         "bad",
         "Token rejected",
+        "Paseo is running but didn’t accept this token. It may have been regenerated.",
+        isSimpleMode()
+          ? "Copy it again: in Paseo, open Send to Paseo and press Copy token, then paste it here."
+          : "Copy it again from that machine: Paseo → Send to Paseo → Copy token. Tokens are per machine and never interchangeable.",
+      );
+      return;
+    }
+    if (res.error.code === "bridge_unreachable" && isLoopback(host.bridgeUrl)) {
+      // Outcome 1, on this computer: the bridge is a Paseo plugin, so "not
+      // running" is both the likely truth and the thing to go and check.
+      setStatus(
+        row.status,
+        "bad",
+        "Bridge not running",
         res.error.message,
-        "This bridge is running but did not accept this token. Copy it again from that machine's Paseo → send-to-paseo → Pairing token. Tokens are per host and never interchangeable.",
+        "Open Paseo on this computer and check the plugin is running: `paseo plugin ls`. It should list send-to-paseo as running.",
       );
       return;
     }
@@ -219,8 +247,8 @@ async function checkConnection(row: HostRow, host: HostConfig): Promise<void> {
       row.status,
       "bad",
       "Update required",
-      `The plugin on this host speaks bridge contract v${d.contract}; this extension was built for v${CONTRACT_VERSION}.`,
-      "Sends are blocked to this host until the versions match. Update whichever side is older. Other hosts are unaffected.",
+      `The plugin on this machine speaks bridge contract v${d.contract}; this extension was built for v${CONTRACT_VERSION}.`,
+      "Sends are blocked to this machine until the versions match. Update whichever side is older. Other machines are unaffected.",
     );
     return;
   }
@@ -235,18 +263,21 @@ async function checkConnection(row: HostRow, host: HostConfig): Promise<void> {
 
   await refreshProviderPicker();
 
-  const daemonBit = d.daemon.reachable
-    ? `daemon ${d.daemon.version ?? "?"} (${d.daemon.serverId ?? "no serverId"})`
-    : "daemon UNREACHABLE";
-  const machineBit = machineName ? `${machineName} · ` : "";
-  const detail = `${machineBit}${d.name} ${d.version} · contract v${d.contract} · ${daemonBit} · ${d.providers?.length ?? 0} providers`;
+  const name = host.label.trim() || machineName;
+  const pluginBit = `plugin ${d.version}`;
+  const paseoBit = d.daemon.version ? `Paseo ${d.daemon.version}` : "Paseo";
+  const models = d.providers?.length ?? 0;
+  row.status.title =
+    `${d.name} ${d.version} · bridge contract v${d.contract}` +
+    (d.daemon.serverId ? ` · server ${d.daemon.serverId}` : "") +
+    ` · ${host.bridgeUrl}`;
 
   if (!d.daemon.reachable) {
     setStatus(
       row.status,
       "warn",
-      "Bridge up, Paseo daemon unreachable",
-      detail,
+      "Paseo isn’t responding",
+      `The bridge on ${name || "this machine"} is running (${pluginBit}), but the Paseo daemon behind it didn’t answer.`,
       "Start the Paseo app on that machine, then test again.",
     );
     return;
@@ -257,9 +288,9 @@ async function checkConnection(row: HostRow, host: HostConfig): Promise<void> {
     setStatus(
       row.status,
       "warn",
-      "Bridge reachable, not paired yet",
-      detail,
-      "Paste this host's pairing token above to finish pairing. Until then it is skipped when a pull request is resolved.",
+      "Paste your token to finish",
+      `Found ${paseoBit}${name ? ` on ${name}` : ""} · ${pluginBit}`,
+      "In Paseo, open Send to Paseo and press Copy token. Until then this machine is skipped.",
     );
     return;
   }
@@ -268,9 +299,9 @@ async function checkConnection(row: HostRow, host: HostConfig): Promise<void> {
     setStatus(
       row.status,
       "warn",
-      "Bridge reachable, but it reports not paired",
-      detail,
-      "The token was accepted but the bridge says paired: false. Test again; if it persists, check `paseo plugin logs send-to-paseo`.",
+      "Token accepted, but the bridge reports not paired",
+      `${paseoBit} · ${pluginBit}`,
+      "Test again. If it persists, check `paseo plugin logs send-to-paseo`.",
     );
     return;
   }
@@ -278,9 +309,9 @@ async function checkConnection(row: HostRow, host: HostConfig): Promise<void> {
   setStatus(
     row.status,
     "ok",
-    "Paired with Paseo",
-    detail,
-    "Open a GitHub or Graphite PR and click Send to Paseo.",
+    name ? `Connected to ${name}` : "Connected to Paseo",
+    `${paseoBit} · ${pluginBit} · ${models} model${models === 1 ? "" : "s"}`,
+    "Open any pull request on GitHub or Graphite and press Send to Paseo.",
   );
 }
 
@@ -367,6 +398,8 @@ function buildRow(host: HostConfig, index: number, total: number): HostRow {
   row.label.setAttribute("aria-label", "Host name");
   row.url.value = host.bridgeUrl;
   row.token.value = host.token;
+  row.token.id = `token-${host.id}`;
+  pick<HTMLLabelElement>(el, "tokenLabel").htmlFor = row.token.id;
   row.enabled.checked = host.enabled;
   // Removing the only host would leave a settings page with nothing on it and
   // no way to get back to a working state, so the last one stays.
@@ -397,6 +430,32 @@ function buildRow(host: HostConfig, index: number, total: number): HostRow {
     const showing = row.token.type === "text";
     row.token.type = showing ? "password" : "text";
     btn.textContent = showing ? "Show" : "Hide";
+    btn.setAttribute("aria-pressed", String(!showing));
+  });
+
+  // Paste, then test straight away: pasting the token is the only thing the
+  // user came here to do, so the verdict should follow without a second click.
+  // The clipboard read can be refused (no permission prompt is guaranteed on
+  // an extension page), and then the field is focused for a keyboard paste.
+  pick<HTMLButtonElement>(el, "hostPaste").addEventListener("click", async () => {
+    let text = "";
+    try {
+      text = (await navigator.clipboard.readText()).trim();
+    } catch {
+      text = "";
+    }
+    if (!text) {
+      row.token.focus();
+      setStatus(
+        row.status,
+        "idle",
+        "Couldn’t read the clipboard",
+        `Click the token field and press ${/Mac/.test(navigator.platform) ? "⌘V" : "Ctrl+V"}, then Test connection.`,
+      );
+      return;
+    }
+    row.token.value = text;
+    await flushAndTest(row, host.id);
   });
 
   pick<HTMLButtonElement>(el, "hostClear").addEventListener("click", async () => {
@@ -495,9 +554,11 @@ async function load(): Promise<void> {
     ? "Use advanced direct connections"
     : "Using advanced direct connections";
   hostsHeading.textContent = simple ? "Connect to Paseo" : "Direct Paseo connections";
+  // Simple mode explains itself with the numbered steps in the page markup.
   hostsHelp.textContent = simple
-    ? "Paste the pairing token shown by the Send to Paseo plugin on this machine."
+    ? ""
     : "Chrome contacts every enabled machine directly. Each row needs that machine’s own private bridge address, pairing token, and Chrome permission.";
+  hostsHelp.hidden = simple;
   testAllBtn.textContent = simple ? "Test connection" : "Test all connections";
   hostsBox.textContent = "";
   rows = [];
@@ -505,13 +566,15 @@ async function load(): Promise<void> {
   if (s.hosts.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty";
-    empty.textContent = "No Paseo host yet. Press “Add a host”.";
+    empty.textContent = "No connection yet. Press “Add a direct connection”.";
     hostsBox.append(empty);
   }
 
   const visibleHosts = simple ? s.hosts.slice(0, 1) : s.hosts;
   for (const [i, host] of visibleHosts.entries()) {
     const row = buildRow(host, i, visibleHosts.length);
+    // With one connection, testing it IS the primary action on the page.
+    row.test.classList.toggle("primary", simple);
     hostsBox.append(row.el);
     rows.push({ row, hostId: host.id });
   }
