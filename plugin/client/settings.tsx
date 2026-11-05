@@ -530,7 +530,8 @@ export function SendToPaseoSettings({ theme, host, layout, navigation }: PluginS
   const [externalUrlDraft, setExternalUrlDraft] = useState<string | null>(null);
   const [connectionCodeDraft, setConnectionCodeDraft] = useState("");
   const [sharedCode, setSharedCode] = useState<string | null>(null);
-  const [showConnectionDetails, setShowConnectionDetails] = useState(false);
+  // Null until the person chooses; a bridge that is down opens the details on its own.
+  const [detailsChoice, setShowConnectionDetails] = useState<boolean | null>(null);
   const [showAgentDefaults, setShowAgentDefaults] = useState(false);
   const [showAdvancedAccess, setShowAdvancedAccess] = useState(false);
   const [machineTests, setMachineTests] = useState<Record<string, string>>({});
@@ -652,6 +653,7 @@ export function SendToPaseoSettings({ theme, host, layout, navigation }: PluginS
   });
 
   const status = query.data?.status ?? null;
+  const showConnectionDetails = detailsChoice ?? (status?.state === "failed" || status?.state === "stopped");
   const providers = query.data?.providers ?? [];
   const providersError = query.data?.providersError ?? null;
   const modes = query.data?.modes ?? [];
