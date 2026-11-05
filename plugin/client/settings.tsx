@@ -876,7 +876,6 @@ export function SendToPaseoSettings({ theme, host, layout, navigation }: PluginS
         <Button
           label={connectMachine.isPending ? "Connecting…" : "Connect additional machine"}
           styles={styles}
-          primary
           disabled={connectionCodeDraft.trim() === "" || connectMachine.isPending}
           onPress={() => connectMachine.mutate(connectionCodeDraft)}
         />
