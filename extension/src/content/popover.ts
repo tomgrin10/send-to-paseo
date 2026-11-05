@@ -39,8 +39,9 @@ import type {
   Result,
 } from "../shared/messages";
 import { sendIntent } from "./bridge";
+import type { ButtonState } from "./ui/button";
 import { Combobox } from "./ui/combobox";
-import { clear, cogIcon, el, renderProse } from "./ui/dom";
+import { checkIcon, clear, cogIcon, el, externalIcon, renderProse } from "./ui/dom";
 import { containKeyboard } from "./ui/keyboard";
 import { POPOVER_CSS } from "./ui/styles";
 
@@ -51,6 +52,20 @@ export interface PopoverContext {
   stackPrNumbers: number[];
   pageUrl: string;
   anchor: HTMLElement;
+  /** The page button's state, which the popover drives (see ui/button.ts). */
+  buttonState?: () => ButtonState;
+  setButtonState?: (state: ButtonState) => void;
+}
+
+/**
+ * Codes that mean "the user has not finished pairing", as opposed to "something
+ * broke". They get the calm setup card instead of a red error, and an amber dot
+ * on the page button instead of a red one.
+ */
+export const PAIRING_CODES: ReadonlySet<string> = new Set(["not_configured", "unauthorized"]);
+
+export function isPairingFailure(result: Result<unknown>): boolean {
+  return !result.ok && PAIRING_CODES.has(result.error.code);
 }
 
 let current: Popover | null = null;
@@ -75,13 +90,13 @@ function resolveNow(pr: PrRef, stackPrNumbers: number[]): Promise<Result<MultiRe
 /** Begin resolution as soon as the PR button is mounted, before the user clicks it. */
 export function warmPopoverResolution(
   ctx: Pick<PopoverContext, "pr" | "stackPrNumbers">,
-): void {
+): Promise<Result<MultiResolveResponse>> {
   const key = resolveKey(ctx.pr, ctx.stackPrNumbers);
   if (
     warmResolve?.key === key &&
     Date.now() - warmResolve.startedAt < WARM_RESOLVE_TTL_MS
   ) {
-    return;
+    return warmResolve.promise;
   }
   const promise = resolveNow(ctx.pr, ctx.stackPrNumbers);
   warmResolve = {
@@ -94,6 +109,7 @@ export function warmPopoverResolution(
   void promise.then((result) => {
     if (!result.ok && warmResolve?.promise === promise) warmResolve = null;
   });
+  return promise;
 }
 
 function warmedOrFreshResolve(
@@ -110,7 +126,7 @@ function warmedOrFreshResolve(
   return warmResolve!.promise;
 }
 
-function invalidateWarmResolve(ctx: Pick<PopoverContext, "pr" | "stackPrNumbers">): void {
+export function invalidateWarmResolve(ctx: Pick<PopoverContext, "pr" | "stackPrNumbers">): void {
   if (warmResolve?.key === resolveKey(ctx.pr, ctx.stackPrNumbers)) warmResolve = null;
 }
 
@@ -185,6 +201,8 @@ class Popover {
   open(): void {
     document.body.append(this.host);
     this.ctx.anchor.setAttribute("aria-expanded", "true");
+    // "Failed" is a red dot that lasts until the user looks; this is the look.
+    if (this.ctx.buttonState?.() === "failed") this.ctx.setButtonState?.("idle");
     this.render();
     this.position();
 
@@ -218,6 +236,17 @@ class Popover {
       closePopover();
     };
     const onReflow = () => this.position();
+    // Pairing happens in another tab (the options page). When the user comes
+    // back to this one with the setup card still up, check again rather than
+    // making them close and reopen the popover.
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (this.phase !== "error" || !this.failure || !PAIRING_CODES.has(this.failure.code)) return;
+      invalidateWarmResolve(this.ctx);
+      void this.loadResolve();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    this.disposers.push(() => document.removeEventListener("visibilitychange", onVisible));
 
     document.addEventListener("pointerdown", onDocPointer, true);
     // Esc is captured on the document so it works whether focus is inside the
@@ -257,6 +286,11 @@ class Popover {
       warmedOrFreshResolve(this.ctx),
     ]);
     if (settings.ok) this.defaultProviderPref = settings.data.defaultProvider;
+
+    // The button is the page's, not ours, so it is updated even if the
+    // popover was closed while this was in flight.
+    if (isPairingFailure(res)) this.ctx.setButtonState?.("unpaired");
+    else if (this.ctx.buttonState?.() === "unpaired") this.ctx.setButtonState?.("idle");
 
     if (!this.host.isConnected) return; // closed while in flight
 
@@ -376,6 +410,7 @@ class Popover {
     this.phase = "sending";
     this.failure = null;
     this.render();
+    this.ctx.setButtonState?.("sending");
 
     const res = await sendIntent({
       type: "send",
@@ -391,6 +426,10 @@ class Popover {
       modeId: this.modeId || undefined,
       pageUrl: this.ctx.pageUrl,
     });
+
+    // Before the isConnected check: a popover closed mid-send must still take
+    // the page button out of "sending".
+    this.ctx.setButtonState?.(res.ok ? "sent" : isPairingFailure(res) ? "unpaired" : "failed");
 
     if (!this.host.isConnected) return;
 
@@ -445,12 +484,18 @@ class Popover {
         break;
 
       case "error":
-        this.card.append(el("div", { class: "body" }, [this.renderError()]));
-        this.card.append(this.renderErrorFooter());
+        if (this.failure && PAIRING_CODES.has(this.failure.code)) {
+          this.card.append(el("div", { class: "body" }, [this.renderSetup()]));
+          this.card.append(this.renderSetupFooter());
+        } else {
+          this.card.append(el("div", { class: "body" }, [this.renderError()]));
+          this.card.append(this.renderErrorFooter());
+        }
         break;
 
       case "sent":
         this.card.append(el("div", { class: "body" }, [this.renderSuccess()]));
+        this.card.append(this.renderSuccessFooter());
         break;
 
       case "ready":
@@ -874,7 +919,7 @@ class Popover {
     );
     if (p.openOptions) {
       const a = el("a", { class: "link", "data-stp-open-options": "", role: "button", tabindex: "0" }, [
-        "Open extension options",
+        "Open settings",
       ]);
       const go = () => void sendIntent({ type: "openOptions" });
       a.addEventListener("click", go);
@@ -883,12 +928,62 @@ class Popover {
       });
       box.append(a);
     }
+    // The raw code is for support and bug reports, not for reading: small,
+    // muted, last.
     box.append(
-      el("div", { class: "ecode" }, [
-        f.status ? `${f.code} · HTTP ${f.status}` : f.code,
+      el("div", { class: "ecode", "data-stp-error-code": "" }, [
+        f.status ? `Error code ${f.code} · HTTP ${f.status}` : `Error code ${f.code}`,
       ]),
     );
     return box;
+  }
+
+  /**
+   * First run, or a token the bridge no longer accepts.
+   *
+   * Not an error card: nothing is broken, the user simply has a step left. So
+   * no red, no raw code, and the one action that fixes it is the primary
+   * button. `data-stp-setup` carries the code for tests and support.
+   */
+  private renderSetup(): HTMLElement {
+    const code = this.failure!.code;
+    const rejected = code === "unauthorized";
+    const box = el("div", { class: "setup", "data-stp-setup": code, role: "status" });
+    box.append(
+      el("div", { class: "setup-title", "data-stp-setup-title": "" }, [
+        rejected ? "Paste a new token" : "Connect to Paseo",
+      ]),
+    );
+    if (rejected) {
+      box.append(
+        el("p", { class: "setup-why" }, [
+          "Paseo didn’t accept the token saved here, usually because it was regenerated. Copy the current one and paste it again.",
+        ]),
+      );
+    }
+    const steps = el("ol", { class: "steps" });
+    for (const [n, text] of [
+      ["1", "In Paseo, open Send to Paseo and press Copy token"],
+      ["2", "Open setup, paste the token, and press Test connection"],
+    ] as const) {
+      steps.append(el("li", {}, [el("span", { class: "n", "aria-hidden": "true" }, [n]), el("span", {}, [text])]));
+    }
+    box.append(steps);
+    return box;
+  }
+
+  private renderSetupFooter(): HTMLElement {
+    const close = el("button", { class: "btn", "data-stp-close": "", type: "button" }, [
+      "Close",
+    ]) as HTMLButtonElement;
+    close.addEventListener("click", () => closePopover());
+    const setup = el(
+      "button",
+      { class: "btn primary", "data-stp-open-options": "", type: "button" },
+      ["Open setup"],
+    ) as HTMLButtonElement;
+    setup.addEventListener("click", () => void sendIntent({ type: "openOptions" }));
+    return el("footer", { class: "actions" }, [close, setup]);
   }
 
   private renderErrorFooter(): HTMLElement {
@@ -909,7 +1004,7 @@ class Popover {
       "Close",
     ]) as HTMLButtonElement;
     close.addEventListener("click", () => closePopover());
-    return el("footer", {}, [close, retry]);
+    return el("footer", { class: "actions" }, [close, retry]);
   }
 
   private renderSuccess(): HTMLElement {
@@ -920,15 +1015,35 @@ class Popover {
     const dry = r.dryRun === true;
     const box = el("div", { class: dry ? "success dry" : "success" });
 
-    const title = el("div", { class: "stitle", "data-stp-success": "" });
     const reused = r.dispatch === "main" && r.agentCreated === false;
+    const followUp = this.selectedCandidate()?.mainAgent?.source === "follow-up";
+    const title = el("div", { class: "stitle" });
+    if (!dry) title.append(checkIcon(15));
     title.append(
-      document.createTextNode(
-        dry ? "Dry run — nothing sent" : reused ? this.selectedCandidate()?.mainAgent?.source === "follow-up" ? "Message sent to registered agent" : "Message sent to main agent" : "Agent started",
-      ),
+      el("span", { "data-stp-success": "" }, [
+        dry
+          ? "Dry run — nothing sent"
+          : reused
+            ? followUp
+              ? "Message sent to registered agent"
+              : "Message sent to main agent"
+            : "Agent started",
+      ]),
     );
     if (dry) title.append(el("span", { class: "badge", "data-stp-dryrun": "true" }, ["DRY RUN"]));
     box.append(title);
+
+    // Where it landed, in words. Principle 1 of PRODUCT.md: the send lands
+    // where the user expected, and the product says why.
+    const route = el("div", { class: "route", "data-stp-route": "" });
+    if (this.sentHostLabel) {
+      route.append(
+        el("span", { class: "host", "data-stp-sent-host": "" }, [this.sentHostLabel]),
+        document.createTextNode(" · "),
+      );
+    }
+    route.append(document.createTextNode(routeSentence(r, this.ctx.pr.number, this.selectedCandidate(), dry)));
+    box.append(route);
 
     if (dry) {
       box.append(
@@ -942,38 +1057,25 @@ class Popover {
       );
     }
 
+    // The agent's own title (a new agent is named after the PR and the
+    // instruction) and the branch it is working on. For a reused agent the
+    // title is already in the route line, so only the branch is left.
     const detail = el("div", { class: "sdetail" });
-    if (this.sentHostLabel) {
-      detail.append(
-        el("span", { class: "host", "data-stp-sent-host": "" }, [this.sentHostLabel]),
-        document.createTextNode(" · "),
-      );
-    }
-    detail.append(document.createTextNode(r.title));
-    if (r.workspaceLabel) {
-      detail.append(
-        document.createTextNode(r.workspaceCreated ? " · created workspace " : " · workspace "),
-        el("code", {}, [r.workspaceLabel]),
-      );
-    }
-    if (r.branch) detail.append(document.createTextNode(" · "), el("code", {}, [r.branch]));
-    box.append(detail);
+    const bits: (Node | string)[] = [];
+    if (!reused && r.title) bits.push(r.title);
+    if (r.branch) bits.push(el("code", {}, [r.branch]));
+    bits.forEach((bit, i) => {
+      if (i > 0) detail.append(document.createTextNode(" · "));
+      detail.append(bit);
+    });
+    if (bits.length) box.append(detail);
+    return box;
+  }
 
-    // `deepLink` is OPAQUE (CONTRACT.md "Deep link format"): rendered verbatim,
-    // never constructed or parsed here.
-    const link = el(
-      "a",
-      {
-        class: dry ? "deep-link muted" : "deep-link",
-        "data-stp-deeplink": r.deepLink,
-        href: r.deepLink,
-      },
-      [dry && !reused ? "Open in Paseo (synthetic id)" : "Open in Paseo"],
-    );
-    box.append(link);
-    box.append(el("div", { class: "deep-link-raw" }, [r.deepLink]));
-
-    const footerish = el("div", { class: "status" });
+  private renderSuccessFooter(): HTMLElement {
+    const r = this.sendResult!;
+    const dry = r.dryRun === true;
+    const reused = r.dispatch === "main" && r.agentCreated === false;
     const again = el("button", { class: "btn", "data-stp-send-another": "", type: "button" }, [
       "Send another",
     ]) as HTMLButtonElement;
@@ -982,9 +1084,21 @@ class Popover {
       this.sendResult = null;
       void this.loadResolve();
     });
-    footerish.append(again);
-    box.append(footerish);
-    return box;
+    // `deepLink` is OPAQUE (CONTRACT.md "Deep link format"): rendered verbatim,
+    // never constructed or parsed here. The raw URL is in the tooltip rather
+    // than printed: it is for support, and a paseo:// string is noise to read.
+    const link = el(
+      "a",
+      {
+        class: dry ? "btn deep-link muted" : "btn primary deep-link",
+        "data-stp-deeplink": r.deepLink,
+        href: r.deepLink,
+        title: r.deepLink,
+      },
+      [dry && !reused ? "Open in Paseo (synthetic id)" : "Open in Paseo"],
+    );
+    link.append(externalIcon(13));
+    return el("footer", { class: "actions" }, [again, link]);
   }
 
   /* ---------------------------------------------------------------------- */
@@ -1013,6 +1127,35 @@ class Popover {
 }
 
 /* -------------------------------------------------------------------------- */
+
+/**
+ * One line saying where the send landed: "Messaged Main in brawny-dodo",
+ * "New agent in brawny-dodo", "New worktree for #942 · new agent".
+ *
+ * Built from the response first (it is what actually happened) and the chosen
+ * candidate only as a fallback for a plugin that omits `workspaceLabel`.
+ */
+function routeSentence(
+  r: SendResponse,
+  prNumber: number,
+  candidate: MergedCandidate | undefined,
+  dry: boolean,
+): string {
+  const reused = r.dispatch === "main" && r.agentCreated === false;
+  const workspace =
+    r.workspaceLabel || (candidate?.kind === "existing" ? candidate.label : "");
+  const where = workspace ? ` in ${workspace}` : "";
+  if (reused) {
+    const agent = r.title || candidate?.mainAgent?.title || "the main agent";
+    return dry ? `Would message ${agent}${where}` : `Messaged ${agent}${where}`;
+  }
+  if (r.workspaceCreated) {
+    return dry
+      ? `Would create a worktree for #${prNumber} · new agent`
+      : `New worktree for #${prNumber} · new agent`;
+  }
+  return dry ? `Would start a new agent${where}` : `New agent${where}`;
+}
 
 /** The human-readable reason tag shown in parentheses on an existing candidate. */
 function candidateReasonTag(c: Candidate): string {

@@ -1,5 +1,40 @@
 # Verification record
 
+## 2026-11-05 — UI polish: button states, setup card, success routing, pairing-first options
+
+Typecheck and the shipping build passed; `node --test test/*.test.mjs` 23/23. The full Chromium
+suite passed **68 of 68** (66 before, plus 6b and 35), including live case 13 (read-only, the
+fictional repo returns `project_not_found`).
+
+New and changed cases, each proven able to fail by breaking the behaviour on purpose
+(`STP_ONLY=6b,9f,10a,35`, 0 passed / 4 failed): blanking the width-lock pseudo-element made 6b
+fail with `"Sent" keeps the idle width: 124.0 -> 67.7`; reverting the setup heading made 9f fail
+on `title`; reverting the options headline made 10a fail; removing the `onInstalled` handler made
+35 fail with `a fresh install must open the options page`. All restored before the green run.
+
+- **6b** page button states: `sending` (spinner, `aria-busy="true"`), `sent` (check + "Sent", held
+  ~4 s, then idle), `failed` (red dot surviving close, cleared on next open). Host width identical
+  across states (sub-pixel tolerance).
+- **9b / 9f** `unauthorized` / `not_configured` render the setup card (`data-stp-setup`), no raw code
+  visible; 9f also checks the amber `unpaired` button state and tooltip, **Open setup** opening the
+  options page, and the automatic re-check when the tab becomes visible after pairing.
+- **9e** every other code keeps its error card, and its raw code in the muted detail line.
+- **6** success: route line (`New agent in <workspace>`), Open in Paseo primary, raw `paseo://` only
+  in the tooltip.
+- **10a–10d** options copy: `Connected to mock-machine` / `Paseo 0.7.0 · plugin 0.1.0 · 3 models`,
+  contract + serverId kept in the status tooltip; `Paste your token to finish`; `Token rejected`;
+  `Bridge not running` naming the URL and `paseo plugin ls`.
+- **35** first install opens the options page once, simple mode, Advanced collapsed. Suite setup
+  sends that tab back to `about:blank` and throws if an options tab survives, so case 34's
+  `waitForOptionsPage()` cannot pass on a leftover tab.
+
+Visual check: 130 headless captures (GitHub light / dark / pinned `data-color-mode="dark"` under an
+OS-light browser, Graphite light / dark, 1280 and 420 wide; options page light / dark at 1280 and
+390), reviewed as contact sheets in two rounds. Round one found and fixed: the token field
+collapsing at 390px, an empty actions row in simple mode, the error footer's alignment, and the
+popover staying light on a GitHub page pinned dark (pre-existing; tokens now also follow
+`html[data-color-mode]`).
+
 ## 2026-11-03 — automatic Follow Up connection
 
 Typecheck, unit tests and the shipping build passed. The full Chromium suite passed all

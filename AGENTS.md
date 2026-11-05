@@ -93,7 +93,11 @@ sync.
   `context.waitForEvent("page")` for this — assert that a tab with the options URL exists
   (`waitForOptionsPage()` in the suite). Case 34 was red for exactly this reason while the
   feature worked fine, and `launchPersistentContext`'s initial `about:blank` is what triggers it,
-  because nothing ever closes it.
+  because nothing ever closes it. Since 2026-11-05 the service worker's `onInstalled`
+  (`reason: "install"`) also calls `openOptionsPage()`, which navigates that same spare tab on
+  the suite's fresh profile. Suite setup records it for case 35 and then sends the tab back to
+  `about:blank` — and throws if an options tab is left over, because a stale one would make
+  every `waitForOptionsPage()` (cases 9f, 34) pass without a click doing anything.
 - **Shadow DOM isolates CSS, not events.** Keyboard events are `composed`, so they escape our
   shadow root, and they are *retargeted*: page listeners see `event.target` as the shadow
   **host**, not our `<textarea>`. Graphite's shortcut layer therefore decides the user is not
@@ -354,7 +358,8 @@ Require `running`, an empty `ERROR` column, and `bridge listening on http://127.
 cd extension
 npm run typecheck
 npm run build
-node ../test/e2e.mjs                     # 66 cases; builds dist/ and dist-test/ itself
+node ../test/e2e.mjs                     # 68 cases; builds dist/ and dist-test/ itself
+STP_ONLY=6b,9f node ../test/e2e.mjs      # just those cases, for proving an assertion can fail; never a release gate
 ```
 
 The suite runs Chromium **headless by default** (`--headless=new` loads MV3 extensions fine, so
@@ -401,6 +406,9 @@ fixture at a real repository — every screenshot in `docs/screenshots/` is comm
 | 20 | One workspace per stack: a stack sibling is the default, not `create`. |
 | 20a–20c | The mode select is filtered per provider with the resolved default preselected and unattended modes marked, `modeId` reaches `/v1/send`, and a degraded resolve with an empty `pr.headBranch` reads as unknown rather than "a different branch". |
 | 21–27 | The GitHub adapter: anchor, Primer token colours, hash rotation, URL parsing, sub-routes, fallback rungs, and a full resolve-and-send. |
+| 6b | Page button states: `sending` (spinner, `aria-busy`), `sent` (check + "Sent", held ~4 s, then idle), `failed` (red dot surviving close, cleared on next open), with the host's width unchanged across states. Uses the mock bridge's `sendDelayMs`. |
+| 9b, 9f | Pairing failures (`unauthorized`, `not_configured`) render the setup card (`data-stp-setup`), not an error card, with no raw code visible; 9f also checks the button's amber `unpaired` state, **Open setup** opening the options page, and the re-check when the tab becomes visible again. |
+| 35 | First install opens the options page once (`onInstalled`), in simple mode, leading with pairing, Advanced collapsed. |
 | 34 | The header settings cog: present in every phase, opens the extension's own options page in a new tab (asserted on the real `page` event, not on the intent), does **not** close the popover or discard a typed draft, and activates on Enter. Its glyph is built with `createElementNS`, never `innerHTML` — a content script shares its document with the host page and github.com enforces Trusted Types, which no fixture can reproduce. |
 | 33 | The merged-branch case end to end from the popover's side: a rank-2 candidate carrying `stackPrState: "merged"` is the default rather than `create`, is findable by typing "merged", and is described as landed work. The note wording is reason-scoped — it used to read "another branch of this stack" for *every* existing candidate, which is a false claim about a rank-3 "same project" workspace. |
 | 29–32 | The Target combobox, which is a hand-built listbox rather than a `<select>`: filtering by workspace name, branch fragment, bare PR number with and without `#`, and multi-word tokens in any order; the empty-result row committing nothing; a keyboard-only path from open to send including wrap-around at both ends; and the two dismissal layers — Esc and click-outside must close the dropdown *before* the popover, which the popover's document-level capturing listeners have to cooperate on. |
