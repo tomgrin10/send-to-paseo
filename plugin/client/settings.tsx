@@ -774,7 +774,6 @@ export function SendToPaseoSettings({ theme, host, layout, navigation }: PluginS
             <Text style={{ ...styles.body, color: stateTone(status, theme) }}>
               {stateLabel(status)}
             </Text>
-            {status.error === null ? null : <Text style={styles.danger}>{status.error}</Text>}
             <Text style={styles.muted}>
               {hostDiscovery.hosts.length} Paseo machine
               {hostDiscovery.hosts.length === 1 ? "" : "s"} discovered automatically.
