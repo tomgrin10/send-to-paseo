@@ -82,9 +82,7 @@ export function Overview({ status, sends, colors, compact, onCopyToken, onToggle
           <Step n={1} done={false} title="Add the Chrome extension" colors={colors}>
             <View style={{ flexDirection: "row" }}>
               <ExternalLink href={CHROME_WEB_STORE_URL} accessibilityLabel="Open Send to Paseo in the Chrome Web Store">
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 32, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: colors.border }}>
-                  <Text style={{ color: colors.foreground, fontSize: 13 }}>Chrome Web Store</Text>
-                </View>
+                <Text style={{ color: colors.foreground, fontSize: 13, textDecorationLine: "underline" }}>Send to Paseo in the Chrome Web Store</Text>
               </ExternalLink>
             </View>
           </Step>
