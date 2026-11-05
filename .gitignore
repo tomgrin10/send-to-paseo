@@ -11,3 +11,4 @@ test/.last-run.json
 # Ad-hoc live captures taken against real (private) PR pages. Never commit these.
 /live-*.png
 gha-creds-*.json
+.impeccable/
