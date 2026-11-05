@@ -33,7 +33,7 @@ function DisplaySettings({ theme }: PluginSurfaceProps) {
       <SettingsCard>
         <SettingsSwitch
           label="Show in sidebar"
-          hint="Off: open it from Command-K (Ctrl-K on Windows and Linux) inside a workspace."
+          hint="When off, open it from Command-K (Ctrl-K on Windows and Linux) inside a workspace."
           value={settings.values.showSidebar}
           disabled={settings.saving}
           onValueChange={(showSidebar) => void settings.save({ ...settings.values, showSidebar }, settings.revision)}

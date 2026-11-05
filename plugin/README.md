@@ -408,7 +408,7 @@ The bridge does not start, the reason lands in the surface's status line and in
 
 ```
 [send-to-paseo] Port 7788 is already in use, so the Send to Paseo bridge did not
-start. Pick another port in Paseo -> Send to Paseo.
+start. Pick another port under Connection details on the Send to Paseo screen.
 ```
 
 Note that `test/mock-bridge.mjs` in this repository uses port **7799**; don't
