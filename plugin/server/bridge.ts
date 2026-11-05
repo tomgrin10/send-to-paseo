@@ -581,7 +581,7 @@ async function onRequest(req: IncomingMessage, res: ServerResponse): Promise<voi
 
 function describeListenError(error: NodeJS.ErrnoException, port: number): string {
   if (error.code === "EADDRINUSE") {
-    return `Port ${port} is already in use, so the Send to Paseo bridge did not start. Pick another port in Paseo -> Send to Paseo.`;
+    return `Port ${port} is already in use, so the Send to Paseo bridge did not start. Pick another port under Connection details on the Send to Paseo screen.`;
   }
   if (error.code === "EACCES") {
     return `Port ${port} needs elevated privileges, so the Send to Paseo bridge did not start. Pick a port above 1024.`;
