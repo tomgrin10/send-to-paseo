@@ -1372,7 +1372,9 @@ async function readError(p) {
     const box = root.querySelector("[data-stp-error]");
     return {
       kind: "error",
-      codeLine: box.querySelector("[data-stp-error-code]")?.textContent.trim() ?? "",
+      codeLine: box.querySelector("[data-stp-error-code]")?.getAttribute("data-stp-error-code") ?? "",
+      copyLabel: box.querySelector("[data-stp-error-code]")?.textContent.trim() ?? "",
+      visibleText: box.innerText,
       code: box.getAttribute("data-stp-error"),
       title: root.querySelector("[data-stp-error-title]").textContent.trim(),
       message: box.querySelector(".emsg")?.textContent.trim() ?? "",
@@ -1502,7 +1504,9 @@ await test("9e. Every CONTRACT.md error code renders a specific message", async 
       assertEq(ui.kind, "setup", "unauthorized gets the setup card");
     } else {
       assertEq(ui.kind, "error", `${code} gets the error card`);
-      assert(ui.codeLine.includes(code), `${code}: the raw code stays in the muted detail line, got "${ui.codeLine}"`);
+      assert(ui.codeLine.includes(code), `${code}: the raw code stays available for support, got "${ui.codeLine}"`);
+      assertEq(ui.copyLabel, "Copy details", `${code}: support details sit behind a Copy details button`);
+      assert(!ui.visibleText.includes(code), `${code}: the raw code must not be visible copy: ${ui.visibleText}`);
     }
     seen.push(`${code} -> "${ui.title}" / "${ui.hint}"`);
     await page.keyboard.press("Escape");
@@ -2498,7 +2502,7 @@ async function readHostErrors(page) {
     ].map((el) => ({
       hostId: el.getAttribute("data-stp-host-error"),
       text: el.textContent.trim(),
-      code: el.querySelector(".hcode")?.textContent.trim() ?? "",
+      code: el.getAttribute("data-stp-host-error-code") ?? "",
     })),
   );
 }
@@ -3556,8 +3560,8 @@ await test("20. One workspace per stack: a stack sibling is the default, not 'cr
   // The branch shown belongs to a sibling PR, so the popover has to say so
   // rather than let it read as this PR's branch.
   assertEq(
-    ui.mismatch,
-    "worktree is on another branch of this stack",
+    ui.mismatch?.replace(/^On giz-1132-stack-sibling-\d+, /, "On <sibling>, "),
+    "On <sibling>, another branch of this stack",
     "a sibling-branch target must be labelled as such",
   );
   assert(
@@ -3744,7 +3748,7 @@ await test("20c. Degraded resolve: an empty pr.headBranch is UNKNOWN, not 'a dif
   });
   assertEq(
     withGh.mismatch,
-    "worktree is on a different branch",
+    "On main, a different branch",
     // Deliberately NOT "another branch of this stack": this control candidate is
     // rank 3 (`same project`) sitting on `main`, which is not in the stack at
     // all. The note used to make that claim about every existing candidate.
@@ -4862,8 +4866,8 @@ await test("33. A stack workspace on a MERGED branch is the default, and says it
       `the resolved-target line must name the merged stack PR: ${ui.summary}`,
     );
     assertEq(
-      ui.mismatch,
-      "worktree is on a branch of this stack whose PR is merged",
+      ui.mismatch?.replace(/^On \S+, /, "On <branch>, "),
+      "On <branch>, a merged branch of this stack",
       "a landed branch must not be described as another (live) branch of the stack",
     );
 

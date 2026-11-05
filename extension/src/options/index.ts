@@ -126,9 +126,19 @@ function renderProviders(providers: Provider[], selected: string, hostCount: num
   }
   defaultProvider.value = selected;
 
+  const simple = document.body.dataset.mode !== "advanced";
   providerHelp.textContent = providers.length
     ? `${providers.length} providers reported across ${hostCount} host${hostCount === 1 ? "" : "s"}.`
-    : "No providers known yet — run Test all connections with a valid token.";
+    : `No providers yet. Press ${simple ? "Test connection" : "Test all connections"} with a valid token.`;
+
+  // First run is just pairing: Defaults and Follow Up appear once Paseo has
+  // answered at least once (it reported providers). Advanced users manage
+  // several machines and see everything.
+  const show = providers.length > 0 || !simple;
+  for (const id of ["defaultsSection", "followUpSection"]) {
+    const section = document.getElementById(id);
+    if (section) section.hidden = !show;
+  }
 }
 
 /**
@@ -261,6 +271,20 @@ async function checkConnection(row: HostRow, host: HostConfig): Promise<void> {
     if (!host.label.trim()) row.label.placeholder = machineName;
   }
 
+  // This page pings the bridge itself, not through the service worker, so it
+  // writes the per-host provider cache the same way the worker does. Without
+  // it, a successful Test connection left Defaults saying "No providers yet".
+  if (d.providers?.length) {
+    const got = await chrome.storage.local.get("lastProviders");
+    const raw = got?.lastProviders;
+    const byHost = raw && !Array.isArray(raw) && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+    await chrome.storage.local.set({
+      lastProviders: {
+        ...byHost,
+        [host.id]: d.providers.map((p) => ({ id: p.id, label: p.label, isDefault: p.isDefault })),
+      },
+    });
+  }
   await refreshProviderPicker();
 
   const name = host.label.trim() || machineName;

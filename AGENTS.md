@@ -344,7 +344,7 @@ the mock bridge.
 
 ```sh
 cd plugin
-npm run verify                           # typecheck + 74 server checks + 7 host-client + 6 main-agent + 6 chat/overview tests; never touches ~/.config/gh
+npm run verify                           # typecheck + 74 server checks + 7 host-client + 6 main-agent + 7 chat/overview tests; never touches ~/.config/gh
 paseo plugin reload send-to-paseo && paseo plugin ls   # needs PASEO_PASSWORD on an authed daemon
 paseo plugin logs send-to-paseo          # expect the three dependency self-check lines, no stack traces
 time paseo plugin reload send-to-paseo   # must finish in seconds, twice — proves no reload hang
@@ -410,7 +410,7 @@ fixture at a real repository — every screenshot in `docs/screenshots/` is comm
 | 9b, 9f | Pairing failures (`unauthorized`, `not_configured`) render the setup card (`data-stp-setup`), not an error card, with no raw code visible; 9f also checks the button's amber `unpaired` state, **Open setup** opening the options page, and the re-check when the tab becomes visible again. |
 | 35 | First install opens the options page once (`onInstalled`), in simple mode, leading with pairing, Advanced collapsed. |
 | 34 | The header settings cog: present in every phase, opens the extension's own options page in a new tab (asserted on the real `page` event, not on the intent), does **not** close the popover or discard a typed draft, and activates on Enter. Its glyph is built with `createElementNS`, never `innerHTML` — a content script shares its document with the host page and github.com enforces Trusted Types, which no fixture can reproduce. |
-| 33 | The merged-branch case end to end from the popover's side: a rank-2 candidate carrying `stackPrState: "merged"` is the default rather than `create`, is findable by typing "merged", and is described as landed work. The note wording is reason-scoped — it used to read "another branch of this stack" for *every* existing candidate, which is a false claim about a rank-3 "same project" workspace. |
+| 33 | The merged-branch case end to end from the popover's side: a rank-2 candidate carrying `stackPrState: "merged"` is the default rather than `create`, is findable by typing "merged", and is described as landed work. The note wording is reason-scoped — it used to read "another branch of this stack" for *every* existing candidate, which is a false claim about a rank-3 "same project" workspace. The route-reason line (`data-stp-route-reason`, shown in the target box and again after a send) now uses the Paseo card's own words: "On the PR's branch" / "On <branch>, another branch of this stack" / "On <branch>, a merged branch of this stack" (amber) / "New worktree for #N". |
 | 29–32 | The Target combobox, which is a hand-built listbox rather than a `<select>`: filtering by workspace name, branch fragment, bare PR number with and without `#`, and multi-word tokens in any order; the empty-result row committing nothing; a keyboard-only path from open to send including wrap-around at both ends; and the two dismissal layers — Esc and click-outside must close the dropdown *before* the popover, which the popover's document-level capturing listeners have to cooperate on. |
 
 When changing a test, confirm it still fails for the right reason: break the thing on purpose,

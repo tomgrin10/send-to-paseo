@@ -120,3 +120,29 @@ export function spinnerIcon(size = 16): SVGElement {
 export function externalIcon(size = 14): SVGElement {
   return lucide(["M15 3h6v6", "M10 14 21 3", "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"], size, "2");
 }
+
+const FOLDER = "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z";
+
+/** Lucide `folder`: leads the popover's target line for an existing workspace. */
+export function folderIcon(size = 14): SVGElement {
+  return lucide([FOLDER], size, "2");
+}
+
+/** Lucide `folder-plus`: the target line when the send will create a worktree. */
+export function folderPlusIcon(size = 14): SVGElement {
+  return lucide([FOLDER, "M12 10v6", "M9 13h6"], size, "2");
+}
+
+/** Lucide `git-branch` (circles drawn as arcs): leads the route-reason line. */
+export function branchIcon(size = 12): SVGElement {
+  return lucide(
+    ["M6 3v12", "M21 6a3 3 0 1 1-6 0a3 3 0 1 1 6 0", "M9 18a3 3 0 1 1-6 0a3 3 0 1 1 6 0", "M18 9a9 9 0 0 1-9 9"],
+    size,
+    "2",
+  );
+}
+
+/** Lucide `copy`, for the error card's "Copy details". */
+export function copyIcon(size = 12): SVGElement {
+  return lucide(["M10 8h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2Z", "M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"], size, "2");
+}
