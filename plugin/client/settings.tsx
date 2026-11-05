@@ -63,7 +63,7 @@ function stateLabel(status: BridgeStatus): string {
 
 function stateTone(status: BridgeStatus, theme: PluginTheme): string {
   if (status.state === "running") return theme.colors.statusSuccess;
-  if (status.state === "failed") return theme.colors.statusDanger;
+  if (status.state === "failed" || status.state === "stopped") return theme.colors.statusDanger;
   return theme.colors.statusWarning;
 }
 
@@ -226,7 +226,7 @@ function Button({
       accessibilityLabel={label}
       onPress={onPress}
       disabled={disabled}
-      style={[primary ? styles.primary : styles.button, disabled ? { opacity: 0.5 } : null]}
+      style={({ pressed }) => [primary ? styles.primary : styles.button, disabled ? { opacity: 0.5 } : null, { transform: [{ scale: pressed && !disabled ? 0.97 : 1 }] }]}
     >
       <Text style={primary ? styles.primaryText : styles.buttonText}>{label}</Text>
     </Pressable>
