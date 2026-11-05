@@ -6,9 +6,10 @@ import {
   useRpc,
 } from "@getpaseo/plugin/client";
 import { copyText, useToast } from "@getpaseo/plugin/client/react-native";
+import { Icon } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useMemo, useState } from "react";
-import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import {
   addAdditionalMachine,
   clearRecentSends,
@@ -29,8 +30,9 @@ import {
   type DependencyReportPayload,
   type ModeOption,
   type ProviderOption,
-  type RecentSend,
 } from "../shared/contracts";
+import { Overview } from "./overview";
+import { raised } from "./theme";
 import { checkHostAccess, organizeDiscoveredHosts, type DiscoveredHostRow } from "./hosts";
 
 /**
@@ -61,7 +63,7 @@ function stateLabel(status: BridgeStatus): string {
 
 function stateTone(status: BridgeStatus, theme: PluginTheme): string {
   if (status.state === "running") return theme.colors.statusSuccess;
-  if (status.state === "failed") return theme.colors.statusDanger;
+  if (status.state === "failed" || status.state === "stopped") return theme.colors.statusDanger;
   return theme.colors.statusWarning;
 }
 
@@ -105,14 +107,16 @@ function useStyles(theme: PluginTheme, compact: boolean) {
         backgroundColor: theme.colors.surface0,
       },
       content: {
-        padding: compact ? 16 : 24,
+        padding: compact ? 16 : 32,
         gap: compact ? 16 : 20,
+        width: "100%" as const,
+        maxWidth: 820,
+        alignSelf: "center" as const,
       },
       card: {
         backgroundColor: theme.colors.surface1,
-        borderColor: theme.colors.border,
-        borderWidth: 1,
         borderRadius: 12,
+        ...raised(theme.colors),
         padding: compact ? 12 : 16,
         gap: compact ? 8 : 10,
       },
@@ -131,7 +135,7 @@ function useStyles(theme: PluginTheme, compact: boolean) {
       mono: {
         color: theme.colors.foreground,
         fontSize: compact ? 12 : 13,
-        fontFamily: "Menlo",
+        fontFamily: Platform.OS === "ios" ? "Menlo" : Platform.OS === "android" ? "monospace" : "ui-monospace, SFMono-Regular, Menlo, monospace",
       },
       row: { flexDirection: "row" as const, gap: 8, alignItems: "center" as const },
       wrapRow: { flexDirection: "row" as const, gap: 8, flexWrap: "wrap" as const },
@@ -178,6 +182,19 @@ function useStyles(theme: PluginTheme, compact: boolean) {
         paddingVertical: 8,
         gap: 2,
       },
+      radio: {
+        width: 16,
+        height: 16,
+        borderRadius: 8,
+        borderWidth: 1.5,
+        borderColor: theme.colors.foregroundMuted,
+        alignItems: "center" as const,
+        justifyContent: "center" as const,
+        marginTop: compact ? 1 : 2,
+      },
+      radioOn: { borderColor: theme.colors.foreground },
+      radioDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: theme.colors.foreground },
+      choiceRow: { borderRadius: 8, paddingHorizontal: 8 },
       selectedRow: {
         backgroundColor: theme.colors.surface2,
         borderRadius: 8,
@@ -209,10 +226,22 @@ function Button({
       accessibilityLabel={label}
       onPress={onPress}
       disabled={disabled}
-      style={[primary ? styles.primary : styles.button, disabled ? { opacity: 0.5 } : null]}
+      style={({ pressed }) => [primary ? styles.primary : styles.button, disabled ? { opacity: 0.5 } : null, { transform: [{ scale: pressed && !disabled ? 0.97 : 1 }] }]}
     >
       <Text style={primary ? styles.primaryText : styles.buttonText}>{label}</Text>
     </Pressable>
+  );
+}
+
+/** A radio row: neutral ring and dot, so the accent stays on primary buttons. */
+function Choice({ on, styles, children }: { on: boolean; styles: Styles; children: React.ReactNode }) {
+  return (
+    <View style={{ flexDirection: "row", gap: 10, paddingVertical: 6 }}>
+      <View style={[styles.radio, on ? styles.radioOn : null]}>
+        {on ? <View style={styles.radioDot} /> : null}
+      </View>
+      <View style={{ flex: 1, gap: 2 }}>{children}</View>
+    </View>
   );
 }
 
@@ -262,15 +291,15 @@ function ProviderPicker({
             accessibilityRole="button"
             accessibilityLabel={`Use ${provider.label} by default`}
             onPress={() => onSelect(provider.id)}
-            style={isSelected ? styles.selectedRow : undefined}
+            style={isSelected ? styles.selectedRow : styles.choiceRow}
           >
-            <View style={{ paddingVertical: 6 }}>
+            <Choice on={isSelected} styles={styles}>
               <Text style={styles.body}>
-                {isSelected ? "● " : "○ "}
+                
                 {provider.label}
               </Text>
               <Text style={styles.muted}>{provider.id}</Text>
-            </View>
+            </Choice>
           </Pressable>
         );
       })}
@@ -311,12 +340,12 @@ function ProfilePicker({
         accessibilityRole="button"
         accessibilityLabel="Do not follow a profile"
         onPress={() => onSelect(null)}
-        style={selected === null ? styles.selectedRow : undefined}
+        style={selected === null ? styles.selectedRow : styles.choiceRow}
       >
-        <View style={{ paddingVertical: 6 }}>
-          <Text style={styles.body}>{selected === null ? "● " : "○ "}No profile</Text>
+        <Choice on={selected === null} styles={styles}>
+          <Text style={styles.body}>No profile</Text>
           <Text style={styles.muted}>Use the model and mode chosen below instead.</Text>
-        </View>
+        </Choice>
       </Pressable>
       {profiles.map((profile) => {
         const isSelected = profile.id === selected;
@@ -333,15 +362,15 @@ function ProfilePicker({
             accessibilityRole="button"
             accessibilityLabel={`Follow the ${profile.name} profile`}
             onPress={() => onSelect(profile.id)}
-            style={isSelected ? styles.selectedRow : undefined}
+            style={isSelected ? styles.selectedRow : styles.choiceRow}
           >
-            <View style={{ paddingVertical: 6 }}>
+            <Choice on={isSelected} styles={styles}>
               <Text style={styles.body}>
-                {isSelected ? "● " : "○ "}
+                
                 {profile.name}
               </Text>
               <Text style={styles.muted}>{detail}</Text>
-            </View>
+            </Choice>
           </Pressable>
         );
       })}
@@ -391,12 +420,12 @@ function ModePicker({
         accessibilityRole="button"
         accessibilityLabel="Follow Paseo's own default mode"
         onPress={() => onSelect(null)}
-        style={selected === null ? styles.selectedRow : undefined}
+        style={selected === null ? styles.selectedRow : styles.choiceRow}
       >
-        <View style={{ paddingVertical: 6 }}>
-          <Text style={styles.body}>{selected === null ? "● " : "○ "}Follow Paseo</Text>
+        <Choice on={selected === null} styles={styles}>
+          <Text style={styles.body}>Follow Paseo</Text>
           <Text style={styles.muted}>Each provider&apos;s own default mode.</Text>
-        </View>
+        </Choice>
       </Pressable>
       {providers.map(([provider, providerModes]) => (
         <View key={provider} style={{ gap: 2 }}>
@@ -410,11 +439,11 @@ function ModePicker({
                 accessibilityRole="button"
                 accessibilityLabel={`Default to ${mode.label} for ${provider}`}
                 onPress={() => onSelect(mode.id)}
-                style={isSelected ? styles.selectedRow : undefined}
+                style={isSelected ? styles.selectedRow : styles.choiceRow}
               >
-                <View style={{ paddingVertical: 6 }}>
+                <Choice on={isSelected} styles={styles}>
                   <Text style={styles.body}>
-                    {isSelected ? "● " : "○ "}
+                    
                     {mode.label}
                     {unattended ? (
                       <Text style={{ color: theme.colors.statusWarning }}> — unattended</Text>
@@ -422,7 +451,7 @@ function ModePicker({
                     {mode.isDefault ? <Text style={styles.muted}> (provider default)</Text> : null}
                   </Text>
                   <Text style={styles.muted}>{mode.id}</Text>
-                </View>
+                </Choice>
               </Pressable>
             );
           })}
@@ -463,59 +492,18 @@ function DependencyRow({
 
   return (
     <View style={{ gap: 2 }}>
-      <Text style={styles.body}>
-        <Text style={{ color: tone }}>{dependency.state === "ok" ? "● " : "▲ "}</Text>
+      <View style={styles.row}>
+        <Icon name={dependency.state === "ok" ? "CircleCheck" : "TriangleAlert"} size={14} color={tone} />
+        <Text style={styles.body}>
         {dependency.name} — {summary}
       </Text>
+      </View>
       {dependency.path === null ? null : <Text style={styles.muted}>{dependency.path}</Text>}
       {dependency.detail === "" ? null : (
         <Text style={styles.muted}>{dependency.detail}</Text>
       )}
       {dependency.hint === "" ? null : <Text style={styles.mono}>{dependency.hint}</Text>}
     </View>
-  );
-}
-
-function RecentSendRow({
-  send,
-  styles,
-  onOpen,
-}: {
-  send: RecentSend;
-  styles: Styles;
-  onOpen: ((agentId: string) => void) | null;
-}) {
-  const meta = [
-    send.workspaceLabel,
-    send.branch ?? "no branch",
-    send.workspaceCreated ? "new worktree" : null,
-    send.dryRun ? "dry run" : null,
-    formatWhen(send.at),
-  ]
-    .filter((part): part is string => part !== null && part !== "")
-    .join(" · ");
-
-  const body = (
-    <View style={styles.listRow}>
-      <Text style={styles.body}>
-        {send.outcome === "ok" ? "" : "Failed — "}
-        {send.prLabel} · {send.title}
-      </Text>
-      <Text style={styles.muted}>{meta}</Text>
-      {send.error === null ? null : <Text style={styles.danger}>{send.error}</Text>}
-    </View>
-  );
-
-  if (send.agentId === null || onOpen === null) return body;
-  const agentId = send.agentId;
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`Open the agent for ${send.prLabel}`}
-      onPress={() => onOpen(agentId)}
-    >
-      {body}
-    </Pressable>
   );
 }
 
@@ -542,7 +530,8 @@ export function SendToPaseoSettings({ theme, host, layout, navigation }: PluginS
   const [externalUrlDraft, setExternalUrlDraft] = useState<string | null>(null);
   const [connectionCodeDraft, setConnectionCodeDraft] = useState("");
   const [sharedCode, setSharedCode] = useState<string | null>(null);
-  const [showConnectionDetails, setShowConnectionDetails] = useState(false);
+  // Null until the person chooses; a bridge that is down opens the details on its own.
+  const [detailsChoice, setShowConnectionDetails] = useState<boolean | null>(null);
   const [showAgentDefaults, setShowAgentDefaults] = useState(false);
   const [showAdvancedAccess, setShowAdvancedAccess] = useState(false);
   const [machineTests, setMachineTests] = useState<Record<string, string>>({});
@@ -664,6 +653,7 @@ export function SendToPaseoSettings({ theme, host, layout, navigation }: PluginS
   });
 
   const status = query.data?.status ?? null;
+  const showConnectionDetails = detailsChoice ?? (status?.state === "failed" || status?.state === "stopped");
   const providers = query.data?.providers ?? [];
   const providersError = query.data?.providersError ?? null;
   const modes = query.data?.modes ?? [];
@@ -761,33 +751,33 @@ export function SendToPaseoSettings({ theme, host, layout, navigation }: PluginS
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <View style={{ gap: 4 }}>
-        <Text style={styles.title}>Send to Paseo</Text>
-        <Text style={styles.muted}>
-          Send pull-request work to the right Paseo workspace.
-        </Text>
-      </View>
+      {status === null ? (
+        <Text style={styles.muted}>{query.isError ? "Status unavailable. Check that the plugin is running." : "Loading…"}</Text>
+      ) : (
+        <Overview
+          status={status}
+          sends={recent}
+          colors={theme.colors}
+          compact={layout.compact}
+          onCopyToken={() => void onCopy()}
+          detailsOpen={showConnectionDetails}
+          onToggleDetails={() => setShowConnectionDetails(!showConnectionDetails)}
+          onOpenAgent={navigation === undefined ? null : (agentId) => navigation.openAgent({ agentId, serverId: host.id })}
+          onClear={() => void clearRecent({ serverId: host.id }).then(invalidate)}
+        />
+      )}
 
+      {status !== null && showConnectionDetails ? (
       <View style={styles.card}>
         <Text style={styles.heading}>Connection</Text>
-        {status === null ? (
-          <Text style={styles.muted}>{query.isError ? "Status unavailable." : "Loading…"}</Text>
-        ) : (
           <>
             <Text style={{ ...styles.body, color: stateTone(status, theme) }}>
               {stateLabel(status)}
             </Text>
-            {status.error === null ? null : <Text style={styles.danger}>{status.error}</Text>}
             <Text style={styles.muted}>
               {hostDiscovery.hosts.length} Paseo machine
               {hostDiscovery.hosts.length === 1 ? "" : "s"} discovered automatically.
             </Text>
-            <Button
-              label={showConnectionDetails ? "Hide connection details" : "Advanced connection details"}
-              styles={styles}
-              onPress={() => setShowConnectionDetails(!showConnectionDetails)}
-            />
-            {showConnectionDetails ? (
               <View style={{ gap: 8 }}>
                 <Text style={styles.muted}>
                   {status.paired ? "Paired" : "Not yet paired"} · {status.requestCount} request
@@ -825,10 +815,9 @@ export function SendToPaseoSettings({ theme, host, layout, navigation }: PluginS
                   />
                 </View>
               </View>
-            ) : null}
           </>
-        )}
       </View>
+      ) : null}
 
       {showConnectionDetails ? (
         <>
@@ -887,7 +876,6 @@ export function SendToPaseoSettings({ theme, host, layout, navigation }: PluginS
         <Button
           label={connectMachine.isPending ? "Connecting…" : "Connect additional machine"}
           styles={styles}
-          primary
           disabled={connectionCodeDraft.trim() === "" || connectMachine.isPending}
           onPress={() => connectMachine.mutate(connectionCodeDraft)}
         />
@@ -1052,6 +1040,7 @@ export function SendToPaseoSettings({ theme, host, layout, navigation }: PluginS
       </View>
       ) : null}
 
+      {status?.paired === false && status.state === "running" ? null : (
       <View style={styles.card}>
         <Text style={styles.heading}>Pairing token</Text>
         <Text style={styles.muted}>
@@ -1078,6 +1067,7 @@ export function SendToPaseoSettings({ theme, host, layout, navigation }: PluginS
           />
         </View>
       </View>
+      )}
 
       <View style={styles.card}>
         <Text style={styles.heading}>Default agent destination</Text>
@@ -1088,30 +1078,30 @@ export function SendToPaseoSettings({ theme, host, layout, navigation }: PluginS
           accessibilityRole="button"
           accessibilityLabel="Default each send to a new agent"
           onPress={() => saveDispatch.mutate("new")}
-          style={(status?.agentDispatch ?? "new") === "new" ? styles.selectedRow : undefined}
+          style={(status?.agentDispatch ?? "new") === "new" ? styles.selectedRow : styles.choiceRow}
         >
-          <View style={{ paddingVertical: 6 }}>
+          <Choice on={(status?.agentDispatch ?? "new") === "new"} styles={styles}>
             <Text style={styles.body}>
-              {(status?.agentDispatch ?? "new") === "new" ? "● " : "○ "}New agent
+              New agent
             </Text>
             <Text style={styles.muted}>Start a separate agent for every send.</Text>
-          </View>
+          </Choice>
         </Pressable>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Default each send to the main agent in the target workspace"
           onPress={() => saveDispatch.mutate("main")}
-          style={status?.agentDispatch === "main" ? styles.selectedRow : undefined}
+          style={status?.agentDispatch === "main" ? styles.selectedRow : styles.choiceRow}
         >
-          <View style={{ paddingVertical: 6 }}>
+          <Choice on={status?.agentDispatch === "main"} styles={styles}>
             <Text style={styles.body}>
-              {status?.agentDispatch === "main" ? "● " : "○ "}Main workspace agent
+              Main workspace agent
             </Text>
             <Text style={styles.muted}>
               Reuse the best root agent in that workspace. Prefers one named Main, then an open,
               active, or recently used agent; subagents are ignored. Starts fresh if none exists.
             </Text>
-          </View>
+          </Choice>
         </Pressable>
         {status?.agentDispatch === "main" ? (
           <View style={{ gap: 6 }}>
@@ -1196,36 +1186,6 @@ export function SendToPaseoSettings({ theme, host, layout, navigation }: PluginS
         </>
       ) : null}
 
-      <View style={styles.card}>
-        <View style={{ ...styles.row, justifyContent: "space-between" }}>
-          <Text style={styles.heading}>Recent sends</Text>
-          {recent.length === 0 ? null : (
-            <Button
-              label="Clear"
-              styles={styles}
-              onPress={() => {
-                void clearRecent({ serverId: host.id }).then(invalidate);
-              }}
-            />
-          )}
-        </View>
-        {recent.length === 0 ? (
-          <Text style={styles.muted}>Nothing sent yet.</Text>
-        ) : (
-          recent.map((send) => (
-            <RecentSendRow
-              key={send.id}
-              send={send}
-              styles={styles}
-              onOpen={
-                navigation === undefined
-                  ? null
-                  : (agentId) => navigation.openAgent({ agentId, serverId: host.id })
-              }
-            />
-          ))
-        )}
-      </View>
     </ScrollView>
   );
 }

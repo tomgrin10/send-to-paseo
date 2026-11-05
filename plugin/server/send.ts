@@ -428,6 +428,7 @@ export async function handleSend(request: SendRequest): Promise<SendResponse> {
         dryRun,
         outcome: "ok",
         error: null,
+        dispatch,
       })
       .catch((error: unknown) => {
         console.error("[send-to-paseo] could not record the send", String(error));

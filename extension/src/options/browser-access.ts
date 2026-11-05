@@ -9,6 +9,7 @@ export function startBrowserAccessSettings() {
   const grants = document.getElementById("graphiteGrants")!;
   const pending = document.getElementById("graphitePending")!;
   let current: Access = { enabled: true, browserReady: false, errors: [], routes: [], grants: [], pending: [] };
+  const retry = document.getElementById("graphiteRefresh") as HTMLButtonElement;
   let pendingKey = "", connectionsKey = "", grantsKey = "", busy = false;
   const button = (label: string, action: () => Promise<void>) => {
     const b = document.createElement("button"); b.type = "button"; b.textContent = label;
@@ -19,30 +20,50 @@ export function startBrowserAccessSettings() {
       const reply = await chrome.runtime.sendMessage({ type, ...fields }) as { ok: boolean; data: Access; error?: { message: string } };
       if (!reply?.ok) throw new Error(reply?.error?.message || "The extension disconnected. Reload this page.");
       current = reply.data; render();
-    } catch (e) { status.textContent = e instanceof Error ? e.message : "Could not check the existing Send to Paseo connection. Retry below."; }
+    } catch (e) {
+      status.textContent = e instanceof Error ? e.message : "Couldn’t check Follow Up. Retry below.";
+      retry.hidden = false;
+    }
   };
   function render() {
     enabled.checked = current.enabled;
+    // Exactly one status line per state. Per-machine rows appear only when
+    // there is more than one machine to tell apart; errors are folded into the
+    // status line (deduplicated: every host can fail with the same sentence).
     const available = current.routes.filter(r => r.available);
-    status.textContent = !current.enabled ? "Follow Up browser access is off. Send to Paseo still works."
-      : available.length ? current.browserReady ? "Connected through Send to Paseo."
-        : "Connection ready. Open Graphite in this browser and sign in to use Merge when ready."
-      : "Checking your existing Send to Paseo connections. No separate pairing is needed.";
-    const nextConnections = JSON.stringify([current.routes, current.errors]);
+    const errors = [...new Set(current.errors.map(e => e.message))];
+    const multi = current.routes.length + current.errors.length > 1;
+    const repoCount = (n: number) => `${n} tracked ${n === 1 ? "repository" : "repositories"}`;
+    let line: string;
+    if (!current.enabled) line = "Follow Up browser access is off. Send to Paseo still works.";
+    else if (errors.length && !available.length) line = errors.join(" ");
+    else if (available.length) {
+      const repos = available.reduce((n, r) => n + (r.repositories?.length ?? 0), 0);
+      line = current.browserReady
+        ? `Connected through Send to Paseo${!multi && repos ? ` · ${repoCount(repos)}` : ""}.`
+        : "Connected. Open Graphite in this browser and sign in to use Merge when ready.";
+    } else if (current.routes.length) line = "Follow Up isn’t installed or enabled in Paseo on this machine.";
+    // Follow Up only talks to Paseo while a Graphite tab is open, so "no
+    // routes, no errors" is normal idle, not a broken connection.
+    else line = "Ready. Follow Up connects when Graphite is open in this browser.";
+    status.textContent = line;
+    // Retry only when something is wrong; a healthy connection polls itself.
+    retry.hidden = !current.enabled || (errors.length === 0 && (available.length > 0 || current.routes.length === 0));
+    const nextConnections = JSON.stringify([current.routes, current.errors, multi]);
     if (nextConnections !== connectionsKey) {
       connectionsKey = nextConnections; connections.replaceChildren();
-      for (const route of current.routes) {
-        const row = document.createElement("p"); row.className = "help";
-        row.textContent = `${route.label} — ${route.available
-          ? route.repositories?.length ? `Follow Up connected · ${route.repositories.length} tracked ${route.repositories.length === 1 ? "repository" : "repositories"}`
-            : "Follow Up connected. Update Follow Up to use tracked repositories automatically."
-          : "Follow Up is unavailable. Install or enable it on this machine."}`;
-        connections.append(row);
+      if (multi) {
+        for (const route of current.routes) {
+          const row = document.createElement("p"); row.className = "help";
+          row.textContent = `${route.label} — ${route.available
+            ? route.repositories?.length ? `connected · ${repoCount(route.repositories.length)}` : "connected"
+            : "Follow Up isn’t installed or enabled on this machine"}`;
+          connections.append(row);
+        }
+        if (available.length) for (const error of current.errors) {
+          const row = document.createElement("p"); row.className = "help"; row.textContent = error.message; connections.append(row);
+        }
       }
-      for (const error of current.errors) {
-        const row = document.createElement("p"); row.className = "help"; row.textContent = error.message; connections.append(row);
-      }
-      if (!current.routes.length && !current.errors.length) connections.textContent = "Pair Send to Paseo above. Follow Up will use that connection automatically.";
     }
     const nextGrants = JSON.stringify([current.grants, current.routes]);
     if (nextGrants !== grantsKey) {
@@ -75,9 +96,9 @@ export function startBrowserAccessSettings() {
     }
   }
   enabled.addEventListener("change", () => { enabled.disabled = true; void call("browserAccessEnable", { enabled: enabled.checked }).finally(() => { enabled.disabled = false; }); });
-  document.getElementById("graphiteRefresh")!.addEventListener("click", event => {
-    const retry = event.currentTarget as HTMLButtonElement; retry.disabled = true;
-    status.textContent = "Checking your Send to Paseo connection…";
+  retry.addEventListener("click", () => {
+    retry.disabled = true;
+    status.textContent = "Checking Follow Up…";
     void call("browserAccessRefresh").finally(() => { retry.disabled = false; });
   });
   const refresh = async () => { if (busy) return; busy = true; try { await call("browserAccessStatus"); } finally { busy = false; } };

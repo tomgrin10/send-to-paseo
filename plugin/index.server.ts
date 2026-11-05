@@ -4,6 +4,8 @@ import type { PluginServerContext } from "@getpaseo/plugin/server";
 import {
   addAdditionalMachine,
   clearRecentSends,
+  dispatchesForAgent,
+  getSummary,
   enablePrivateAccess,
   getConnectionCode,
   getStatus,
@@ -59,6 +61,24 @@ export default function contribute(server: PluginServerContext) {
       dependencies: deps.dependencies,
       additionalMachines: current.additionalMachines.map(publicMachine),
     };
+  });
+
+  server.handle(getSummary, async ({ serverId }) => {
+    await requireServerTarget(serverId);
+    const [status, current] = await Promise.all([getBridgeStatus(), settings.read()]);
+    const last = current.recentSends[0];
+    return {
+      state: status.state,
+      paired: status.paired,
+      lastSendAt: last?.at ?? null,
+      lastSendFailed: last?.outcome === "failed",
+    };
+  });
+
+  server.handle(dispatchesForAgent, async ({ serverId, agentId }) => {
+    await requireServerTarget(serverId);
+    const current = await settings.read();
+    return { sends: current.recentSends.filter((send) => send.agentId === agentId) };
   });
 
   server.handle(revealToken, async ({ serverId }) => {

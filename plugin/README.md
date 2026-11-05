@@ -9,17 +9,30 @@ A Paseo plugin that runs a small local HTTP bridge so a browser extension can
 send work from a pull request to the right workspace and agent — creating a
 worktree checked out to the PR if none exists.
 
-![The Send to Paseo composer open on a live github.com pull request — rails/rails #58627, state Open, merging Shopify:actionpack-singleton-class-attrs into rails:main — with the button anchored in GitHub's own PR header action row beside Code, and the popover below it showing the resolved target workspace, the target picker, the typed instruction "Fix the flaky test in this PR", the Provider and Mode selects, and the Cmd-Enter / Esc footer with Send enabled](https://raw.githubusercontent.com/tomgrin10/send-to-paseo/main/docs/screenshots/hero-github-pr-popover.png)
+![Send to Paseo on a GitHub pull request, and the card the send becomes in the agent's chat in Paseo](https://raw.githubusercontent.com/tomgrin10/send-to-paseo/main/plugin/docs/media/send-to-paseo-hero-dark.png)
+
+<sub>Screenshots use synthetic repositories and data.</sub>
 
 The extension never talks to the Paseo daemon. It talks only to this bridge,
 which speaks the frozen API in [the repository contract](https://github.com/tomgrin10/send-to-paseo/blob/main/CONTRACT.md) and reaches
 Paseo through the supported SDK.
 
 - Bridge: `http://127.0.0.1:7788`, loopback only, bearer token required.
-- Surface: **Send to Paseo** in the Paseo sidebar — status, token, agent destination,
-  new-agent defaults, recent sends.
+- Screen: **Send to Paseo** in the Paseo sidebar. One line says whether sending works; on
+  first run it shows the three pairing steps, after that the recent sends (each opens its
+  agent), then the token, agent destination and new-agent defaults. The sidebar row shows an
+  amber dot until Chrome is paired and a red one when the bridge is down or a send failed.
+- Chat: every send appears in the agent's chat as a card with the PR, the instruction, and why
+  it landed in this workspace (on the PR's branch, another branch of the stack, a new worktree);
+  "What the agent got" shows the exact message. The `send_to_paseo_bridge_status` agent tool
+  shows as a one-line row.
 - Verified behaviour, with real command output, is recorded in the
   [repository](https://github.com/tomgrin10/send-to-paseo/blob/main/plugin/VERIFICATION.md).
+
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/tomgrin10/send-to-paseo/main/plugin/docs/media/send-to-paseo-overview-light.png">
+  <img alt="The Send to Paseo screen: paired with Chrome, four sends today, and the recent sends list with one failed send that names the fix" src="https://raw.githubusercontent.com/tomgrin10/send-to-paseo/main/plugin/docs/media/send-to-paseo-overview-dark.png">
+</picture>
 
 ---
 
@@ -408,7 +421,7 @@ The bridge does not start, the reason lands in the surface's status line and in
 
 ```
 [send-to-paseo] Port 7788 is already in use, so the Send to Paseo bridge did not
-start. Pick another port in Paseo -> Send to Paseo.
+start. Pick another port under Connection details on the Send to Paseo screen.
 ```
 
 Note that `test/mock-bridge.mjs` in this repository uses port **7799**; don't

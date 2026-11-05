@@ -35,7 +35,13 @@ async function execute(job: Job) {
   job.session.port.postMessage({ type: "execute", command: job.command });
 }
 async function exchange(host: HostConfig, ready: boolean, acceptJobs: boolean) {
-  if (!host.token) throw new Error("Pair Send to Paseo using the connection above.");
+  // Not paired yet is not a Follow Up failure: the pairing card above already
+  // says what to do, so Follow Up stays idle rather than repeating it.
+  if (!host.token) {
+    connectionErrors.delete(host.id);
+    for (const [key, route] of inventory) if (route.hostId === host.id) inventory.delete(key);
+    return;
+  }
   const origin = new URL(host.bridgeUrl);
   if (origin.protocol !== "https:" && !["127.0.0.1", "localhost", "[::1]"].includes(origin.hostname)) throw new Error("Use HTTPS or a loopback bridge for this connection.");
   if (!await chrome.permissions.contains({ origins: [`${origin.origin}/*`] })) throw new Error("Allow Chrome access to the existing Send to Paseo connection above.");
@@ -61,7 +67,7 @@ async function exchange(host: HostConfig, ready: boolean, acceptJobs: boolean) {
   try {
     const response = await fetch(`${origin.origin}/follow-up/v1/exchange`, { method: "POST", credentials: "omit", redirect: "error", headers: { authorization: `Bearer ${host.token}`, "content-type": "application/json" }, body: JSON.stringify({ clientId: deviceId, ready: enabled && ready, acceptJobs: enabled && acceptJobs, routes: enabled ? [...scopes.values()] : [], results: pending.map(p => ({ ...p.result, routeId: p.route.routeId })) }), signal: controller.signal });
     if (!response.ok) throw new Error(response.status === 404
-      ? "Update Send to Paseo on this connection’s Primary machine to enable Follow Up."
+      ? "Follow Up needs a newer Send to Paseo plugin on your Paseo machine. Update it in Paseo."
       : response.status === 401 ? "The Send to Paseo pairing was refused. Check the existing connection above."
       : `The existing Send to Paseo connection returned HTTP ${response.status}. Try again.`);
     const data = await response.json() as { routes?: { routeId: string; serverId: string; label: string; available: boolean; repositories?: unknown; jobs: unknown[]; accepted: string[] }[] };
@@ -184,6 +190,11 @@ export async function browserAccessIntent(message: { type: string; route?: Brows
   return { enabled: await followUpEnabled(), browserReady: [...sessions].some(s => s.ready), errors: [...connectionErrors].map(([hostId, message]) => ({ hostId, message })), routes: [...inventory.values()], grants: await readGrants(), pending: [...issued.values()].filter(j => j.phase === "approval").map(j => ({ key: j.key, label: j.route.label, command: j.command })) };
 }
 export function startFollowUpBridge() {
+  // A changed connection (new token, URL, mode) makes every recorded failure
+  // stale; the next exchange reports afresh instead of showing an old error.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && changes.settings) connectionErrors.clear();
+  });
   chrome.runtime.onConnect.addListener(port => {
     if (port.name !== "follow-through-graphite-v1") return;
     let url: URL; try { url = new URL(port.sender?.url ?? ""); } catch { port.disconnect(); return; }

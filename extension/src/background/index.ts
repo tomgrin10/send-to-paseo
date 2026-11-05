@@ -311,6 +311,13 @@ chrome.action.onClicked.addListener(() => {
   void chrome.runtime.openOptionsPage();
 });
 
+// First run: pairing is the front door, and until it is done the page button
+// can only say "set me up". Open the setup page once, on a fresh install only —
+// never on an update or a browser restart.
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details.reason === "install") void chrome.runtime.openOptionsPage();
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) return false;
   const type = message && typeof message === "object" ? message.type : null;

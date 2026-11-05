@@ -38,7 +38,7 @@
  *   POST /__test/fail   {"code": "project_not_found" | null, "once": true?}
  *   POST /__test/config {"contract": 2?, "dryRun": true?, "daemonDown": true?,
  *                        "noGh": true?, "machineName": "devbox"?,
- *                        "agentDispatch": "new" | "main"?}
+ *                        "agentDispatch": "new" | "main"?, "sendDelayMs": 0?}
  *   POST /__test/reset
  *   GET  /__test/log    -> [{ method, path, origin, hasAuth, authState, body }]
  */
@@ -91,6 +91,7 @@ const CONFIG = {
   routed: flag("routed"),
   /** Whether an existing workspace reuses its selected root agent. */
   agentDispatch: "new",
+  sendDelayMs: 0,
   followUpOwner: false,
   followUpRouting: true,
 };
@@ -643,6 +644,8 @@ async function handleControl(req, res, url, origin) {
     if (body.agentDispatch !== undefined) {
       CONFIG.agentDispatch = body.agentDispatch === "main" ? "main" : "new";
     }
+    // Holds /v1/send open so the UI's in-flight state can be observed.
+    if (body.sendDelayMs !== undefined) CONFIG.sendDelayMs = Math.max(0, Number(body.sendDelayMs) || 0);
     return sendJson(
       res,
       200,
@@ -674,6 +677,7 @@ async function handleControl(req, res, url, origin) {
     CONFIG.machineName = "mock-machine";
     CONFIG.routed = false;
     CONFIG.agentDispatch = "new";
+    CONFIG.sendDelayMs = 0;
     CONFIG.followUpOwner = false;
     CONFIG.followUpRouting = true;
     return sendJson(res, 200, { ok: true }, null);
@@ -802,6 +806,7 @@ export function createMockBridge(overrides = {}) {
       return handleResolve(res, origin, body);
     }
     if (url.pathname === "/v1/send" && req.method === "POST") {
+      if (CONFIG.sendDelayMs > 0) await new Promise((r) => setTimeout(r, CONFIG.sendDelayMs));
       return handleSend(res, origin, body);
     }
 

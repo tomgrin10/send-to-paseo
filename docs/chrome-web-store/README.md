@@ -121,6 +121,8 @@ local Paseo installation.
 - Package: the `send-to-paseo-extension.zip` asset attached to GitHub release `v1.4.0`
 - Store icon: `docs/chrome-web-store/icon-128.png`
 - Screenshots: `docs/chrome-web-store/github-pr-1280x800.png` and
-  `docs/chrome-web-store/graphite-pr-1280x800.png`. Both show the composer on actual PR pages;
-  local machine names and a reviewer's name and avatar are obscured.
+  `docs/chrome-web-store/graphite-pr-1280x800.png`. Both show the composer on the repository's
+  synthetic GitHub and Graphite fixture pages (`test/fixtures`) against the mock bridge, so they
+  contain no real repository, person or machine. Regenerated in the November 2026 UI pass; the
+  store listing itself was not updated.
 - Small promotional tile: `docs/chrome-web-store/small-promo-440x280.png` (440×280)
