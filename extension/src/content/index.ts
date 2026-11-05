@@ -9,7 +9,13 @@ import { startGraphiteCompanion } from "./graphite-companion";
 import type { PrRef } from "../shared/contract";
 import { adapterFor } from "./adapters";
 import type { SiteAdapter } from "./adapters/types";
-import { closePopover, togglePopover, warmPopoverResolution } from "./popover";
+import {
+  closePopover,
+  invalidateWarmResolve,
+  isPairingFailure,
+  togglePopover,
+  warmPopoverResolution,
+} from "./popover";
 import { BUTTON_TAG, MARKER_ATTR, createButton, type ButtonHandle, type ButtonMode } from "./ui/button";
 
 const LOCATION_EVENT = "send-to-paseo:locationchange";
@@ -105,12 +111,48 @@ function inject(): void {
       stackPrNumbers: adapter.findStackPrNumbers(),
       pageUrl: location.href,
       anchor: handle.button,
+      buttonState: handle.getState,
+      setButtonState: (state) => {
+        // A late answer for a button that has since been replaced (SPA nav to
+        // another PR) must not paint the new one.
+        if (mounted?.handle === handle) handle.setState(state);
+      },
     });
   });
 
   place(handle.host, placement);
   mounted = { pr, mode: desiredMode, handle, adapter };
-  warmPopoverResolution({ pr, stackPrNumbers: adapter.findStackPrNumbers() });
+  warmAndReflect(handle, { pr, stackPrNumbers: adapter.findStackPrNumbers() });
+}
+
+/**
+ * Prewarm resolution (see popover.ts) and let its answer decide whether the
+ * button wears the amber "not paired" dot. The resolve is happening anyway, so
+ * this costs no request of its own — and with no token stored the service
+ * worker answers `not_configured` without touching the network at all.
+ */
+function warmAndReflect(handle: ButtonHandle, ctx: { pr: PrRef; stackPrNumbers: number[] }): void {
+  void warmPopoverResolution(ctx).then((result) => {
+    if (mounted?.handle !== handle) return;
+    const state = handle.getState();
+    if (isPairingFailure(result)) {
+      if (state === "idle") handle.setState("unpaired");
+    } else if (state === "unpaired") {
+      handle.setState("idle");
+    }
+  });
+}
+
+/**
+ * Pairing is finished in the options tab. When the user comes back here, the
+ * dot should already be gone — so re-check, but only while it is showing.
+ */
+function onVisibilityChange(): void {
+  if (document.visibilityState !== "visible" || !mounted) return;
+  if (mounted.handle.getState() !== "unpaired") return;
+  const ctx = { pr: mounted.pr, stackPrNumbers: mounted.adapter.findStackPrNumbers() };
+  invalidateWarmResolve(ctx);
+  warmAndReflect(mounted.handle, ctx);
 }
 
 function place(host: HTMLElement, placement: ReturnType<SiteAdapter["findAnchor"]>): void {
@@ -188,6 +230,7 @@ function start(): void {
   // world cannot see the page's history calls on its own.
   window.addEventListener(LOCATION_EVENT, onLocationChange);
   window.addEventListener("popstate", onLocationChange);
+  document.addEventListener("visibilitychange", onVisibilityChange);
   setInterval(() => {
     // Safety net for a router that swaps the URL without touching history (or
     // if the MAIN-world shim was blocked by a page CSP)...

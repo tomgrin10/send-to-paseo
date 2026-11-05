@@ -9,11 +9,15 @@
 Send instructions from GitHub and Graphite pull requests to your [Paseo](https://paseo.sh) agents.
 Choose a workspace, start a new agent or continue with an existing one, and send.
 
-![Send to Paseo open on a GitHub pull request, with workspace, agent, and model choices](docs/screenshots/hero-github-pr-popover.png)
+![Send to Paseo open on a GitHub pull request, and the card the send becomes in the agent's chat in Paseo](plugin/docs/media/send-to-paseo-hero-dark.png)
+
+<sub>Screenshots use synthetic repositories and data.</sub>
 
 - Reuse an existing workspace or check out the pull request in a new worktree.
 - Keep stacked pull requests in the same workspace.
 - Send work to your laptop or another connected Paseo machine.
+- See where every send went: the agent's chat opens on a card with the PR, your instruction,
+  and why it landed in that workspace, and the Send to Paseo screen in Paseo lists recent sends.
 
 ## Install
 
@@ -27,8 +31,15 @@ Requires [Paseo](https://paseo.sh) 0.14.0 or newer and `git` on the computer run
    paseo plugin install send-to-paseo
    ```
 
-3. **Pair once.** In Paseo, open **Send to Paseo** and copy the **pairing token**. Click the
-   extension's icon in Chrome's Extensions menu, paste the token, and press **Test connection**.
+3. **Pair once.** In Paseo, open **Send to Paseo** and press **Copy token**. Chrome opens the
+   extension's setup page when you add it (later: click the extension's icon); paste the token
+   and press **Test connection**. The Send to Paseo screen switches to your send history once
+   Chrome connects.
+
+   <picture>
+     <source media="(prefers-color-scheme: light)" srcset="plugin/docs/media/send-to-paseo-card-light.png">
+     <img alt="A send as it appears in the agent's chat: the PR, where it landed and why, the PR title and branches, and the instruction" src="plugin/docs/media/send-to-paseo-card-dark.png" width="640">
+   </picture>
 
 Open a GitHub or Graphite pull request, click **Send to Paseo**, type an instruction, and press
 **Send**. Chrome keeps the extension up to date automatically.

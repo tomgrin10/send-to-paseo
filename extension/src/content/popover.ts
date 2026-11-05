@@ -39,8 +39,20 @@ import type {
   Result,
 } from "../shared/messages";
 import { sendIntent } from "./bridge";
+import type { ButtonState } from "./ui/button";
 import { Combobox } from "./ui/combobox";
-import { clear, cogIcon, el, renderProse } from "./ui/dom";
+import {
+  branchIcon,
+  checkIcon,
+  clear,
+  cogIcon,
+  copyIcon,
+  el,
+  externalIcon,
+  folderIcon,
+  folderPlusIcon,
+  renderProse,
+} from "./ui/dom";
 import { containKeyboard } from "./ui/keyboard";
 import { POPOVER_CSS } from "./ui/styles";
 
@@ -51,6 +63,20 @@ export interface PopoverContext {
   stackPrNumbers: number[];
   pageUrl: string;
   anchor: HTMLElement;
+  /** The page button's state, which the popover drives (see ui/button.ts). */
+  buttonState?: () => ButtonState;
+  setButtonState?: (state: ButtonState) => void;
+}
+
+/**
+ * Codes that mean "the user has not finished pairing", as opposed to "something
+ * broke". They get the calm setup card instead of a red error, and an amber dot
+ * on the page button instead of a red one.
+ */
+export const PAIRING_CODES: ReadonlySet<string> = new Set(["not_configured", "unauthorized"]);
+
+export function isPairingFailure(result: Result<unknown>): boolean {
+  return !result.ok && PAIRING_CODES.has(result.error.code);
 }
 
 let current: Popover | null = null;
@@ -75,13 +101,13 @@ function resolveNow(pr: PrRef, stackPrNumbers: number[]): Promise<Result<MultiRe
 /** Begin resolution as soon as the PR button is mounted, before the user clicks it. */
 export function warmPopoverResolution(
   ctx: Pick<PopoverContext, "pr" | "stackPrNumbers">,
-): void {
+): Promise<Result<MultiResolveResponse>> {
   const key = resolveKey(ctx.pr, ctx.stackPrNumbers);
   if (
     warmResolve?.key === key &&
     Date.now() - warmResolve.startedAt < WARM_RESOLVE_TTL_MS
   ) {
-    return;
+    return warmResolve.promise;
   }
   const promise = resolveNow(ctx.pr, ctx.stackPrNumbers);
   warmResolve = {
@@ -94,6 +120,7 @@ export function warmPopoverResolution(
   void promise.then((result) => {
     if (!result.ok && warmResolve?.promise === promise) warmResolve = null;
   });
+  return promise;
 }
 
 function warmedOrFreshResolve(
@@ -110,7 +137,7 @@ function warmedOrFreshResolve(
   return warmResolve!.promise;
 }
 
-function invalidateWarmResolve(ctx: Pick<PopoverContext, "pr" | "stackPrNumbers">): void {
+export function invalidateWarmResolve(ctx: Pick<PopoverContext, "pr" | "stackPrNumbers">): void {
   if (warmResolve?.key === resolveKey(ctx.pr, ctx.stackPrNumbers)) warmResolve = null;
 }
 
@@ -185,6 +212,8 @@ class Popover {
   open(): void {
     document.body.append(this.host);
     this.ctx.anchor.setAttribute("aria-expanded", "true");
+    // "Failed" is a red dot that lasts until the user looks; this is the look.
+    if (this.ctx.buttonState?.() === "failed") this.ctx.setButtonState?.("idle");
     this.render();
     this.position();
 
@@ -218,6 +247,17 @@ class Popover {
       closePopover();
     };
     const onReflow = () => this.position();
+    // Pairing happens in another tab (the options page). When the user comes
+    // back to this one with the setup card still up, check again rather than
+    // making them close and reopen the popover.
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (this.phase !== "error" || !this.failure || !PAIRING_CODES.has(this.failure.code)) return;
+      invalidateWarmResolve(this.ctx);
+      void this.loadResolve();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    this.disposers.push(() => document.removeEventListener("visibilitychange", onVisible));
 
     document.addEventListener("pointerdown", onDocPointer, true);
     // Esc is captured on the document so it works whether focus is inside the
@@ -257,6 +297,11 @@ class Popover {
       warmedOrFreshResolve(this.ctx),
     ]);
     if (settings.ok) this.defaultProviderPref = settings.data.defaultProvider;
+
+    // The button is the page's, not ours, so it is updated even if the
+    // popover was closed while this was in flight.
+    if (isPairingFailure(res)) this.ctx.setButtonState?.("unpaired");
+    else if (this.ctx.buttonState?.() === "unpaired") this.ctx.setButtonState?.("idle");
 
     if (!this.host.isConnected) return; // closed while in flight
 
@@ -376,6 +421,7 @@ class Popover {
     this.phase = "sending";
     this.failure = null;
     this.render();
+    this.ctx.setButtonState?.("sending");
 
     const res = await sendIntent({
       type: "send",
@@ -391,6 +437,10 @@ class Popover {
       modeId: this.modeId || undefined,
       pageUrl: this.ctx.pageUrl,
     });
+
+    // Before the isConnected check: a popover closed mid-send must still take
+    // the page button out of "sending".
+    this.ctx.setButtonState?.(res.ok ? "sent" : isPairingFailure(res) ? "unpaired" : "failed");
 
     if (!this.host.isConnected) return;
 
@@ -445,12 +495,18 @@ class Popover {
         break;
 
       case "error":
-        this.card.append(el("div", { class: "body" }, [this.renderError()]));
-        this.card.append(this.renderErrorFooter());
+        if (this.failure && PAIRING_CODES.has(this.failure.code)) {
+          this.card.append(el("div", { class: "body" }, [this.renderSetup()]));
+          this.card.append(this.renderSetupFooter());
+        } else {
+          this.card.append(el("div", { class: "body" }, [this.renderError()]));
+          this.card.append(this.renderErrorFooter());
+        }
         break;
 
       case "sent":
         this.card.append(el("div", { class: "body" }, [this.renderSuccess()]));
+        this.card.append(this.renderSuccessFooter());
         break;
 
       case "ready":
@@ -753,20 +809,27 @@ class Popover {
     const c = this.selectedCandidate();
     const slice = this.selectedSlice();
     const box = el("div", { class: "target-summary", "data-stp-target-summary": "" });
-    box.append(el("span", { class: "arrow" }, ["→ "]));
+    // The first line is "which workspace"; an icon instead of a text arrow, so
+    // it reads like the host's own UI (Primer and Paseo both lead rows with an
+    // outline icon) and is the same size on every font stack.
+    const head = el("div", { class: "thead" });
+    box.append(head);
 
     if (!c || !slice || !slice.resolved) {
-      box.append(document.createTextNode("no candidate selected"));
+      head.append(document.createTextNode("No candidate selected"));
       return box;
     }
     const hostResolved = slice.resolved;
+    head.append(el("span", { class: "ticon" }, [c.kind === "create" ? folderPlusIcon() : folderIcon()]));
+    const headText = el("span", { class: "ttext" });
+    head.append(headText);
 
     // The host comes first, and is a distinct element rather than part of the
     // sentence: which machine the agent starts on is the one fact this popover
     // could not tell you before, and it is the one that is expensive to get
     // wrong.
     if (this.multiHost) {
-      box.append(
+      headText.append(
         el("span", { class: "host", "data-stp-target-host": slice.hostId }, [
           this.chipFor(c.hostIndex),
         ]),
@@ -775,21 +838,28 @@ class Popover {
     }
 
     if (c.kind === "create") {
-      box.append(document.createTextNode(`will create worktree for PR #${hostResolved.pr.number}`));
+      headText.append(document.createTextNode(`will create worktree for PR #${hostResolved.pr.number}`));
     } else {
-      box.append(document.createTextNode("workspace "), el("code", {}, [c.label]));
+      headText.append(document.createTextNode("workspace "), el("code", {}, [c.label]));
       if (c.reason === "stack" && c.stackPrNumber) {
-        box.append(
+        headText.append(
           document.createTextNode(` · stack #${c.stackPrNumber}${stackStateSuffix(c)}`),
         );
       }
     }
-    const sub = el("span", { class: "sub" });
-    sub.append(
-      document.createTextNode(c.branch ? `${c.branch}` : hostResolved.pr.headBranch),
-      document.createTextNode(` · ${hostResolved.project.name}`),
+
+    // Why this target: the same words the Paseo card uses once the send lands,
+    // so the reason reads identically before and after.
+    const reason = routeReason(c, hostResolved.pr);
+    if (reason) box.append(reasonLine(reason));
+    // The branch goes on the sub-line unless the reason already named it.
+    const branch = c.branch || hostResolved.pr.headBranch;
+    const named = reason !== null && branch !== "" && reason.text.includes(branch);
+    box.append(
+      el("span", { class: "sub" }, [
+        named || !branch ? hostResolved.project.name : `${branch} · ${hostResolved.project.name}`,
+      ]),
     );
-    box.append(sub);
 
     if (this.effectiveAgentDispatch() === "main") {
       if (c.kind === "existing" && c.mainAgent) {
@@ -807,26 +877,6 @@ class Popover {
       }
     }
 
-    // One workspace per stack is normal, so the resolved target is often a
-    // worktree on a *sibling* branch. Say so, rather than letting the branch on
-    // the line above be mistaken for this PR's branch.
-    //
-    // `resolved.pr.headBranch` must be non-empty. When `gh` is unavailable the
-    // bridge deliberately never guesses it and sends "", and "any branch !== \"\""
-    // is true for every existing candidate — which asserted a mismatch nothing
-    // could actually know about. Unknown is not "different".
-    if (
-      c.kind === "existing" &&
-      c.branch &&
-      hostResolved.pr.headBranch &&
-      c.branch !== hostResolved.pr.headBranch
-    ) {
-      box.append(
-        el("span", { class: "mismatch", "data-stp-branch-mismatch": "" }, [
-          branchMismatchNote(c),
-        ]),
-      );
-    }
     return box;
   }
 
@@ -845,17 +895,24 @@ class Popover {
       .filter(({ slice }) => slice.error !== null)
       .map(({ slice, hostIndex }) => {
         const presented = presentError(slice.error!.code);
+        // The raw code is for support, so it lives in the tooltip and a data
+        // attribute, never in the visible sentence.
         return el(
           "div",
-          { class: "host-error", "data-stp-host-error": slice.hostId, role: "status" },
+          {
+            class: "host-error",
+            "data-stp-host-error": slice.hostId,
+            "data-stp-host-error-code": slice.error!.code,
+            title: `Error code ${slice.error!.code}`,
+            role: "status",
+          },
           [
             el("span", { class: "host" }, [chips[hostIndex] ?? slice.hostLabel]),
             // The headline is used verbatim. Lower-casing it to splice into a
             // sentence produced "chrome hasn't been given access…" — these
             // titles are sentences of their own, several starting with a proper
             // noun, so the row is a label and a sentence rather than one clause.
-            document.createTextNode(` — ${presented.title} · `),
-            el("span", { class: "hcode" }, [slice.error!.code]),
+            document.createTextNode(` — ${presented.title}`),
           ],
         );
       });
@@ -874,7 +931,7 @@ class Popover {
     );
     if (p.openOptions) {
       const a = el("a", { class: "link", "data-stp-open-options": "", role: "button", tabindex: "0" }, [
-        "Open extension options",
+        "Open settings",
       ]);
       const go = () => void sendIntent({ type: "openOptions" });
       a.addEventListener("click", go);
@@ -883,12 +940,78 @@ class Popover {
       });
       box.append(a);
     }
+    // The raw code is for support and bug reports, not for reading. It is
+    // never visible copy: it sits in the button's tooltip and goes to the
+    // clipboard, together with the HTTP status and the message, on demand.
+    const details = [
+      `Send to Paseo error: ${f.code}`,
+      ...(f.status ? [`HTTP ${f.status}`] : []),
+      ...(f.message ? [f.message] : []),
+    ].join("\n");
+    const summary = f.status ? `Error code ${f.code} · HTTP ${f.status}` : `Error code ${f.code}`;
+    const copy = el(
+      "button",
+      { class: "copy-details", type: "button", "data-stp-error-code": summary, title: summary },
+      [copyIcon(), el("span", {}, ["Copy details"])],
+    ) as HTMLButtonElement;
+    copy.addEventListener("click", () => {
+      const label = copy.querySelector("span")!;
+      navigator.clipboard
+        .writeText(details)
+        .then(() => (label.textContent = "Copied"))
+        .catch(() => (label.textContent = "Couldn’t copy"))
+        .finally(() => setTimeout(() => (label.textContent = "Copy details"), 2000));
+    });
+    box.append(copy);
+    return box;
+  }
+
+  /**
+   * First run, or a token the bridge no longer accepts.
+   *
+   * Not an error card: nothing is broken, the user simply has a step left. So
+   * no red, no raw code, and the one action that fixes it is the primary
+   * button. `data-stp-setup` carries the code for tests and support.
+   */
+  private renderSetup(): HTMLElement {
+    const code = this.failure!.code;
+    const rejected = code === "unauthorized";
+    const box = el("div", { class: "setup", "data-stp-setup": code, role: "status" });
     box.append(
-      el("div", { class: "ecode" }, [
-        f.status ? `${f.code} · HTTP ${f.status}` : f.code,
+      el("div", { class: "setup-title", "data-stp-setup-title": "" }, [
+        rejected ? "Paste a new token" : "Connect to Paseo",
       ]),
     );
+    if (rejected) {
+      box.append(
+        el("p", { class: "setup-why" }, [
+          "Paseo didn’t accept the token saved here, usually because it was regenerated. Copy the current one and paste it again.",
+        ]),
+      );
+    }
+    const steps = el("ol", { class: "steps" });
+    for (const [n, text] of [
+      ["1", "In Paseo, open Send to Paseo and press Copy token"],
+      ["2", "Open setup, paste the token, and press Test connection"],
+    ] as const) {
+      steps.append(el("li", {}, [el("span", { class: "n", "aria-hidden": "true" }, [n]), el("span", {}, [text])]));
+    }
+    box.append(steps);
     return box;
+  }
+
+  private renderSetupFooter(): HTMLElement {
+    const close = el("button", { class: "btn", "data-stp-close": "", type: "button" }, [
+      "Close",
+    ]) as HTMLButtonElement;
+    close.addEventListener("click", () => closePopover());
+    const setup = el(
+      "button",
+      { class: "btn primary", "data-stp-open-options": "", type: "button" },
+      ["Open setup"],
+    ) as HTMLButtonElement;
+    setup.addEventListener("click", () => void sendIntent({ type: "openOptions" }));
+    return el("footer", { class: "actions" }, [close, setup]);
   }
 
   private renderErrorFooter(): HTMLElement {
@@ -909,7 +1032,7 @@ class Popover {
       "Close",
     ]) as HTMLButtonElement;
     close.addEventListener("click", () => closePopover());
-    return el("footer", {}, [close, retry]);
+    return el("footer", { class: "actions" }, [close, retry]);
   }
 
   private renderSuccess(): HTMLElement {
@@ -920,15 +1043,43 @@ class Popover {
     const dry = r.dryRun === true;
     const box = el("div", { class: dry ? "success dry" : "success" });
 
-    const title = el("div", { class: "stitle", "data-stp-success": "" });
     const reused = r.dispatch === "main" && r.agentCreated === false;
+    const followUp = this.selectedCandidate()?.mainAgent?.source === "follow-up";
+    const title = el("div", { class: "stitle" });
+    if (!dry) title.append(checkIcon(15));
     title.append(
-      document.createTextNode(
-        dry ? "Dry run — nothing sent" : reused ? this.selectedCandidate()?.mainAgent?.source === "follow-up" ? "Message sent to registered agent" : "Message sent to main agent" : "Agent started",
-      ),
+      el("span", { "data-stp-success": "" }, [
+        dry
+          ? "Dry run — nothing sent"
+          : reused
+            ? followUp
+              ? "Message sent to registered agent"
+              : "Message sent to main agent"
+            : "Agent started",
+      ]),
     );
     if (dry) title.append(el("span", { class: "badge", "data-stp-dryrun": "true" }, ["DRY RUN"]));
     box.append(title);
+
+    // Where it landed, in words. Principle 1 of PRODUCT.md: the send lands
+    // where the user expected, and the product says why.
+    const route = el("div", { class: "route", "data-stp-route": "" });
+    if (this.sentHostLabel) {
+      route.append(
+        el("span", { class: "host", "data-stp-sent-host": "" }, [this.sentHostLabel]),
+        document.createTextNode(" · "),
+      );
+    }
+    route.append(document.createTextNode(routeSentence(r, this.ctx.pr.number, this.selectedCandidate(), dry)));
+    box.append(route);
+    // Why it landed there. Skipped for a new worktree, where the route line
+    // already says exactly that.
+    const sent = this.selectedCandidate();
+    const sentPr = this.selectedSlice()?.resolved?.pr;
+    if (!r.workspaceCreated && sent && sentPr) {
+      const reason = routeReason(sent, sentPr);
+      if (reason) box.append(reasonLine(reason));
+    }
 
     if (dry) {
       box.append(
@@ -942,38 +1093,25 @@ class Popover {
       );
     }
 
+    // The agent's own title (a new agent is named after the PR and the
+    // instruction) and the branch it is working on. For a reused agent the
+    // title is already in the route line, so only the branch is left.
     const detail = el("div", { class: "sdetail" });
-    if (this.sentHostLabel) {
-      detail.append(
-        el("span", { class: "host", "data-stp-sent-host": "" }, [this.sentHostLabel]),
-        document.createTextNode(" · "),
-      );
-    }
-    detail.append(document.createTextNode(r.title));
-    if (r.workspaceLabel) {
-      detail.append(
-        document.createTextNode(r.workspaceCreated ? " · created workspace " : " · workspace "),
-        el("code", {}, [r.workspaceLabel]),
-      );
-    }
-    if (r.branch) detail.append(document.createTextNode(" · "), el("code", {}, [r.branch]));
-    box.append(detail);
+    const bits: (Node | string)[] = [];
+    if (!reused && r.title) bits.push(r.title);
+    if (r.branch) bits.push(el("code", {}, [r.branch]));
+    bits.forEach((bit, i) => {
+      if (i > 0) detail.append(document.createTextNode(" · "));
+      detail.append(bit);
+    });
+    if (bits.length) box.append(detail);
+    return box;
+  }
 
-    // `deepLink` is OPAQUE (CONTRACT.md "Deep link format"): rendered verbatim,
-    // never constructed or parsed here.
-    const link = el(
-      "a",
-      {
-        class: dry ? "deep-link muted" : "deep-link",
-        "data-stp-deeplink": r.deepLink,
-        href: r.deepLink,
-      },
-      [dry && !reused ? "Open in Paseo (synthetic id)" : "Open in Paseo"],
-    );
-    box.append(link);
-    box.append(el("div", { class: "deep-link-raw" }, [r.deepLink]));
-
-    const footerish = el("div", { class: "status" });
+  private renderSuccessFooter(): HTMLElement {
+    const r = this.sendResult!;
+    const dry = r.dryRun === true;
+    const reused = r.dispatch === "main" && r.agentCreated === false;
     const again = el("button", { class: "btn", "data-stp-send-another": "", type: "button" }, [
       "Send another",
     ]) as HTMLButtonElement;
@@ -982,9 +1120,21 @@ class Popover {
       this.sendResult = null;
       void this.loadResolve();
     });
-    footerish.append(again);
-    box.append(footerish);
-    return box;
+    // `deepLink` is OPAQUE (CONTRACT.md "Deep link format"): rendered verbatim,
+    // never constructed or parsed here. The raw URL is in the tooltip rather
+    // than printed: it is for support, and a paseo:// string is noise to read.
+    const link = el(
+      "a",
+      {
+        class: dry ? "btn deep-link muted" : "btn primary deep-link",
+        "data-stp-deeplink": r.deepLink,
+        href: r.deepLink,
+        title: r.deepLink,
+      },
+      [dry && !reused ? "Open in Paseo (synthetic id)" : "Open in Paseo"],
+    );
+    link.append(externalIcon(13));
+    return el("footer", { class: "actions" }, [again, link]);
   }
 
   /* ---------------------------------------------------------------------- */
@@ -1013,6 +1163,35 @@ class Popover {
 }
 
 /* -------------------------------------------------------------------------- */
+
+/**
+ * One line saying where the send landed: "Messaged Main in brawny-dodo",
+ * "New agent in brawny-dodo", "New worktree for #942 · new agent".
+ *
+ * Built from the response first (it is what actually happened) and the chosen
+ * candidate only as a fallback for a plugin that omits `workspaceLabel`.
+ */
+function routeSentence(
+  r: SendResponse,
+  prNumber: number,
+  candidate: MergedCandidate | undefined,
+  dry: boolean,
+): string {
+  const reused = r.dispatch === "main" && r.agentCreated === false;
+  const workspace =
+    r.workspaceLabel || (candidate?.kind === "existing" ? candidate.label : "");
+  const where = workspace ? ` in ${workspace}` : "";
+  if (reused) {
+    const agent = r.title || candidate?.mainAgent?.title || "the main agent";
+    return dry ? `Would message ${agent}${where}` : `Messaged ${agent}${where}`;
+  }
+  if (r.workspaceCreated) {
+    return dry
+      ? `Would create a worktree for #${prNumber} · new agent`
+      : `New worktree for #${prNumber} · new agent`;
+  }
+  return dry ? `Would start a new agent${where}` : `New agent${where}`;
+}
 
 /** The human-readable reason tag shown in parentheses on an existing candidate. */
 function candidateReasonTag(c: Candidate): string {
@@ -1107,24 +1286,58 @@ function candidateOptionLabel(c: Candidate, hostLabel: string | null): string {
  * first — that is the field users actually remember.
  */
 /**
- * What to say about a target whose branch is not this PR's branch.
+ * Why a send goes (or went) to this workspace, in the Paseo card's words:
+ * "On the PR's branch", "On feat-x, another branch of this stack", "On feat-x,
+ * a merged branch of this stack", "New worktree for #942".
  *
- * Reason-aware, because a single sentence cannot be true of every case. It read
- * "another branch of this stack" for *every* existing candidate, which is a
- * false claim about a rank-3 "same project" workspace — that branch is not in
- * the stack at all, and saying it is invites the user to trust a target the
- * bridge deliberately refuses to default to. A merged branch gets its own
- * wording for the opposite reason: "another branch of this stack" reads as a
- * live sibling, and a worktree parked on a branch that has already landed is
- * the case this whole ranking path exists to recognise.
+ * Derived from what resolve already returned (reason, stack state, branch vs
+ * `pr.headBranch`), so no wire change. Reason-aware because one sentence is not
+ * true of every case: a rank-3 "same project" workspace is not in the stack,
+ * and a merged branch must not read as a live sibling. `mismatch` is set only
+ * when the branches are known to differ.
+ *
+ * `pr.headBranch` is "" when `gh` is unavailable: the bridge never guesses it,
+ * and "any branch !== \"\"" would assert a mismatch nothing can know about, so
+ * that case says the details are unavailable instead.
  */
-function branchMismatchNote(c: Candidate): string {
-  if (c.reason !== "stack") return "worktree is on a different branch";
-  const state = c.stackPrState;
-  if (state === "merged" || state === "closed") {
-    return `worktree is on a branch of this stack whose PR is ${state}`;
+interface RouteReason {
+  text: string;
+  /** Merged/closed branch: the user may not want this target. Amber. */
+  attention: boolean;
+  /** The workspace is known to be on a branch other than the PR's. */
+  mismatch: boolean;
+}
+
+function routeReason(c: Candidate, pr: { number: number; headBranch: string }): RouteReason | null {
+  if (c.kind === "create") return { text: `New worktree for #${pr.number}`, attention: false, mismatch: false };
+  if (!pr.headBranch) {
+    return c.branch
+      ? { text: `On ${c.branch} · PR details unavailable (gh)`, attention: false, mismatch: false }
+      : null;
   }
-  return "worktree is on another branch of this stack";
+  if (!c.branch || c.branch === pr.headBranch) {
+    return { text: "On the PR's branch", attention: false, mismatch: false };
+  }
+  if (c.reason === "stack") {
+    const state = c.stackPrState;
+    if (state === "merged" || state === "closed") {
+      return { text: `On ${c.branch}, a ${state} branch of this stack`, attention: true, mismatch: true };
+    }
+    return { text: `On ${c.branch}, another branch of this stack`, attention: false, mismatch: true };
+  }
+  return { text: `On ${c.branch}, a different branch`, attention: false, mismatch: true };
+}
+
+function reasonLine(reason: RouteReason): HTMLElement {
+  return el(
+    "span",
+    {
+      class: reason.attention ? "reason attention" : "reason",
+      "data-stp-route-reason": "",
+      ...(reason.mismatch ? { "data-stp-branch-mismatch": "" } : {}),
+    },
+    [branchIcon(), el("span", {}, [reason.text])],
+  );
 }
 
 function candidateSearchText(c: Candidate, slice: HostSlice | undefined): string {

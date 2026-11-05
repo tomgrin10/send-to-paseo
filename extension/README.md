@@ -138,20 +138,25 @@ survives reloads as long as you don't move the folder.
 
 1. In Paseo, open the **send-to-paseo** plugin surface and copy the **pairing token**.
    (It also lives at `$PASEO_HOME/plugin-data/send-to-paseo/settings.json`, mode `0600`.)
-2. Click the extension's toolbar icon (or the cog in the composer's header, or
-   **Details → Extension options**).
-3. Paste the token. Settings save as you type.
+2. The settings page opens by itself the first time the extension is installed. Later, click
+   the extension's toolbar icon, **Open setup** in the popover, the cog in the composer's
+   header, or **Details → Extension options**.
+3. Paste the token (**Paste** reads the clipboard and tests straight away). Settings save as
+   you type.
 4. Click **Test connection**. It tells you which of these you have:
 
    | Result | Meaning |
    | --- | --- |
-   | green **Paired with Paseo** | Token accepted. The **Default provider** dropdown is now populated from the bridge. |
-   | amber **Bridge reachable, not paired yet** | The plugin is running but no token is stored. Paste one. |
+   | green **Connected to _machine_** | Token accepted. Shows the Paseo and plugin versions; hover for the contract version and server id. The **Default provider** dropdown is now populated from the bridge. |
+   | amber **Paste your token to finish** | The plugin is running but no token is stored. Paste one. |
    | red **Token rejected** | The plugin is running and refused this token. Copy it again. |
-   | red **Can't reach the Paseo bridge** | The plugin isn't listening on that URL. |
+   | red **Bridge not running** | Nothing answered on this computer's bridge URL. `paseo plugin ls` should list `send-to-paseo` as running. (A remote direct connection says **Can't reach the Paseo bridge** instead.) |
    | red **Chrome hasn't been given access to this bridge** | Advanced direct mode only: press **Grant access to this address** on that connection. |
    | red **Update required** | Plugin and extension speak different contract versions. Sends are blocked until you update one of them. |
-   | amber **Bridge up, Paseo daemon unreachable** | Start the Paseo app. |
+   | amber **Paseo isn't responding** | The bridge is up but its Paseo daemon didn't answer. Start the Paseo app. |
+
+   Until pairing is done, the **Send to Paseo** button on a PR carries a small amber dot, and
+   the popover shows a two-step **Connect to Paseo** card instead of an error.
 
    These are distinguishable because `GET /v1/ping` takes *optional* auth: without a token
    it still returns 200 (liveness), with a valid token it returns `paired: true` plus the
@@ -488,16 +493,17 @@ intent; prewarming does not weaken the contract gate.
 | No button on a Graphite PR page | Check the URL is `app.graphite.com/github/pr/...` (or `.dev`). Then `chrome://extensions` → **Errors**, and the page console for `[send-to-paseo]` warnings. |
 | No button on a GitHub PR page | Check the URL is `github.com/{owner}/{repo}/pull/{n}` — if GitHub redirected you to `/issues/{n}` it is an issue, not a PR, and there is deliberately no button. Otherwise same checks as above. |
 | Button appears bottom-right instead of in the header | Every anchor rung is missing — usually a site redesign. The extension still works; open an issue with the new header markup. |
-| Popover says "Not paired with Paseo" | No token, or the wrong one. Options → paste the token from the Paseo plugin surface → **Test connection**. |
+| Popover says **Connect to Paseo** or **Paste a new token** (amber dot on the button) | No token, or Paseo no longer accepts the saved one. **Open setup** → paste the token from Paseo → **Test connection**. Coming back to the PR tab re-checks by itself. |
+| Red dot on the button | The last send failed. Open the popover to see why; opening it clears the dot. |
 | Popover says "Can't reach the Paseo bridge" | The plugin isn't running (`paseo plugin ls` should show `send-to-paseo` as `running`), or the port differs from the Bridge URL. Check `paseo plugin logs send-to-paseo`. |
 | "Remote bridges require HTTPS" | Advanced direct mode only: plain HTTP is accepted only for loopback. On the Additional machine, enable private access and use its `.ts.net` address. |
 | "Bridge rejected the request host" | Save the HTTPS origin as **Private bridge address** under **Share this Paseo machine**. The allowlist is exact. |
 | "This repo isn't a Paseo project" | Add the repository as a project in Paseo, then reopen the popover. |
 | "GitHub CLI isn't authenticated" | Run `gh auth login` on the machine running Paseo. |
 | Popover says **Update required** | Plugin and extension are on different contract versions. Sends are blocked deliberately. Update whichever side is older; **Test connection** prints both numbers. |
-| Popover says **Token rejected** on the options page | The bridge is up and refused the token. Re-copy it from the Paseo plugin surface. Distinct from "Can't reach the Paseo bridge". |
-| Success state says **Dry run — no agent created** | The plugin is running with `SEND_TO_PASEO_DRY_RUN=1`. Nothing was created and the ids are synthetic. Unset the env var and reload the plugin. |
-| **Default provider** dropdown is empty | Providers come from an authenticated ping. Paste a valid token and click **Test all connections**. |
+| Options page says **Token rejected** | The bridge is up and refused the token. Re-copy it from the Paseo plugin surface. Distinct from **Bridge not running**. |
+| Success state says **Dry run — nothing sent** | The plugin is running with `SEND_TO_PASEO_DRY_RUN=1`. Nothing was created and the ids are synthetic. Unset the env var and reload the plugin. |
+| **Default provider** dropdown is empty | Providers come from an authenticated ping. Paste a valid token and press **Test connection** (**Test all connections** in Advanced). Defaults and Follow Up stay hidden in simple mode until Paseo has answered once. |
 | "Chrome hasn't been given access to this bridge" | Only `127.0.0.1:7788` is permitted up front. Options → that host → **Grant access to this address**. |
 | A host is named in a warning row under the Target picker | That machine did not answer; the others did. The row carries its own error code — `bridge_unreachable` (proxy/tunnel down or Paseo not running there), `unauthorized` (wrong token for *that* machine), `contract_mismatch` (its plugin is a different version). |
 | A workspace you expect is missing from the Target list | Its host is disabled, has no token, or is in a warning row. The field label counts the hosts that answered: "4 candidates on 1 host" with two paired means one is missing. |

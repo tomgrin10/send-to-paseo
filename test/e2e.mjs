@@ -82,7 +82,16 @@ function assertEq(actual, expected, message) {
   }
 }
 
+/* STP_ONLY=6b,9f,35 runs just those cases (by the id before the first ". "),
+   for proving a changed assertion can fail without a full ten-minute run. A
+   filtered run is never a release gate: the skipped cases are reported. */
+const ONLY = process.env.STP_ONLY ? new Set(process.env.STP_ONLY.split(",").map((s) => s.trim())) : null;
+
 async function test(name, fn) {
+  if (ONLY && !ONLY.has(name.split(". ")[0])) {
+    results.push({ name, ok: false, skipped: true, reason: "not in STP_ONLY" });
+    return;
+  }
   currentName = name;
   const started = Date.now();
   process.stdout.write(`\n── ${name}\n`);
@@ -671,6 +680,40 @@ async function extensionId() {
 const extId = await extensionId();
 console.log(`· extension id: ${extId}`);
 
+/* First-run nudge. On a fresh profile the service worker's onInstalled
+   ("install") opens the options page. With launchPersistentContext's spare
+   about:blank present, openOptionsPage() NAVIGATES that tab (see AGENTS.md), so
+   the nudge is observed by URL and then the tab is sent back to about:blank.
+   That last step matters: case 34 asserts a cog click opens the options page,
+   and a stale options tab left over from install would satisfy it for free. */
+const firstRun = { opened: false, ui: null };
+{
+  const url = `chrome-extension://${extId}/options.html`;
+  const deadline = Date.now() + 8000;
+  while (Date.now() < deadline) {
+    const tab = context.pages().find((p) => p.url() === url);
+    if (tab) {
+      firstRun.opened = true;
+      await tab.waitForFunction(() => document.querySelectorAll(".host").length > 0, null, { timeout: 5000 }).catch(() => {});
+      firstRun.ui = await tab.evaluate(() => ({
+        mode: document.body.dataset.mode,
+        heading: document.querySelector("#hostsHeading")?.textContent.trim(),
+        stepsVisible: (document.querySelector("#pairSteps")?.getBoundingClientRect().height ?? 0) > 0,
+        advancedOpen: document.querySelector("#advancedDetails")?.open ?? null,
+        tokenType: document.querySelector(".hostToken")?.type ?? null,
+        tone: document.querySelector(".hostStatus")?.dataset.tone ?? null,
+        testIsPrimary: document.querySelector(".hostTest")?.classList.contains("primary") ?? false,
+      }));
+      await tab.goto("about:blank");
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  if (context.pages().filter((p) => p.url() === url).length > 0) {
+    throw new Error("the first-run options tab was not cleared; case 34 would pass vacuously");
+  }
+}
+
 const consoleErrors = [];
 context.on("weberror", (e) => consoleErrors.push(String(e.error())));
 
@@ -1031,6 +1074,10 @@ await test("6. Send posts a correctly-shaped /v1/send body; success shows the de
       badge: root.querySelector("[data-stp-dryrun]")?.textContent ?? null,
       linkText: link.textContent.trim(),
       href: link.getAttribute("href"),
+      linkTitle: link.getAttribute("title"),
+      linkIsPrimary: link.classList.contains("primary"),
+      rawLinkPrinted: root.querySelector(".card").innerText.includes("paseo://"),
+      route: root.querySelector("[data-stp-route]")?.textContent.trim() ?? null,
       detail: root.querySelector(".sdetail").textContent.replace(/\s+/g, " ").trim(),
     };
   });
@@ -1045,6 +1092,10 @@ await test("6. Send posts a correctly-shaped /v1/send body; success shows the de
     `deep link must match paseo://h/<serverId>/agent/<agentId>, got: ${ui.href}`,
   );
   assert(ui.detail.includes("PR #942"), `success detail should name the PR, got: ${ui.detail}`);
+  assert(/^New agent in \S+/.test(ui.route), `routing line names the workspace: ${ui.route}`);
+  assert(ui.linkIsPrimary, "Open in Paseo is the primary action");
+  assertEq(ui.linkTitle, ui.href, "the raw deep link moved to the button's tooltip");
+  assert(!ui.rawLinkPrinted, "the raw paseo:// URL is no longer printed in the card");
 
   note(`deepLink: ${ui.href}`);
   await shot(page, "popover-success-deep-link", POPOVER_CLIP);
@@ -1052,6 +1103,80 @@ await test("6. Send posts a correctly-shaped /v1/send body; success shows the de
     `POST /v1/send body: ${JSON.stringify(req.body)}`,
     `deepLink rendered: ${ui.href} (matches paseo://h/<serverId>/agent/<agentId>)`,
   ];
+});
+
+/* ---- 6b. page button states ---------------------------------------------- */
+await test("6b. Page button: sending -> sent -> idle, and failed until the next open", async () => {
+  await bridgeReset();
+  await bridgeConfig({ sendDelayMs: 1500 });
+  try {
+    await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
+    await waitForButton(page);
+    const readBtn = () =>
+      page.evaluate((sel) => {
+        const host = document.querySelector(sel);
+        const btn = host.shadowRoot.querySelector("button");
+        return {
+          state: host.getAttribute("data-stp-state"),
+          label: btn.textContent.trim(),
+          busy: btn.getAttribute("aria-busy"),
+          spinner: Boolean(btn.querySelector("svg.spin")),
+          dot: getComputedStyle(host.shadowRoot.querySelector(".dot")).display !== "none",
+          width: host.getBoundingClientRect().width,
+        };
+      }, BUTTON);
+    const idle = await readBtn();
+    assertEq(idle.state, "idle", "starts idle");
+
+    await openPopover(page);
+    await waitForPhase(page, "ready");
+    await page.locator("[data-stp-prompt]").fill("Rebase on main");
+    await page.locator("[data-stp-send]").click();
+    await page.waitForFunction((sel) => document.querySelector(sel).getAttribute("data-stp-state") === "sending", BUTTON, { timeout: 3000 });
+    const sending = await readBtn();
+    assertEq(sending.busy, "true", "aria-busy while sending");
+    assert(sending.spinner, "spinner replaces the send icon");
+    assertEq(sending.label, "Send to Paseo", "label unchanged while sending");
+    assert(Math.abs(sending.width - idle.width) < 0.5, `no layout shift: ${idle.width} -> ${sending.width}`);
+
+    await waitForPhase(page, "sent", 6000);
+    const sent = await readBtn();
+    assertEq(sent.state, "sent", "sent state");
+    assertEq(sent.label, "Sent", "label reads Sent");
+    assertEq(sent.busy, null, "aria-busy cleared");
+    assert(Math.abs(sent.width - idle.width) < 0.5, `"Sent" keeps the idle width: ${idle.width} -> ${sent.width}`);
+    const sentAt = Date.now();
+    await page.waitForFunction((sel) => document.querySelector(sel).getAttribute("data-stp-state") === "idle", BUTTON, { timeout: 7000 });
+    const heldMs = Date.now() - sentAt;
+    assert(heldMs > 2500, `"Sent" should stay up ~4 s, went idle after ${heldMs} ms`);
+    assertEq((await readBtn()).label, "Send to Paseo", "back to the idle label");
+    await page.keyboard.press("Escape");
+
+    // Failure: red dot that survives closing the popover, cleared on next open.
+    await bridgeConfig({ sendDelayMs: 0 });
+    await openPopover(page);
+    await waitForPhase(page, "ready");
+    await forceFail("agent_create_failed", true);
+    await page.locator("[data-stp-prompt]").fill("This one fails");
+    await page.locator("[data-stp-send]").click();
+    await waitForPhase(page, "error");
+    await page.keyboard.press("Escape");
+    await page.waitForSelector(POPOVER, { state: "detached", timeout: 4000 });
+    const failed = await readBtn();
+    assertEq(failed.state, "failed", "failed state after the popover closes");
+    assert(failed.dot, "red dot shown");
+    await openPopover(page);
+    assertEq((await readBtn()).state, "idle", "opening the popover clears the failed dot");
+    await page.keyboard.press("Escape");
+    return [
+      `idle ${idle.width.toFixed(1)}px · sending ${sending.width.toFixed(1)}px (aria-busy, spinner) · sent ${sent.width.toFixed(1)}px`,
+      `"Sent" held ${heldMs} ms`,
+      "failed: red dot until the next open",
+    ];
+  } finally {
+    await bridgeConfig({ sendDelayMs: 0 });
+    await forceFail(null);
+  }
 });
 
 /* ---- 7. keyboard ------------------------------------------------------- */
@@ -1222,11 +1347,34 @@ await test("9a. Error path: bridge down -> bridge_unreachable", async () => {
   }
 });
 
+/* Reads either card the error phase can show: the setup card (pairing codes:
+   not_configured, unauthorized), or the error card (everything else). `kind`
+   says which, so a test can never pass by reading the wrong one. */
 async function readError(p) {
   return p.evaluate(() => {
     const root = document.querySelector("send-to-paseo-popover").shadowRoot;
+    const setup = root.querySelector("[data-stp-setup]");
+    if (setup) {
+      return {
+        kind: "setup",
+        code: setup.getAttribute("data-stp-setup"),
+        title: setup.querySelector("[data-stp-setup-title]").textContent.trim(),
+        message: setup.querySelector(".setup-why")?.textContent.trim() ?? "",
+        steps: [...setup.querySelectorAll(".steps li")].map((li) => li.textContent.replace(/^\d/, "").trim()),
+        hint: [...setup.querySelectorAll(".steps li")].map((li) => li.textContent.trim()).join(" / "),
+        hasOptionsLink: Boolean(root.querySelector("[data-stp-open-options]")),
+        primaryLabel: root.querySelector("footer .btn.primary")?.textContent.trim() ?? null,
+        visibleText: root.querySelector(".card").innerText,
+        hasErrorCard: Boolean(root.querySelector("[data-stp-error]")),
+        bare: false,
+      };
+    }
     const box = root.querySelector("[data-stp-error]");
     return {
+      kind: "error",
+      codeLine: box.querySelector("[data-stp-error-code]")?.getAttribute("data-stp-error-code") ?? "",
+      copyLabel: box.querySelector("[data-stp-error-code]")?.textContent.trim() ?? "",
+      visibleText: box.innerText,
       code: box.getAttribute("data-stp-error"),
       title: root.querySelector("[data-stp-error-title]").textContent.trim(),
       message: box.querySelector(".emsg")?.textContent.trim() ?? "",
@@ -1237,7 +1385,7 @@ async function readError(p) {
   });
 }
 
-await test("9b. Error path: unauthorized -> 'Not paired with Paseo' + options link", async () => {
+await test("9b. Error path: unauthorized -> 'Paste a new token' setup card + Open setup", async () => {
   await bridgeReset();
   await seedSettings(context, extId, { token: "definitely-the-wrong-token" });
   await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
@@ -1245,10 +1393,19 @@ await test("9b. Error path: unauthorized -> 'Not paired with Paseo' + options li
   await openPopover(page);
   await waitForPhase(page, "error");
   const ui = await readError(page);
+  assertEq(ui.kind, "setup", "a rejected token is a setup step, not a red error card");
   assertEq(ui.code, "unauthorized", "code");
-  assertEq(ui.title, "Not paired with Paseo", "title");
+  assertEq(ui.title, "Paste a new token", "title");
+  assert(/didn.t accept/.test(ui.message), `one sentence says why: ${ui.message}`);
+  assertEq(ui.primaryLabel, "Open setup", "the fix is the primary action");
   assert(ui.hasOptionsLink, "must link to the options page");
+  assert(!ui.visibleText.includes("unauthorized"), "no raw error code in the setup card");
   assert(!ui.bare, "never a bare 'failed'");
+  assertEq(
+    await page.locator(BUTTON).getAttribute("data-stp-state"),
+    "unpaired",
+    "the page button wears the not-paired dot after a rejected token",
+  );
   // With ping's auth now optional, a bad token is caught by the contract/auth
   // preflight — so /v1/resolve is never attempted at all.
   const pingReq = await lastRequest("/v1/ping");
@@ -1343,6 +1500,14 @@ await test("9e. Every CONTRACT.md error code renders a specific message", async 
     assertEq(ui.code, code, `rendered code for ${code}`);
     assert(ui.title.length > 3 && !/^(failed|error)$/i.test(ui.title), `${code} needs a real title, got "${ui.title}"`);
     assert(ui.hint.length > 3, `${code} needs an actionable hint, got "${ui.hint}"`);
+    if (code === "unauthorized") {
+      assertEq(ui.kind, "setup", "unauthorized gets the setup card");
+    } else {
+      assertEq(ui.kind, "error", `${code} gets the error card`);
+      assert(ui.codeLine.includes(code), `${code}: the raw code stays available for support, got "${ui.codeLine}"`);
+      assertEq(ui.copyLabel, "Copy details", `${code}: support details sit behind a Copy details button`);
+      assert(!ui.visibleText.includes(code), `${code}: the raw code must not be visible copy: ${ui.visibleText}`);
+    }
     seen.push(`${code} -> "${ui.title}" / "${ui.hint}"`);
     await page.keyboard.press("Escape");
     await page.waitForSelector(POPOVER, { state: "detached", timeout: 4000 });
@@ -1363,18 +1528,67 @@ await test("9f. First-run path: no token stored -> not_configured, no request se
   await openPopover(page);
   await waitForPhase(page, "error");
   const ui = await readError(page);
+  assertEq(ui.kind, "setup", "first run is a calm setup card, not a red error");
   assertEq(ui.code, "not_configured", "code");
-  assertEq(ui.title, "Not paired with Paseo", "title");
-  assert(ui.hasOptionsLink, "must link to the options page");
+  assertEq(ui.title, "Connect to Paseo", "title");
+  assertEq(
+    ui.steps,
+    [
+      "In Paseo, open Send to Paseo and press Copy token",
+      "Open setup, paste the token, and press Test connection",
+    ],
+    "two numbered steps",
+  );
+  assertEq(ui.primaryLabel, "Open setup", "primary action");
+  assert(!ui.hasErrorCard, "no error card alongside the setup card");
+  assert(!ui.visibleText.includes("not_configured"), "no raw error code on first run");
   const log = await bridgeLog();
   assertEq(
     log.filter((r) => r.path === "/v1/resolve").length,
     0,
     "with no token the extension must not send an unauthenticated request at all",
   );
+
+  // The page button says the same thing before it is ever opened.
+  const btn = await page.evaluate((sel) => {
+    const host = document.querySelector(sel);
+    const dot = host.shadowRoot.querySelector(".dot");
+    return {
+      state: host.getAttribute("data-stp-state"),
+      title: host.shadowRoot.querySelector("button").title,
+      label: host.shadowRoot.querySelector("button").textContent.trim(),
+      dotShown: getComputedStyle(dot).display !== "none",
+    };
+  }, BUTTON);
+  assertEq(btn.state, "unpaired", "button state");
+  assertEq(btn.title, "Set up Send to Paseo to start sending", "button tooltip");
+  assertEq(btn.label, "Send to Paseo", "label unchanged");
+  assert(btn.dotShown, "amber dot visible on the button icon");
   await shot(page, "error-not-paired", POPOVER_CLIP);
+
+  // "Open setup" opens the options page and leaves the card up.
+  const opened = await waitForOptionsPage(context, extId, () =>
+    page.locator("[data-stp-open-options]").click(),
+  );
+  assertEq(opened.url(), `chrome-extension://${extId}/options.html`, "Open setup opens the extension's options page");
+  await opened.goto("about:blank");
+
+  // Pairing finishes in that other tab; coming back re-checks by itself.
   await seedSettings(context, extId, {});
-  return [`code=${ui.code}`, "no HTTP request is made when unpaired"];
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await waitForPhase(page, "ready", 10000);
+  await page.waitForFunction(
+    (sel) => document.querySelector(sel).getAttribute("data-stp-state") === "idle",
+    BUTTON,
+    { timeout: 5000 },
+  );
+  await page.keyboard.press("Escape");
+  return [
+    `code=${ui.code}`,
+    "no HTTP request is made when unpaired",
+    "button: amber dot + setup tooltip; Open setup -> options page",
+    "returning to the tab after pairing re-resolves: popover ready, dot cleared",
+  ];
 });
 
 /* ---- 10. options page: three Test-connection outcomes + providers ------- */
@@ -1395,6 +1609,7 @@ async function readOptionsStatus(opt, index = 0) {
       title: status.querySelector(".st").textContent.trim(),
       detail: status.querySelector(".sd")?.textContent.trim() ?? "",
       hint: status.querySelector(".sh")?.textContent.trim() ?? "",
+      tech: status.getAttribute("title") ?? "",
       providerOptions: [...document.querySelectorAll("#defaultProvider option")].map((o) => o.textContent),
       providerHelp: document.querySelector("#providerHelp").textContent.trim(),
     };
@@ -1425,10 +1640,11 @@ await test("10a. Options page: paired token -> ok, and providers come from /v1/p
   const st = await runTestConnection(opt);
 
   assertEq(st.tone, "ok", `expected ok tone, got ${st.tone} / ${st.title}`);
-  assertEq(st.title, "Paired with Paseo", "headline");
-  assert(st.detail.includes("contract v1"), `detail must report the contract version: ${st.detail}`);
-  assert(st.detail.includes("srv_"), `detail must report the daemon serverId: ${st.detail}`);
-  assert(st.detail.includes("3 providers"), `detail must report the provider count: ${st.detail}`);
+  assertEq(st.title, "Connected to mock-machine", "headline names the machine in plain words");
+  assert(/^Paseo \S+ · plugin \S+ · 3 models$/.test(st.detail), `detail reads Paseo/plugin versions and model count: ${st.detail}`);
+  assert(st.tech.includes("contract v1"), `tooltip keeps the contract version for support: ${st.tech}`);
+  assert(st.tech.includes("srv_"), `tooltip keeps the daemon serverId for support: ${st.tech}`);
+  assertEq(st.hint, "Open any pull request on GitHub or Graphite and press Send to Paseo.", "next step after a successful test");
 
   // The picker is populated from ping — no <datalist> workaround any more.
   assertEq(st.providerOptions.length, 4, "placeholder + 3 providers");
@@ -1462,7 +1678,7 @@ await test("10a. Options page: paired token -> ok, and providers come from /v1/p
   ];
 });
 
-await test("10b. Options page: no token -> warn 'not paired', empty provider list", async () => {
+await test("10b. Options page: no token -> warn 'Paste your token to finish', empty provider list", async () => {
   await bridgeReset();
   await seedSettings(context, extId, { token: "", defaultProvider: "" });
   // Clear the cached provider list so this genuinely reflects an unpaired ping.
@@ -1473,8 +1689,9 @@ await test("10b. Options page: no token -> warn 'not paired', empty provider lis
   const st = await runTestConnection(opt);
 
   assertEq(st.tone, "warn", `expected warn tone, got ${st.tone} / ${st.title}`);
-  assertEq(st.title, "Bridge reachable, not paired yet", "headline");
-  assert(st.detail.includes("0 providers"), `unauthenticated ping returns no providers: ${st.detail}`);
+  assertEq(st.title, "Paste your token to finish", "headline");
+  assert(st.detail.startsWith("Found Paseo"), `the bridge was found: ${st.detail}`);
+  assert(st.hint.includes("Copy token"), `hint names the next step: ${st.hint}`);
   assertEq(st.providerOptions.length, 1, "provider picker holds only the placeholder");
 
   const pingReq = await lastRequest("/v1/ping");
@@ -1510,7 +1727,7 @@ await test("10c. Options page: bad token -> bad 'Token rejected' (distinct from 
   return [`bad: ${st.title}`, "401 from an authenticated ping, reported as 'Token rejected'"];
 });
 
-await test("10d. Options page: bridge down -> bad, names the URL tried", async () => {
+await test("10d. Options page: bridge down -> bad 'Bridge not running', names the URL tried", async () => {
   await bridgeReset();
   await seedSettings(context, extId, {});
   const opt = await context.newPage();
@@ -1525,8 +1742,9 @@ await test("10d. Options page: bridge down -> bad, names the URL tried", async (
     await bridge.listen();
   }
   assertEq(st.tone, "bad", "bridge-down must be a bad tone");
-  assertEq(st.title, "Can't reach the Paseo bridge", "headline");
+  assertEq(st.title, "Bridge not running", "headline");
   assert(st.detail.includes(BRIDGE_URL), `message should name the URL tried: ${st.detail}`);
+  assert(st.hint.includes("paseo plugin ls"), `hint says how to check: ${st.hint}`);
   await opt.close();
   note(`down: ${st.title} — ${st.detail}`);
   return [`down: ${st.title} — ${st.detail}`, "distinct from 10c's 'Token rejected'"];
@@ -2284,7 +2502,7 @@ async function readHostErrors(page) {
     ].map((el) => ({
       hostId: el.getAttribute("data-stp-host-error"),
       text: el.textContent.trim(),
-      code: el.querySelector(".hcode")?.textContent.trim() ?? "",
+      code: el.getAttribute("data-stp-host-error-code") ?? "",
     })),
   );
 }
@@ -3342,8 +3560,8 @@ await test("20. One workspace per stack: a stack sibling is the default, not 'cr
   // The branch shown belongs to a sibling PR, so the popover has to say so
   // rather than let it read as this PR's branch.
   assertEq(
-    ui.mismatch,
-    "worktree is on another branch of this stack",
+    ui.mismatch?.replace(/^On giz-1132-stack-sibling-\d+, /, "On <sibling>, "),
+    "On <sibling>, another branch of this stack",
     "a sibling-branch target must be labelled as such",
   );
   assert(
@@ -3530,7 +3748,7 @@ await test("20c. Degraded resolve: an empty pr.headBranch is UNKNOWN, not 'a dif
   });
   assertEq(
     withGh.mismatch,
-    "worktree is on a different branch",
+    "On main, a different branch",
     // Deliberately NOT "another branch of this stack": this control candidate is
     // rank 3 (`same project`) sitting on `main`, which is not in the stack at
     // all. The note used to make that claim about every existing candidate.
@@ -4648,8 +4866,8 @@ await test("33. A stack workspace on a MERGED branch is the default, and says it
       `the resolved-target line must name the merged stack PR: ${ui.summary}`,
     );
     assertEq(
-      ui.mismatch,
-      "worktree is on a branch of this stack whose PR is merged",
+      ui.mismatch?.replace(/^On \S+, /, "On <branch>, "),
+      "On <branch>, a merged branch of this stack",
       "a landed branch must not be described as another (live) branch of the stack",
     );
 
@@ -4807,6 +5025,19 @@ await test("34. Header cog opens the options page, in every phase, without closi
     `click -> ${openedUrl} open in a tab (pages ${before} -> ${context.pages().length}); popover still ready, draft intact`,
     `Enter on the focused cog -> ${keyUrl}`,
   ];
+});
+
+await test("35. First install opens the options page once, leading with simple pairing", async () => {
+  assert(firstRun.opened, "a fresh install must open the options page (background onInstalled)");
+  const ui = firstRun.ui;
+  assertEq(ui.mode, "simple", "a fresh install starts in simple mode");
+  assertEq(ui.heading, "Connect to Paseo", "the page leads with pairing");
+  assert(ui.stepsVisible, "the two pairing steps are visible on first run");
+  assertEq(ui.advancedOpen, false, "direct connections stay under a collapsed Advanced section");
+  assertEq(ui.tokenType, "password", "the token field is masked");
+  assertEq(ui.tone, "idle", "nothing is pinged before a token exists");
+  assert(ui.testIsPrimary, "Test connection is the page's primary action in simple mode");
+  return [`opened on install: ${JSON.stringify(ui)}`];
 });
 
 /* -------------------------------------------------------------------------- */

@@ -147,7 +147,7 @@ test("Follow Up discovers existing paired connections without manual grants and 
     assert.deepEqual(calls.at(-1).routes, [], "re-pairing does not echo stale repository scopes");
     globalThis.fetch = async () => Response.json({}, { status: 404 });
     const old = await worker.browserAccessIntent({ type: "browserAccessRefresh" });
-    assert.deepEqual(old.routes, []); assert.match(old.errors[0].message, /Update Send to Paseo.*Primary/);
+    assert.deepEqual(old.routes, []); assert.match(old.errors[0].message, /Follow Up needs a newer Send to Paseo plugin/);
   } finally { globalThis.chrome = oldChrome; globalThis.fetch = oldFetch; }
 });
 

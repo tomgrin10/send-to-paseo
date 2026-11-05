@@ -1,6 +1,17 @@
 {
   "id": "send-to-paseo",
+  "name": "Send to Paseo",
   "icon": "assets/icon.png",
+  "description": "Send work from a GitHub or Graphite pull request to the right Paseo workspace and agent, then see in the agent's chat which PR it came from and why it landed there.",
+  "media": [
+    "docs/media/send-to-paseo-hero-dark.png",
+    "docs/media/send-to-paseo-card-dark.png",
+    "docs/media/send-to-paseo-overview-dark.png",
+    "docs/media/send-to-paseo-setup-dark.png",
+    "docs/media/send-to-paseo-mobile.png",
+    "docs/media/send-to-paseo-overview-light.png",
+    "docs/media/send-to-paseo-card-light.png"
+  ],
   "requirements": {
     "paseo": ">=0.14.0"
   }

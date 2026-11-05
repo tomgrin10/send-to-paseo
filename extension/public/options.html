@@ -70,6 +70,10 @@
       h1 { font-size: 19px; margin: 0; display: flex; align-items: center; gap: 9px; }
       h1 svg { width: 20px; height: 20px; color: var(--accent); }
       .sub { color: var(--muted); font-size: 13px; margin: -10px 0 0; }
+      /* Empty live regions (no pending request, no grants) must not leave a
+         grid gap behind, and paragraphs take the grid's spacing, not their own. */
+      section > :empty { display: none !important; }
+      section p { margin: 0; }
       section {
         background: var(--card);
         border: 1px solid var(--border);
@@ -78,7 +82,30 @@
         display: grid;
         gap: 14px;
       }
-      h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0; }
+      h2 { font-size: 15px; font-weight: 600; letter-spacing: -0.005em; color: var(--fg); margin: 0; }
+      .help { color: var(--muted); font-size: 12.5px; }
+      .section-head { display: grid; gap: 8px; }
+      .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+      body[data-mode="simple"] .steps.simple-only { display: grid; }
+      .steps li { display: grid; grid-template-columns: 22px 1fr; gap: 8px; align-items: start; font-size: 13px; }
+      .steps .n {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 20px; height: 20px; margin-top: 0;
+        border-radius: 50%; border: 1px solid var(--border-strong); background: var(--bg);
+        color: var(--muted); font: 600 11px/1 inherit; font-variant-numeric: tabular-nums;
+      }
+      .steps b { font-weight: 600; }
+      .field > .lbl { font-weight: 600; font-size: 12.5px; }
+      .field { display: grid; gap: 5px; }
+      body { font-variant-numeric: tabular-nums; }
+      input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+      summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+      a:focus-visible, .toggle input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+      @media (max-width: 440px) {
+        body { padding: 20px 16px 48px; }
+        .row.token-row > input { flex: 1 1 100%; }
+      }
       label.field { display: grid; gap: 5px; }
       label.field > .lbl { font-weight: 600; font-size: 12.5px; }
       label.field > .help { color: var(--muted); font-size: 12px; }
@@ -202,6 +229,8 @@
       .simple-only { display: none; }
       body[data-mode="simple"] .simple-only { display: block; }
       body[data-mode="simple"] .advanced-only { display: none !important; }
+      /* Its buttons are advanced-only; an empty row would leave a gap under the status. */
+      body[data-mode="simple"] #hostsActions { display: none; }
       body[data-mode="simple"] .hosts .host:not(:first-child) { display: none; }
       body[data-mode="simple"] .host {
         border: 0;
@@ -222,16 +251,20 @@
         Send to Paseo
       </h1>
       <p class="sub">
-        Connect this browser once. Paseo discovers and routes to your other machines automatically.
+        Connect this browser once. Paseo routes to your other machines for you.
       </p>
 
       <section id="hostsSection">
-        <h2 id="hostsHeading">Connect to Paseo</h2>
-        <span class="help" id="hostsHelp">
-          Paste the pairing token shown by the Send to Paseo plugin on this machine.
-        </span>
+        <div class="section-head">
+          <h2 id="hostsHeading">Connect to Paseo</h2>
+          <ol class="steps simple-only" id="pairSteps">
+            <li><span class="n" aria-hidden="true">1</span><span>In Paseo, open <b>Send to Paseo</b> and press <b>Copy token</b>.</span></li>
+            <li><span class="n" aria-hidden="true">2</span><span>Paste it below and press <b>Test connection</b>.</span></li>
+          </ol>
+          <span class="help" id="hostsHelp"></span>
+        </div>
         <div class="hosts" id="hosts"></div>
-        <div class="row">
+        <div class="row" id="hostsActions">
           <button id="addHost" class="advanced-only" type="button">Add a direct connection</button>
           <button id="testAll" class="primary advanced-only" type="button">Test all connections</button>
           <span class="saved" id="saved">Saved</span>
@@ -253,7 +286,9 @@
         </div>
       </details>
 
-      <section>
+      <!-- Defaults and Follow Up only matter once Paseo answered: first run is
+           just pairing. The options script un-hides them. -->
+      <section id="defaultsSection" hidden>
         <h2>Defaults</h2>
         <label class="field">
           <span class="lbl">Default provider</span>
@@ -267,13 +302,13 @@
         </label>
       </section>
 
-      <section aria-labelledby="graphiteHeading">
+      <section id="followUpSection" aria-labelledby="graphiteHeading" hidden>
         <h2 id="graphiteHeading">Follow Up</h2>
         <p class="help">Uses your existing Send to Paseo connection to read Merge when ready for tracked PRs.
           Keep Graphite open and signed in. Approve toggle changes in Chrome, with an option to remember permission.</p>
         <label class="toggle"><input type="checkbox" id="graphiteEnabled" checked /> Use Graphite with Follow Up</label>
         <div id="graphitePending" aria-live="polite"></div>
-        <p id="graphiteStatus" role="status" class="help">Checking your Send to Paseo connection…</p>
+        <p id="graphiteStatus" role="status" class="help">Checking Follow Up…</p>
         <div id="graphiteConnections"></div>
         <div id="graphiteGrants"></div>
         <button type="button" id="graphiteRefresh">Retry connection</button>
@@ -288,7 +323,6 @@
          page has no innerHTML anywhere. -->
     <template id="hostTemplate">
       <div class="host">
-        <b class="simple-only">Primary Paseo machine</b>
         <div class="host-head advanced-only">
           <span class="idx"></span>
           <input class="hostLabel" type="text" spellcheck="false" autocomplete="off" />
@@ -306,20 +340,21 @@
           <button class="hostGrant" type="button">Grant access to this address</button>
           <span class="help hostGrantHelp"></span>
         </div>
-        <label class="field">
-          <span class="lbl">Pairing token</span>
-          <div class="row">
-            <input class="hostToken" type="password" spellcheck="false" autocomplete="off" placeholder="paste token" />
-            <button class="hostReveal" type="button">Show</button>
+        <div class="field">
+          <label class="lbl tokenLabel">Pairing token</label>
+          <div class="row token-row">
+            <input class="hostToken" type="password" spellcheck="false" autocomplete="off" placeholder="Paste the token from Paseo" />
+            <button class="hostReveal" type="button" aria-pressed="false">Show</button>
+            <button class="hostPaste" type="button">Paste</button>
             <button class="hostClear" type="button">Clear</button>
           </div>
-        </label>
+        </div>
         <div class="row">
           <button class="hostTest" type="button">Test connection</button>
         </div>
-        <div class="status hostStatus" data-tone="idle">
-          <span class="st">Not tested yet</span>
-          <span class="sd">Test connection calls <code>GET /v1/ping</code> on this bridge.</span>
+        <div class="status hostStatus" data-tone="idle" role="status" aria-live="polite">
+          <span class="st">Not connected yet</span>
+          <span class="sd">Paste the token, then press Test connection.</span>
         </div>
       </div>
     </template>
