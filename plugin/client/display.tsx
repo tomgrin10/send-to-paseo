@@ -1,10 +1,9 @@
-import type { PluginClientContext, PluginSidebarContribution, PluginSurfaceProps } from "@getpaseo/plugin/client";
+import type { PluginClientContext, PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { useSettings } from "@getpaseo/plugin/client";
 import { SettingsAction, SettingsCard, SettingsSection, SettingsSwitch } from "@getpaseo/plugin/client/ui";
 import { useEffect } from "react";
 import { ActivityIndicator, ScrollView, Text, View } from "react-native";
 import { displayPreferences, displayRpc } from "../shared/display";
-import { withNavigation } from "./navigation";
 import { sidebarVisibility } from "./sidebar-visibility";
 
 const listeners = new Set<(visible: boolean) => void>();
@@ -29,12 +28,12 @@ function DisplaySettings({ theme }: PluginSurfaceProps) {
   );
 
   return (
-    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 16 }}>
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingVertical: 16, gap: 16 }}>
     <SettingsSection title="Navigation">
       <SettingsCard>
         <SettingsSwitch
           label="Show in sidebar"
-          hint="Open this plugin from Command-K (Ctrl-K on Windows and Linux) while viewing a workspace or plugin on this host."
+          hint="Off: open it from Command-K (Ctrl-K on Windows and Linux) inside a workspace."
           value={settings.values.showSidebar}
           disabled={settings.saving}
           onValueChange={(showSidebar) => void settings.save({ ...settings.values, showSidebar }, settings.revision)}
@@ -47,22 +46,22 @@ function DisplaySettings({ theme }: PluginSurfaceProps) {
 }
 
 /** Settings notifications reach mounted screens; poll for changes made on other clients. */
-export function contributeDisplay(client: PluginClientContext, item: PluginSidebarContribution) {
-  const sidebar = sidebarVisibility(() => client.addSidebarItem(item));
+export function contributeDisplay(client: PluginClientContext, item: { title: string; register: () => (() => void) | void }) {
+  const sidebar = sidebarVisibility(item.register);
   // Paseo 0.10.1 memoizes sidebar route resolution when an installation mounts.
   // Register synchronously, then reconcile the saved preference, so that an
-  // already-open sidebar route can resolve its surface during that first render.
+  // already-open sidebar route can resolve its screen during that first render.
   sidebar.set(true);
-  const Settings = withNavigation(DisplaySettings, client, item.surface, "display");
-  const removeSurface = client.addSurface("display-settings", Settings);
-  const removeSettings = client.addSettingsScreen({ id: "display", title: "Display", icon: "PanelLeft", Component: Settings });
+  // `display-settings` was a surface id before 2.3; kept as a screen so old links still open.
+  const removeSurface = client.addScreen({ id: "display-settings", title: `${item.title} display`, Component: DisplaySettings });
+  const removeSettings = client.addSettingsScreen({ id: "display", title: "Display", icon: "PanelLeft", Component: DisplaySettings });
   const removeCommand = client.addCommandCenterItem({
     id: "display-settings",
     title: `${item.title}: display settings`,
     icon: "PanelLeft",
     keywords: [item.title, "sidebar", "show", "hide", "display", "settings"],
     context: "global",
-    onSelect({ openSurface }) { openSurface("display-settings"); },
+    onSelect({ openSettings }) { openSettings("display"); },
   });
   let disposed = false;
   let pending = false;

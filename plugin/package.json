@@ -35,7 +35,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node check-deps.mjs && node --test client/hosts.test.mjs server/main-agent.test.mjs server/follow-up.test.mjs",
-    "verify": "npm run typecheck && npm test && node --test --experimental-strip-types agent-tools.test.mjs && node --test native-tools.test.mjs"
+    "verify": "npm run typecheck && npm test && node --test --experimental-strip-types agent-tools.test.mjs shared/chat.test.mjs && node --test native-tools.test.mjs"
   },
   "devDependencies": {
     "@getpaseo/client": "0.14.0",

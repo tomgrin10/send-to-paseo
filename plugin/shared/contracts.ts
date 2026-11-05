@@ -418,6 +418,12 @@ export const RecentSendSchema = z.object({
   dryRun: z.boolean(),
   outcome: z.enum(["ok", "failed"]),
   error: z.string().nullable(),
+  /**
+   * Additive: whether the send started an agent or messaged the workspace's main
+   * one. Optional so rows written before it existed keep validating (a failed
+   * parse regenerates settings.json and with it the pairing token).
+   */
+  dispatch: AgentDispatchSchema.optional(),
 });
 export type RecentSend = z.infer<typeof RecentSendSchema>;
 
@@ -530,6 +536,28 @@ export const getStatus = defineRpc({
     recentSends: z.array(RecentSendSchema),
     dependencies: z.array(DependencyReportSchema),
     additionalMachines: z.array(AdditionalMachineSchema),
+  }),
+});
+
+/**
+ * The sends that reached one agent, for the provenance card in its chat. Rows
+ * carry no prompt text beyond the title the agent already shows.
+ */
+export const dispatchesForAgent = defineRpc({
+  name: "send-to-paseo.dispatches.for-agent",
+  input: SurfaceTargetSchema.extend({ agentId: z.string().min(1).max(200) }),
+  output: z.object({ sends: z.array(RecentSendSchema) }),
+});
+
+/** Cheap enough for a sidebar row to poll: no provider, mode or dependency probes. */
+export const getSummary = defineRpc({
+  name: "send-to-paseo.summary",
+  input: SurfaceTargetSchema,
+  output: z.object({
+    state: BridgeStatusSchema.shape.state,
+    paired: z.boolean(),
+    lastSendAt: z.string().nullable(),
+    lastSendFailed: z.boolean(),
   }),
 });
 
