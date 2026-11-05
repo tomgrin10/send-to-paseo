@@ -60,9 +60,9 @@ function ProvenanceCard({ item, theme, layout, host, agentId, timestamp, rpc }: 
       <View style={{ paddingHorizontal: 14, paddingTop: 11, paddingBottom: 10, gap: 3 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           {card.forge === "github" ? <Icon icon={GITHUB_MARK} size={14} color={c.foreground} /> : <Icon name="GitPullRequest" size={14} color={c.foreground} />}
-          <Text numberOfLines={tight ? 2 : 1} style={{ flexShrink: 1, color: c.foregroundMuted, fontSize: 12, lineHeight: 17, fontVariant: ["tabular-nums"] }}>
+          <Text numberOfLines={1} style={{ flexShrink: 1, color: c.foregroundMuted, fontSize: 12, lineHeight: 17, fontVariant: ["tabular-nums"] }}>
             <Text style={{ color: c.foreground, fontWeight: "600" }}>{card.repo} #{card.number}</Text>
-            {site === null ? "" : ` · sent from ${site}`}
+            {site === null || tight ? "" : ` · sent from ${site}`}
           </Text>
           <View style={{ flex: 1 }} />
           <ExternalLink href={card.prUrl} accessibilityLabel={`Open ${card.repo} pull request ${card.number}`}>
@@ -73,7 +73,7 @@ function ProvenanceCard({ item, theme, layout, host, agentId, timestamp, rpc }: 
         </View>
         <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8, marginTop: 2, marginBottom: 4 }}>
           <View style={{ paddingTop: 2 }}><Icon name={route.attention ? "TriangleAlert" : "Route"} size={13} color={route.attention ? c.statusWarning : c.foregroundMuted} /></View>
-          <Text style={{ flex: 1, color: route.attention ? c.statusWarning : c.foregroundMuted, fontSize: 13, lineHeight: 18 }}>{route.text}</Text>
+          <Text style={{ flex: 1, color: route.attention ? c.statusWarning : c.foregroundMuted, fontSize: 13, lineHeight: 18 }}>{tight && site !== null ? `From ${site} · ${route.text}` : route.text}</Text>
         </View>
         {card.title === null ? null : <Text numberOfLines={2} style={{ color: c.foreground, fontSize: 13, lineHeight: 18 }}>{card.title}</Text>}
         {card.head === null ? null : (
