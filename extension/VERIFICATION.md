@@ -1,5 +1,34 @@
 # Verification record
 
+## 2026-11-09 — Open workspace: "Workspace for this PR" from Follow-up
+
+Additive wire change (no `contract` bump): `followUp` on the /v1/resolve request and response
+(CONTRACT.md). Measured on this headless VM; Tom's Chrome and Paseo desktop app are on his Mac.
+
+- Plugin `npm run verify`: green, including 4 new `server/follow-up.test.mjs` cases (lookup:
+  owner found, several owners, none, repository not granted, Follow-up absent/old/malformed;
+  view links and Paseo names; agent link builders; the opt-in forwarded to Additional machines).
+- Extension typecheck, build, `npm run test:unit` 20/20 (new `test/open-workspace.test.mjs`:
+  merge across hosts, cap and `more`, empty vs absent, and rejection of any link that is not a
+  `paseo://h/<s>/agent/<a>` or `https://app.paseo.sh/h/<s>/agent/<a>` link).
+- Chromium suite: **71 of 72**, every case except live case 13, which was deliberately not run
+  (it reaches the live daemon through the real bridge; this change was verified without touching
+  it). New 36, 36b, 36c, 36d; case 27 now expects `followUp: true` in the resolve body. Proven able
+  to fail: making `ownerSection` return null failed 36/36b/36c, and always sending the opt-in
+  failed 36d with `resolve must not ask for Follow-up data while browser access is off`.
+- Real installed plugins: `test/follow-up-install.mjs` against Follow-up's isolated `--keep`
+  daemon (`/tmp/follow-install-*`, synthetic agents and repository) now also asserts that resolve
+  omits `followUp` unless asked, returns the registered workspace with links built from that
+  daemon's `server-id` when asked, and returns an empty view for an unowned PR in a tracked
+  repository. Output: `followUp view: Synthetic registration routing · Waiting on others · Some PR
+  status is unavailable · retrying · agent idle` then PASS. The daemon was stopped afterwards.
+- Not verified here: that Chrome on macOS hands the `paseo://` anchor to Paseo.app (Chrome asks
+  once per site; the post-send "Open in Paseo" link uses the same mechanism), and that
+  `app.paseo.sh` opens the agent in a browser where the server is paired. The route
+  `/h/<serverId>/agent/<agentId>` returns 200 from app.paseo.sh and, in Paseo 0.15.2 source,
+  redirects to the agent's workspace.
+- Screenshots (synthetic): `docs/screenshots/popover-open-workspace-{owned,several,none,absent}-{light,dark}.png`.
+
 ## 2026-11-05 (round 2) — route reason, single-status options, no raw codes, Primer labels
 
 Finish-review fixes. No wire change: the route reason is derived from fields resolve already returns.

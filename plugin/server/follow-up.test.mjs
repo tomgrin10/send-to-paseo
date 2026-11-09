@@ -90,3 +90,55 @@ test("an Additional bridge downgrade refuses a registered-agent send before forw
     assert.deepEqual(paths, ["/v1/ping"]);
   } finally { globalThis.fetch = original; }
 });
+
+const view = (id, patch = {}) => ({ workspaceId: id, agentId: `agent-${id}`, title: `Follow-up ${id}`, agentStatus: "idle", group: "waiting", state: "Waiting on others", ...patch });
+const workspacesModule = reply => load("server/follow-up.ts", { "./daemon": { callFollowUp: async (method, input) => {
+  assert.equal(method, "follow.pr-workspaces"); assert.deepEqual(input, { repo: "example/app", number: 7 });
+  if (reply instanceof Error) throw reply; return reply;
+} } });
+test("PR workspaces lookup: owner found, several owners, none, repository not granted, Follow-up absent", async () => {
+  const one = await (await workspacesModule({ tracked: true, more: 0, workspaces: [view("w1", { group: "needs", state: "Needs you · Merge ready" })] })).lookupPrWorkspaces("example", "app", 7);
+  assert.deepEqual(one, { more: 0, workspaces: [view("w1", { group: "needs", state: "Needs you · Merge ready" })] });
+  const several = await (await workspacesModule({ tracked: true, more: 2, workspaces: [view("a"), view("b"), view("c")] })).lookupPrWorkspaces("example", "app", 7);
+  assert.deepEqual([several.workspaces.map(w => w.workspaceId), several.more], [["a", "b", "c"], 2]);
+  assert.deepEqual(await (await workspacesModule({ tracked: true, more: 0, workspaces: [] })).lookupPrWorkspaces("example", "app", 7), { workspaces: [], more: 0 }, "tracked repository, no owner: say so");
+  assert.equal(await (await workspacesModule({ tracked: false, more: 0, workspaces: [] })).lookupPrWorkspaces("example", "app", 7), null, "outside Follow-up's advertised scope: nothing");
+  for (const reply of [new Error("Plugin follow-through is not installed"), new Error("Unknown RPC follow.pr-workspaces"), null, {}, { tracked: true, more: 0, workspaces: [view("a"), view("b"), view("c"), view("d")] }, { tracked: true, more: 0, workspaces: [{ workspaceId: "w" }] }])
+    assert.equal(await (await workspacesModule(reply)).lookupPrWorkspaces("example", "app", 7), null, `fails closed for ${JSON.stringify(reply) ?? reply}`);
+});
+
+test("the popover view carries Paseo's workspace name and both open links for this machine only", async () => {
+  const m = await load("server/follow-up.ts", { "./daemon": { callFollowUp: async () => null } });
+  const found = { more: 1, workspaces: [view("w1"), view("w2", { title: "" })] };
+  const out = m.followUpView(found, "srv/main", new Map([["w1", "brawny-dodo"]]));
+  assert.deepEqual(out.workspaces.map(w => [w.title, w.deepLink, w.webUrl]), [
+    ["brawny-dodo", "paseo://h/srv%2Fmain/agent/agent-w1", "https://app.paseo.sh/h/srv%2Fmain/agent/agent-w1"],
+    ["w2", "paseo://h/srv%2Fmain/agent/agent-w2", "https://app.paseo.sh/h/srv%2Fmain/agent/agent-w2"],
+  ]);
+  assert.equal(out.more, 1);
+  assert.equal(m.followUpView(found, null, new Map()), undefined, "no server id, no links, no section");
+  assert.equal(m.followUpView(null, "srv", new Map()), undefined);
+});
+
+test("agent links: desktop deep link and web link share one encoded route", async () => {
+  const m = await load("shared/contracts.ts", {});
+  for (const [serverId, agentId, route] of [["srv_abc", "agt_1", "/h/srv_abc/agent/agt_1"], [" srv pad ", " a/b?c#d ", "/h/srv%20pad/agent/a%2Fb%3Fc%23d"]]) {
+    assert.equal(m.buildAgentDeepLink({ serverId, agentId }), `paseo:/${route}`);
+    assert.equal(m.buildAgentWebLink({ serverId, agentId }), `https://app.paseo.sh${route}`);
+  }
+  assert.throws(() => m.buildAgentWebLink({ serverId: " ", agentId: "a" }), /server ID/);
+});
+
+test("an Additional machine receives the Follow-up opt-in with the resolve it is asked", async () => {
+  const m = await load("server/peers.ts", {});
+  const original = globalThis.fetch; const bodies = [];
+  globalThis.fetch = async (url, init) => {
+    if (new URL(url).pathname === "/v1/ping") return Response.json({ ok: true, name: "send-to-paseo", contract: 1, paired: true, providers: [], daemon: { reachable: true, serverId: "additional" } });
+    bodies.push(JSON.parse(init.body));
+    return Response.json({ error: { code: "project_not_found", message: "Synthetic" } }, { status: 404 });
+  };
+  try {
+    await m.resolveOnMachine({ id: "vm", label: "Fixture", machineName: "Fixture", bridgeUrl: "https://fixture.invalid", token: "synthetic-token", serverId: "additional", enabled: true }, { forge: "github", owner: "example", repo: "app", number: 7, followUp: true });
+    assert.equal(bodies[0]?.followUp, true);
+  } finally { globalThis.fetch = original; }
+});

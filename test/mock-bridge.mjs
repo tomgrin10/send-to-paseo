@@ -94,7 +94,31 @@ const CONFIG = {
   sendDelayMs: 0,
   followUpOwner: false,
   followUpRouting: true,
+  /**
+   * The additive `followUp` view on /v1/resolve: null (Follow-up absent, the
+   * field is omitted), "one", "several" (3 shown + 2 more), "none" (tracked
+   * repository, no owner) or "untracked" (outside Follow-up's scope: omitted).
+   * Sent only when the request asked for it, like the real plugin.
+   */
+  followUpView: null,
 };
+
+const OWNER_ROWS = {
+  needs: { workspaceId: "wks_4d1a8b7c2e0f9351", agentId: "agt_owner_needs", title: "brawny-dodo", agentStatus: "idle", group: "needs", state: "Needs you · Merge ready" },
+  fixing: { workspaceId: "wks_owner_fixing", agentId: "agt_owner_fixing", title: "review-pass", agentStatus: "running", group: "fixing", state: "Follow-up is fixing · 3 threads" },
+  running: { workspaceId: "wks_owner_running", agentId: "agt_owner_running", title: "stack-base", agentStatus: "running", group: "running", state: "Running" },
+};
+function followUpView(kind) {
+  const link = (row) => ({
+    ...row,
+    deepLink: `paseo://h/${encodeURIComponent(SERVER_ID)}/agent/${encodeURIComponent(row.agentId)}`,
+    webUrl: `https://app.paseo.sh/h/${encodeURIComponent(SERVER_ID)}/agent/${encodeURIComponent(row.agentId)}`,
+  });
+  if (kind === "one") return { workspaces: [link(OWNER_ROWS.needs)], more: 0 };
+  if (kind === "several") return { workspaces: [link(OWNER_ROWS.needs), link(OWNER_ROWS.fixing), link(OWNER_ROWS.running)], more: 2 };
+  if (kind === "none") return { workspaces: [], more: 0 };
+  return null;
+}
 
 const MAX_BODY = 64 * 1024; // CONTRACT.md: 64 KiB
 const RATE_WINDOW_MS = 10_000;
@@ -506,6 +530,8 @@ function handleResolve(res, origin, body) {
   if (CONFIG.followUpOwner && payload.candidates[payload.defaultCandidateIndex]?.kind === "existing") {
     payload.candidates[payload.defaultCandidateIndex].followUpAgent = { agentId: "agt_registeredmock", title: "Registered PR agent", status: "idle" };
   }
+  const view = body.followUp === true ? followUpView(CONFIG.followUpView) : null;
+  if (view) payload.followUp = view;
   if (CONFIG.routed) {
     const additional = {
       ...payload,
@@ -641,6 +667,7 @@ async function handleControl(req, res, url, origin) {
     if (body.followUpRouting !== undefined) CONFIG.followUpRouting = Boolean(body.followUpRouting);
     if (body.followUpOwner !== undefined) CONFIG.followUpOwner = Boolean(body.followUpOwner);
     if (body.routed !== undefined) CONFIG.routed = Boolean(body.routed);
+    if (body.followUpView !== undefined) CONFIG.followUpView = body.followUpView;
     if (body.agentDispatch !== undefined) {
       CONFIG.agentDispatch = body.agentDispatch === "main" ? "main" : "new";
     }
@@ -680,6 +707,7 @@ async function handleControl(req, res, url, origin) {
     CONFIG.sendDelayMs = 0;
     CONFIG.followUpOwner = false;
     CONFIG.followUpRouting = true;
+    CONFIG.followUpView = null;
     return sendJson(res, 200, { ok: true }, null);
   }
   res.writeHead(404).end();
