@@ -31,6 +31,7 @@ import type {
 import { providerIdOf } from "../shared/contract";
 import { presentError } from "../shared/errors";
 import { clampIndex } from "../shared/merge";
+import { agentStatusText, openHref, ownerSection, type OpenTarget, type OwnerSection } from "../shared/open-workspace";
 import type {
   FailurePayload,
   HostSlice,
@@ -182,6 +183,7 @@ class Popover {
   private providerId = "";
   private modeId = "";
   private defaultProviderPref = "";
+  private openTarget: OpenTarget = "app";
 
   private textarea: HTMLTextAreaElement | null = null;
   /** The Target combobox of the *current* render, or null outside "ready". */
@@ -296,7 +298,10 @@ class Popover {
       sendIntent({ type: "getPublicSettings" }),
       warmedOrFreshResolve(this.ctx),
     ]);
-    if (settings.ok) this.defaultProviderPref = settings.data.defaultProvider;
+    if (settings.ok) {
+      this.defaultProviderPref = settings.data.defaultProvider;
+      this.openTarget = settings.data.openTarget === "web" ? "web" : "app";
+    }
 
     // The button is the page's, not ours, so it is updated even if the
     // popover was closed while this was in flight.
@@ -575,6 +580,19 @@ class Popover {
     const sendBtn = this.sendButton();
     this.pendingSendBtn = sendBtn;
 
+    // Who already owns this PR in Paseo, per Follow-up. Above the composer
+    // because when a workspace owns the PR, opening it is usually the move.
+    const owners = ownerSection(resolved.hosts);
+    if (owners) {
+      body.append(this.renderOwners(owners));
+      // Two jobs, two blocks: the composer below names its own target, which
+      // must not read as one more owner row.
+      body.append(el("hr", { class: "owners-rule" }));
+      body.append(el("span", { class: "composer-lbl", "data-stp-composer-label": "" }, [
+        owners.rows.length ? "Or send an instruction" : "Send an instruction",
+      ]));
+    }
+
     body.append(this.renderTargetSummary());
 
     /* Candidate picker — ALWAYS rendered, even when rank 1 matched.
@@ -803,6 +821,74 @@ class Popover {
       document.createTextNode(" to close"),
     );
     return el("footer", {}, [hint, btn]);
+  }
+
+  /**
+   * "Workspace for this PR": up to three Paseo workspaces Follow-up says own
+   * this PR, each with its main agent's status, Follow-up's one line, and an
+   * Open link. Links come from the bridge and were re-validated by
+   * `ownerSection`; they are anchors, so a `paseo://` link is handed to the
+   * desktop app by Chrome exactly as the post-send "Open in Paseo" link is.
+   */
+  private renderOwners(section: OwnerSection): HTMLElement {
+    const box = el("div", { class: "field owners", "data-stp-owners": String(section.rows.length) });
+    box.append(el("span", { class: "lbl" }, [section.rows.length > 1 ? "Workspaces for this PR" : "Workspace for this PR"]));
+    if (section.rows.length === 0) {
+      box.append(el("div", { class: "owners-empty", "data-stp-owners-empty": "" }, [
+        "No workspace owns this PR yet.",
+      ]));
+      return box;
+    }
+    const list = el("ul", { class: "owner-list" });
+    const multi = this.multiHost;
+    for (const row of section.rows) {
+      const tone = row.agentStatus === "error" ? "danger" : row.group === "needs" ? "warn" : row.group === "fixing" || row.group === "running" ? "active" : "muted";
+      const status = agentStatusText(row.agentStatus, row.state);
+      const href = openHref(row, this.openTarget);
+      const open = el("a", {
+        class: "btn owner-open",
+        href,
+        "data-stp-open-workspace": row.workspaceId,
+        "aria-label": `Open ${row.title} in ${this.openTarget === "web" ? "the Paseo web app" : "Paseo"}`,
+        title: this.openTarget === "web" ? "Open in the Paseo web app" : "Open in the Paseo app",
+        ...(this.openTarget === "web" ? { target: "_blank", rel: "noopener noreferrer" } : {}),
+      }, ["Open"]);
+      // The box-arrow promises a browser tab, which only the web link opens.
+      if (this.openTarget === "web") open.append(externalIcon(12));
+      const name = el("span", { class: "owner-name" });
+      if (multi) name.append(el("span", { class: "host" }, [this.chipFor(row.hostIndex)]), document.createTextNode(" · "));
+      name.append(document.createTextNode(row.title));
+      list.append(el("li", { class: "owner", "data-stp-owner": row.workspaceId, "data-stp-owner-group": row.group }, [
+        el("span", { class: `owner-dot ${tone}`, "aria-hidden": "true" }),
+        el("span", { class: "owner-text" }, [
+          name,
+          el("span", { class: "owner-line" }, [
+            el("span", { class: `owner-state ${tone}`, "data-stp-owner-state": "" }, [row.state]),
+            ...(status ? [el("span", { class: "owner-agent", "data-stp-owner-agent": row.agentStatus }, [` · ${status}`])] : []),
+          ]),
+        ]),
+        open,
+      ]));
+    }
+    box.append(list);
+    const foot = el("div", { class: "owners-foot" });
+    if (section.more > 0) {
+      foot.append(el("span", { "data-stp-owners-more": String(section.more) }, [`+${section.more} more, see Follow-up in Paseo`]), document.createTextNode(" · "));
+    }
+    const other: OpenTarget = this.openTarget === "web" ? "app" : "web";
+    const toggle = el("button", { type: "button", class: "linkish", "data-stp-open-target": this.openTarget }, [
+      other === "web" ? "Use the web app instead" : "Use the Paseo app instead",
+    ]) as HTMLButtonElement;
+    toggle.addEventListener("click", () => {
+      this.openTarget = other;
+      this.draft = this.textarea?.value ?? this.draft;
+      void sendIntent({ type: "setOpenTarget", openTarget: other });
+      this.render();
+      this.position();
+    });
+    foot.append(document.createTextNode(this.openTarget === "web" ? "Opens in the Paseo web app. " : "Opens in the Paseo app. "), toggle);
+    box.append(foot);
+    return box;
   }
 
   private renderTargetSummary(): HTMLElement {

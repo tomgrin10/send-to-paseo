@@ -41,6 +41,16 @@ try {
   const resolved = await bridge("/v1/resolve", ref);
   const selected = resolved.candidates[resolved.defaultCandidateIndex];
   assert.equal(selected.workspaceId, w.id); assert.equal(selected.followUpAgent.agentId, owner.id); assert.equal(selected.mainAgent.agentId, decoy.id);
+  assert.equal(resolved.followUp, undefined, "the Follow-up view is opt-in");
+  const serverId = (await readFile(join(fixture.home, "server-id"), "utf8")).trim();
+  const viewed = await bridge("/v1/resolve", { ...ref, followUp: true });
+  assert.equal(viewed.followUp.more, 0); assert.equal(viewed.followUp.workspaces.length, 1);
+  const [ownerView] = viewed.followUp.workspaces;
+  assert.equal(ownerView.workspaceId, w.id); assert.equal(ownerView.agentId, owner.id); assert.match(ownerView.state, /\S/); assert.ok(ownerView.title);
+  assert.equal(ownerView.deepLink, `paseo://h/${encodeURIComponent(serverId)}/agent/${encodeURIComponent(owner.id)}`);
+  assert.equal(ownerView.webUrl, `https://app.paseo.sh/h/${encodeURIComponent(serverId)}/agent/${encodeURIComponent(owner.id)}`);
+  assert.deepEqual((await bridge("/v1/resolve", { ...ref, number: number + 1, followUp: true })).followUp, { workspaces: [], more: 0 }, "tracked repository, unowned PR");
+  console.log(`followUp view: ${ownerView.title} · ${ownerView.state} · agent ${ownerView.agentStatus}`);
   const sent = await bridge("/v1/send", { ...ref, prompt: "Synthetic routing assertion", target: { kind: "existing", workspaceId: w.id }, agentDispatch: "main", followUpAgentId: owner.id });
   assert.equal(sent.agentId, owner.id); assert.equal(sent.agentCreated, false); assert.notEqual(sent.agentId, decoy.id);
   for (let i = 0; i < 50; i++) {

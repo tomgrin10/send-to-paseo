@@ -110,6 +110,12 @@ export type PrRef = z.infer<typeof PrRefSchema>;
 export const ResolveRequestSchema = PrRefSchema.extend({
   /** Sibling PRs in the Graphite stack, excluding this one. Best-effort. */
   stackPrNumbers: z.array(z.number().int().positive().max(10_000_000)).max(64).optional(),
+  /**
+   * Additive. Ask for the Follow-up view of this PR (`followUp` on the answer).
+   * The extension sets it only while "Use Graphite with Follow Up" is on, so
+   * turning that off stops the lookup instead of hiding its result.
+   */
+  followUp: z.boolean().optional(),
 });
 export type ResolveRequest = z.infer<typeof ResolveRequestSchema>;
 
@@ -352,6 +358,39 @@ export interface LocalResolveResponse {
    * Additive: absent means the older `new` behavior.
    */
   agentDispatch?: AgentDispatch;
+  /**
+   * Additive. The Paseo workspaces Follow-up says own this PR, on THIS machine.
+   * Present only when the request asked for it, Follow-up is installed and
+   * answers, and the repository is one Follow-up tracks (the same scope it
+   * advertises to the browser). Absent otherwise; never an error.
+   */
+  followUp?: FollowUpView;
+}
+
+/** One workspace that owns the PR, as the popover shows it. Titles, ids, status and one line: nothing else. */
+export interface FollowUpWorkspace {
+  workspaceId: string;
+  /** The workspace's main agent: the one the open links land on. */
+  agentId: string;
+  /** As Paseo shows the workspace, else Follow-up's own title. */
+  title: string;
+  /** Paseo lifecycle status of the main agent (`running`, `idle`, `error`, ...) or `permission`. */
+  agentStatus: string;
+  /** Follow-up's Home group: needs | fixing | running | waiting | later | quiet. */
+  group: string;
+  /** Follow-up's one line, e.g. "Needs you · Merge ready". */
+  state: string;
+  /** Opens the main agent in the Paseo desktop app. */
+  deepLink: string;
+  /** Opens the same agent in the Paseo web app. */
+  webUrl: string;
+}
+
+export interface FollowUpView {
+  /** Most urgent first, at most three. Empty means Follow-up tracks the repository and no workspace owns this PR. */
+  workspaces: FollowUpWorkspace[];
+  /** How many more owners were left out. */
+  more: number;
 }
 
 /** One Paseo machine reached through the primary machine's bridge. */
@@ -684,6 +723,19 @@ export function buildAgentDeepLink(target: { serverId: string; agentId: string }
     throw new Error("Agent deep links require a server ID and agent ID.");
   }
   return `paseo://h/${encodeURIComponent(serverId)}/agent/${encodeURIComponent(agentId)}`;
+}
+
+/**
+ * The Paseo web app's link for the same agent. The web app's
+ * `/h/<serverId>/agent/<agentId>` route (Paseo 0.15.2,
+ * `packages/app/src/app/h/[serverId]/agent/[agentId].tsx`) looks the agent's
+ * workspace up and redirects there, exactly as the desktop app does for the
+ * `paseo://` link, so both land in the workspace with its main agent open.
+ * It opens only where that browser already has this server paired.
+ */
+export const PASEO_WEB_APP = "https://app.paseo.sh";
+export function buildAgentWebLink(target: { serverId: string; agentId: string }): string {
+  return `${PASEO_WEB_APP}${buildAgentDeepLink(target).slice("paseo:/".length)}`;
 }
 
 /** `github:acmegizmos/gizmo-poc#942`, the value of the `send-to-paseo/pr` label. */

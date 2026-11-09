@@ -409,6 +409,34 @@ Omitting the field keeps the root-agent/new-agent semantics below. The additive 
 `capabilities.followUpRouting` gates this opt-in before a send, including at proxy hops. See
 [Follow Up integration](docs/follow-up-integration.md) for the separate browser addon.
 
+### `followUp` (additive, optional, request and response)
+
+A request may carry `"followUp": true`. The extension sends it only while **Use Graphite with
+Follow Up** is on. The bridge then asks the local Follow-up plugin (`follow.pr-workspaces`, a
+read-only RPC) which tracked workspaces registered this PR, and adds to the local answer (and to
+each route's `resolved` answer, computed on that machine):
+
+```json
+"followUp": {
+  "workspaces": [
+    { "workspaceId": "wks_…", "agentId": "agt_…", "title": "quiet-heron",
+      "agentStatus": "idle", "group": "needs", "state": "Needs you · Merge ready",
+      "deepLink": "paseo://h/srv_…/agent/agt_…",
+      "webUrl": "https://app.paseo.sh/h/srv_…/agent/agt_…" }
+  ],
+  "more": 0
+}
+```
+
+At most three workspaces, most urgent first; `more` counts the rest. `agentId` is the workspace's
+main agent. `deepLink` is the format below; `webUrl` is the same route on the Paseo web app, whose
+agent route redirects to that agent's workspace. The field is **absent** when the request did not
+ask, Follow-up is missing, older or failing, the machine's server id is unknown, or the repository
+is outside the set Follow-up tracks (the same scope it advertises to the browser). An empty
+`workspaces` means Follow-up tracks the repository and nothing owns the PR. The field never turns a
+resolve into an error. The extension accepts only `paseo://h/<s>/agent/<a>` and
+`https://app.paseo.sh/h/<s>/agent/<a>` links and drops any other row.
+
 `agentDispatch` is additive and optional. Missing means the historical `"new"` default.
 It initializes the extension's per-send Agent dropdown: `"new"` starts fresh, while `"main"`
 prefers the target workspace's selected root agent. Independently of that default, an existing

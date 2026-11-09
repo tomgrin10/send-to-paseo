@@ -21,6 +21,21 @@ preview fails without sending to someone else. A fresh `capabilities.followUpRou
 hop prevents a downgraded bridge from stripping the optional binding and dispatching elsewhere. Older or unavailable companions leave standalone
 matching usable; a send already bound to a registration fails until refreshed.
 
+## Open workspace from the popover
+
+With Follow Up browser access on, each resolve asks its machine's Follow-up for
+`follow.pr-workspaces`: the tracked workspaces that registered this PR, each with its title, main
+agent id and status, and Follow-up's one-line state from the same model as Home. The bridge adds
+the machine's `paseo://` agent link and the matching `app.paseo.sh` link; the popover lists up to
+three owners above the composer with an **Open** link each. The desktop app is the default; the
+footer switches every link to the web app and the choice is stored in the extension. Paseo 0.15.2
+registers only agent deep links, and both the desktop app and the web app resolve an agent link to
+its workspace, so Open lands in the workspace with its main agent selected.
+
+The RPC returns nothing for repositories outside Follow-up's advertised scope, and the extension
+does not ask while browser access is off. No messages, paths, branches, PR content or credentials
+cross it.
+
 ## Browser authority
 
 Follow Up uses the existing Send to Paseo pairing, Primary and Additional machine routes, token,

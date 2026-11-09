@@ -15,6 +15,7 @@ Choose a workspace, start a new agent or continue with an existing one, and send
 
 - Reuse an existing workspace or check out the pull request in a new worktree.
 - Keep stacked pull requests in the same workspace.
+- With [Follow-up](https://github.com/tomgrin10/paseo-follow-up), see which workspace owns the PR and what it needs, and open it in Paseo from the PR page.
 - Send work to your laptop or another connected Paseo machine.
 - See where every send went: the agent's chat opens on a card with the PR, your instruction,
   and why it landed in that workspace, and the Send to Paseo screen in Paseo lists recent sends.
