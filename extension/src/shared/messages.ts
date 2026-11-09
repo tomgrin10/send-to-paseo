@@ -64,12 +64,19 @@ export interface IntentOpenOptions {
   type: "openOptions";
 }
 
+/** Where "Open workspace" lands: the Paseo desktop app (default) or the web app. A per-browser preference. */
+export interface IntentSetOpenTarget {
+  type: "setOpenTarget";
+  openTarget: "app" | "web";
+}
+
 export type Intent =
   | IntentPing
   | IntentResolve
   | IntentSend
   | IntentGetPublicSettings
-  | IntentOpenOptions;
+  | IntentOpenOptions
+  | IntentSetOpenTarget;
 
 /* -------------------------------------------------------------------------- */
 /* Multi-host resolve                                                         */
@@ -117,6 +124,8 @@ export interface MultiResolveResponse {
 /** Everything the UI is allowed to know about configuration. Never a token. */
 export interface PublicSettings {
   defaultProvider: string;
+  /** Where "Open workspace" opens. `app` unless the user switched to the web app. */
+  openTarget: "app" | "web";
   /** One row per configured host, tokenless. */
   hosts: PublicHost[];
 }
@@ -151,6 +160,7 @@ export interface IntentResultMap {
   send: SendResponse;
   getPublicSettings: PublicSettings;
   openOptions: { opened: true };
+  setOpenTarget: { openTarget: "app" | "web" };
 }
 
 export type ResultFor<I extends Intent> = Result<IntentResultMap[I["type"]]>;

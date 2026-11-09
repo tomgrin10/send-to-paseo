@@ -1,4 +1,5 @@
 import { browserAccessIntent, startFollowUpBridge } from "./follow-up";
+import { followUpEnabled } from "./browser-access";
 
 // Content scripts do not need storage access. Keep pairing tokens and grants in trusted contexts.
 const storageReady = chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
@@ -42,10 +43,16 @@ import {
   type HostConfig,
 } from "./settings";
 
+const OPEN_TARGET_KEY = "openWorkspaceTarget";
+async function readOpenTarget(): Promise<"app" | "web"> {
+  return (await chrome.storage.local.get(OPEN_TARGET_KEY))[OPEN_TARGET_KEY] === "web" ? "web" : "app";
+}
+
 async function publicSettings(): Promise<PublicSettings> {
   const s = await readSettings();
   return {
     defaultProvider: s.defaultProvider,
+    openTarget: await readOpenTarget(),
     hosts: s.hosts.map((h) => ({
       id: h.id,
       label: hostDisplayName(h),
@@ -223,6 +230,8 @@ async function handle(intent: Intent): Promise<Result<unknown>> {
         repo: intent.pr.repo,
         number: intent.pr.number,
         stackPrNumbers: intent.stackPrNumbers,
+        // "Use Graphite with Follow Up" off means the bridge is not even asked.
+        ...(await followUpEnabled() ? { followUp: true } : {}),
       });
 
     case "send": {
@@ -290,6 +299,12 @@ async function handle(intent: Intent): Promise<Result<unknown>> {
 
     case "getPublicSettings":
       return { ok: true, data: await publicSettings() };
+
+    case "setOpenTarget": {
+      const openTarget = intent.openTarget === "web" ? "web" : "app";
+      await chrome.storage.local.set({ [OPEN_TARGET_KEY]: openTarget });
+      return { ok: true, data: { openTarget } };
+    }
 
     case "openOptions":
       await chrome.runtime.openOptionsPage();

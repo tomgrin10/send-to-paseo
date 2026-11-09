@@ -137,7 +137,7 @@ async function resolvePassword(): Promise<string | undefined> {
 }
 
 /** Optional companion RPCs always target this daemon, never a browser-selected host. */
-export async function callFollowUp(method: "follow.pr-owner" | "follow.browser-exchange", input: unknown): Promise<unknown> {
+export async function callFollowUp(method: "follow.pr-owner" | "follow.pr-workspaces" | "follow.browser-exchange", input: unknown): Promise<unknown> {
   const load = typeof require === "function" ? require : createRequire(join(process.cwd(), "noop.cjs"));
   const { DaemonClient } = load(["@getpaseo", "client", "internal", "daemon-client"].join("/")) as {
     DaemonClient: new (options: Record<string, unknown>) => {

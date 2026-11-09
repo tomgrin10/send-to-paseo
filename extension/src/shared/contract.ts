@@ -157,6 +157,27 @@ export interface ResolveRequest extends PrRef {
    * braces, since it is the side that knows which PR the page is showing.
    */
   stackPrNumbers?: number[];
+  /** Additive: ask for the Follow-up view (`followUp` on the answer). Sent only while Follow Up browser access is on. */
+  followUp?: boolean;
+}
+
+/** Additive on /v1/resolve: one Paseo workspace that owns the PR, per Follow-up. */
+export interface FollowUpWorkspace {
+  workspaceId: string;
+  agentId: string;
+  title: string;
+  agentStatus: string;
+  group: string;
+  state: string;
+  /** `paseo://h/<serverId>/agent/<agentId>`: opens the main agent in the desktop app. */
+  deepLink: string;
+  /** `https://app.paseo.sh/h/<serverId>/agent/<agentId>`: the same agent in the web app. */
+  webUrl: string;
+}
+
+export interface FollowUpView {
+  workspaces: FollowUpWorkspace[];
+  more: number;
 }
 
 export interface ResolvedPr {
@@ -215,6 +236,8 @@ export interface ResolveResponse {
   /** Additive plugin preference controlling whether sends create or reuse an agent. */
   agentDispatch?: AgentDispatch;
   followUpAgentId?: string;
+  /** Additive: present only when asked, Follow-up answered, and it tracks this repository. */
+  followUp?: FollowUpView;
   /** Additive router result returned by a primary Paseo machine. */
   routes?: ResolveRoute[];
 }

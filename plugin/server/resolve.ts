@@ -13,8 +13,8 @@ import {
   type ResolveResponse,
   type StackPrState,
 } from "../shared/contracts";
-import { withPaseo } from "./daemon";
-import { lookupPrOwner, registeredAgent, type PrOwner } from "./follow-up";
+import { requireServerId, withPaseo } from "./daemon";
+import { followUpView, lookupPrOwner, lookupPrWorkspaces, registeredAgent, type PrOwner } from "./follow-up";
 import {
   ANCESTRY_STACK_DISTANCE,
   UNKNOWN_STACK_DISTANCE,
@@ -979,6 +979,10 @@ export async function handleResolve(request: ResolveRequest): Promise<ResolveRes
     // starts this work before the popover opens).
     const workspacesPromise = paseo.workspaces.list();
     const ownerPromise = lookupPrOwner(ref.owner, ref.repo, ref.number);
+    // Asked for only by an extension with Follow-up browser access on; absent or failing is "no section".
+    const followUpPromise = request.followUp === true
+      ? Promise.all([lookupPrWorkspaces(ref.owner, ref.repo, ref.number), requireServerId().catch(() => null)])
+      : Promise.resolve([null, null] as const);
     const projectPromise = Promise.all([workspacesPromise, ownerPromise]).then(([all, owner]) =>
       resolveProject(paseo, ref, all.entries.find(w => w.id === owner?.workspaceId && w.archivingAt === null)?.projectId),
     );
@@ -1036,7 +1040,10 @@ export async function handleResolve(request: ResolveRequest): Promise<ResolveRes
       effectiveProvider === undefined
         ? undefined
         : await resolveDefaultMode(paseo, effectiveProvider, { profile, catalog });
+    const [ownersFound, serverId] = await followUpPromise;
+    const followUp = followUpView(ownersFound, serverId, new Map(allWorkspaces.entries.map(w => [w.id, typeof w.name === "string" ? w.name : ""])));
     return {
+      ...(followUp ? { followUp } : {}),
       pr,
       project,
       candidates,
