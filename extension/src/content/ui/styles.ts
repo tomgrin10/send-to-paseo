@@ -610,6 +610,33 @@ select:focus, textarea:focus { outline: 2px solid var(--stp-accent); outline-off
 }
 .host-error .host { color: inherit; }
 
+/* Workspace for this PR (Follow-up). A compact list, not cards: up to three
+   rows of name, Follow-up's one line and an Open link. The dot carries the
+   same urgency as the line's colour so the list scans without reading. */
+.owner-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--stp-border); border-radius: var(--stp-radius); background: var(--stp-bg-subtle); }
+.owner { display: flex; align-items: flex-start; gap: 8px; padding: 7px 9px; }
+.owner + .owner { border-top: 1px solid var(--stp-border); }
+.owner-dot { flex: none; width: 7px; height: 7px; margin-top: 6px; border-radius: 50%; background: var(--stp-border-strong); }
+.owner-dot.warn { background: var(--stp-warn); }
+.owner-dot.active { background: var(--stp-success); }
+.owner-dot.danger { background: var(--stp-danger); }
+.owner-text { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.owner-line { font: 500 11.5px/1.4 var(--stp-font); overflow-wrap: anywhere; }
+.owner-name { font: 600 12.5px/1.4 var(--stp-font); color: var(--stp-fg); overflow-wrap: anywhere; }
+.owner-state { color: var(--stp-fg); }
+.owner-state.warn { color: var(--stp-warn); }
+.owner-state.danger { color: var(--stp-danger); }
+.owner-agent { font-weight: 400; color: var(--stp-fg-muted); }
+.btn.owner-open { flex: none; height: 26px; padding: 0 9px; gap: 5px; font-size: 12px; align-self: center; }
+.owner-open svg { width: 12px; height: 12px; opacity: 0.8; }
+.owners-empty { font: 400 12px/1.45 var(--stp-font); color: var(--stp-fg-muted); }
+.owners-rule { border: 0; border-top: 1px solid var(--stp-border); margin: 2px 0; }
+.composer-lbl { font: 600 12px/1.3 var(--stp-font); color: var(--stp-fg); margin-bottom: -4px; }
+.owners-foot { font: 400 11px/1.4 var(--stp-font); color: var(--stp-fg-muted); }
+.linkish { font: inherit; color: var(--stp-fg-muted); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.linkish:hover { color: var(--stp-fg); }
+.linkish:focus-visible, .btn.owner-open:focus-visible { outline: 2px solid var(--stp-accent); outline-offset: 1px; border-radius: 3px; }
+
 footer {
   display: flex;
   align-items: center;

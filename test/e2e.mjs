@@ -4273,7 +4273,7 @@ await test("27. GitHub: popover resolves and sends with the right payload", asyn
   assert(resolve.hasAuth, "resolve must carry the bearer token (added by the service worker)");
   assertEq(
     resolve.body,
-    { forge: "github", owner: "acmegizmos", repo: "gizmo-poc", number: 942, stackPrNumbers: [] },
+    { forge: "github", owner: "acmegizmos", repo: "gizmo-poc", number: 942, stackPrNumbers: [], followUp: true },
     "resolve body for a GitHub PR page",
   );
 
@@ -5038,6 +5038,172 @@ await test("35. First install opens the options page once, leading with simple p
   assertEq(ui.tone, "idle", "nothing is pinged before a token exists");
   assert(ui.testIsPrimary, "Test connection is the page's primary action in simple mode");
   return [`opened on install: ${JSON.stringify(ui)}`];
+});
+
+/* ---- 36. Open workspace: the Follow-up section ------------------------- */
+
+/** What the "Workspace for this PR" section shows, read through the shadow root. */
+async function readOwners(page) {
+  return page.evaluate(() => {
+    const root = document.querySelector("send-to-paseo-popover").shadowRoot;
+    const box = root.querySelector("[data-stp-owners]");
+    if (!box) return null;
+    return {
+      count: box.getAttribute("data-stp-owners"),
+      label: box.querySelector(".lbl")?.textContent.trim() ?? null,
+      empty: box.querySelector("[data-stp-owners-empty]")?.textContent.trim() ?? null,
+      more: box.querySelector("[data-stp-owners-more]")?.textContent.trim() ?? null,
+      target: box.querySelector("[data-stp-open-target]")?.getAttribute("data-stp-open-target") ?? null,
+      toggle: box.querySelector("[data-stp-open-target]")?.textContent.trim() ?? null,
+      rows: [...box.querySelectorAll("[data-stp-owner]")].map((li) => {
+        const a = li.querySelector("[data-stp-open-workspace]");
+        return {
+          id: li.getAttribute("data-stp-owner"),
+          name: li.querySelector(".owner-name").textContent.trim(),
+          state: li.querySelector("[data-stp-owner-state]").textContent.trim(),
+          agent: li.querySelector("[data-stp-owner-agent]")?.textContent.trim() ?? null,
+          href: a.getAttribute("href"),
+          targetAttr: a.getAttribute("target"),
+          rel: a.getAttribute("rel"),
+          label: a.getAttribute("aria-label"),
+          tag: a.tagName,
+          icon: Boolean(a.querySelector("svg")),
+        };
+      }),
+      sendPresent: Boolean(root.querySelector("[data-stp-send]")),
+      bodyIsFirst: root.querySelector(".body")?.firstElementChild === box,
+      composerLabel: root.querySelector("[data-stp-composer-label]")?.textContent.trim() ?? null,
+    };
+  });
+}
+
+/** Screenshot of just the popover card, both themes. Synthetic data only. */
+async function shotPopoverThemes(page, name) {
+  const card = page.locator(POPOVER).locator(".card");
+  await shotOf(card, page, `${name}-light`);
+  await page.emulateMedia({ colorScheme: "dark" });
+  await shotOf(card, page, `${name}-dark`);
+  await page.emulateMedia({ colorScheme: "light" });
+}
+
+async function openWithFollowUp(view) {
+  await bridgeReset();
+  await bridgeConfig({ followUpView: view });
+  await page.goto(fixtures.url(), { waitUntil: "domcontentloaded" });
+  await waitForButton(page);
+  await openPopover(page);
+  await waitForPhase(page, "ready");
+}
+
+const lastResolveBody = async () => (await bridgeLog()).filter((r) => r.path === "/v1/resolve").at(-1)?.body ?? null;
+
+await test("36. Open workspace: the owning workspace, its state, and an Open link to the main agent", async () => {
+  await openWithFollowUp("one");
+  try {
+    assertEq((await lastResolveBody())?.followUp, true, "with Follow Up browser access on, resolve asks for the Follow-up view");
+    const ui = await readOwners(page);
+    assert(ui, "the section must render when the bridge sends a Follow-up view");
+    assert(ui.bodyIsFirst, "the section leads the popover body, above the target");
+    assertEq(ui.label, "Workspace for this PR", "singular label");
+    assertEq(ui.rows.length, 1, "one owner");
+    const [row] = ui.rows;
+    assertEq(row.name, "brawny-dodo", "Paseo's workspace name");
+    assertEq(row.state, "Needs you · Merge ready", "Follow-up's one line");
+    assertEq(row.agent, "· agent idle", "main agent status, joined to the state line");
+    assertEq(row.tag, "A", "Open is a real link, so Chrome hands paseo:// to the desktop app");
+    assertEq(row.href, "paseo://h/srv_Ab3xY9pQ2mNt/agent/agt_owner_needs", "desktop deep link by default");
+    assertEq(row.targetAttr, null, "a paseo:// link must not open a blank tab");
+    assertEq(row.icon, false, "no external-tab icon on a link that opens the desktop app");
+    assertEq(ui.target, "app", "default open target is the Paseo app");
+    assert(ui.sendPresent, "Send to Paseo stays available");
+    assertEq(ui.composerLabel, "Or send an instruction", "the composer is set apart from the owners");
+    await shotPopoverThemes(page, "popover-open-workspace-owned");
+
+    // Switch to the web app: the link changes in place, the draft survives, and the choice persists.
+    await page.locator(POPOVER).locator("[data-stp-prompt]").click();
+    await page.keyboard.type("keep me");
+    await page.locator(POPOVER).locator("[data-stp-open-target]").click();
+    const web = await readOwners(page);
+    assertEq(web.target, "web", "toggle switches to the web app");
+    assertEq(web.rows[0].href, "https://app.paseo.sh/h/srv_Ab3xY9pQ2mNt/agent/agt_owner_needs", "web link to the same agent");
+    assertEq(web.rows[0].targetAttr, "_blank", "the web app opens in a new tab");
+    assertEq(web.rows[0].rel, "noopener noreferrer", "and without an opener");
+    assertEq(web.rows[0].icon, true, "the web link carries the new-tab icon");
+    assertEq(web.toggle, "Use the Paseo app instead", "the toggle offers the way back");
+    const draft = await page.evaluate(() => document.querySelector("send-to-paseo-popover").shadowRoot.querySelector("[data-stp-prompt]").value);
+    assertEq(draft, "keep me", "switching target must not discard a typed instruction");
+    const sw = await serviceWorker(context);
+    assertEq(await sw.evaluate(async () => (await chrome.storage.local.get("openWorkspaceTarget")).openWorkspaceTarget), "web", "the choice is stored in the extension");
+
+    // Clicking Open really opens the web app (intercepted: no network, no real host).
+    await context.route("https://app.paseo.sh/**", (route) => route.fulfill({ status: 200, contentType: "text/html", body: "<title>Paseo web fixture</title>" }));
+    const [opened] = await Promise.all([context.waitForEvent("page", { timeout: 5000 }), page.locator(POPOVER).locator("[data-stp-open-workspace]").click()]);
+    await opened.waitForURL(/^https:\/\/app\.paseo\.sh\//, { timeout: 5000 });
+    const openedUrl = opened.url();
+    await opened.close();
+    await context.unroute("https://app.paseo.sh/**");
+    assertEq(openedUrl, "https://app.paseo.sh/h/srv_Ab3xY9pQ2mNt/agent/agt_owner_needs", "Open lands on the agent's web route");
+
+    // Reopen: the preference holds.
+    await closePopover(page);
+    await openPopover(page);
+    await waitForPhase(page, "ready");
+    assertEq((await readOwners(page)).target, "web", "the web choice persists across popovers");
+    await page.locator(POPOVER).locator("[data-stp-open-target]").click();
+    assertEq((await readOwners(page)).rows[0].href.startsWith("paseo://"), true, "and switches back");
+    await closePopover(page);
+    return [`row: ${row.name} — ${row.state} — ${row.agent}`, `app: ${row.href}`, `web: ${openedUrl} (opened in a new tab)`];
+  } finally {
+    const sw = await serviceWorker(context);
+    await sw.evaluate(async () => chrome.storage.local.remove("openWorkspaceTarget"));
+  }
+});
+
+await test("36b. Open workspace: several owners, most urgent first, capped at three with a count", async () => {
+  await openWithFollowUp("several");
+  const ui = await readOwners(page);
+  assertEq(ui.label, "Workspaces for this PR", "plural label");
+  assertEq(ui.rows.map((r) => r.name).join(","), "brawny-dodo,review-pass,stack-base", "the bridge's urgency order is kept");
+  assertEq(ui.rows.map((r) => r.state).join(" | "), "Needs you · Merge ready | Follow-up is fixing · 3 threads | Running", "each row has Follow-up's line");
+  assertEq(ui.more, "+2 more, see Follow-up in Paseo", "the rest are counted, not listed");
+  assertEq(ui.rows.map((r) => r.agent).join("|"), "· agent idle|· agent running|", "the agent status is dropped where the state already says Running");
+  assert(ui.rows.every((r) => r.href.startsWith("paseo://h/srv_Ab3xY9pQ2mNt/agent/agt_owner_")), "every row opens its own main agent");
+  await shotPopoverThemes(page, "popover-open-workspace-several");
+  await closePopover(page);
+  return ui.rows.map((r) => `${r.name}: ${r.state}`);
+});
+
+await test("36c. Open workspace: Follow-up tracks the repo but nothing owns the PR; Send stays the move", async () => {
+  await openWithFollowUp("none");
+  const ui = await readOwners(page);
+  assertEq(ui.count, "0", "no rows");
+  assertEq(ui.empty, "No workspace owns this PR yet.", "says so");
+  assertEq(ui.target, null, "no open-target toggle without a link");
+  assert(ui.sendPresent, "the Send action is still there");
+  await shotPopoverThemes(page, "popover-open-workspace-none");
+  await closePopover(page);
+  return [ui.empty];
+});
+
+await test("36d. Open workspace: no section when Follow-up is absent, the repo is untracked, or browser access is off", async () => {
+  for (const view of [null, "untracked"]) {
+    await openWithFollowUp(view);
+    assertEq(await readOwners(page), null, `no section for followUpView=${view}`);
+    if (view === null) await shotPopoverThemes(page, "popover-open-workspace-absent");
+    await closePopover(page);
+  }
+  // "Use Graphite with Follow Up" off: the bridge is not even asked, so a view it would send never arrives.
+  const sw = await serviceWorker(context);
+  await sw.evaluate(async () => chrome.storage.local.set({ enableGraphiteFollowUp: false }));
+  try {
+    await openWithFollowUp("one");
+    assertEq((await lastResolveBody())?.followUp, undefined, "resolve must not ask for Follow-up data while browser access is off");
+    assertEq(await readOwners(page), null, "and no section is shown");
+    await closePopover(page);
+  } finally {
+    await sw.evaluate(async () => chrome.storage.local.remove("enableGraphiteFollowUp"));
+  }
+  return ["absent: no section", "untracked: no section", "browser access off: not requested, no section"];
 });
 
 /* -------------------------------------------------------------------------- */

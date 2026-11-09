@@ -43,6 +43,9 @@ sync.
 
 ## Hard-won facts — do not re-derive
 
+- **Workflows pin `ubuntu-24.04`, not `ubuntu-latest`.** Measured on 2026-11-09: `ubuntu-latest` had moved
+  to Ubuntu 26.04 and `npx playwright install chromium` failed with "Playwright does not support chromium on
+  ubuntu26.04-x64", failing every CI run. Move the pin only after Playwright supports the newer image.
 - **This repository uses GitHub's immutable OIDC subject format.** Measured on 2026-10-06:
   `repo:tomgrin10@17593920/send-to-paseo@1353553015:environment:chrome-web-store`.
   The setup script formerly assumed `repo:tomgrin10/send-to-paseo:environment:chrome-web-store`,
@@ -358,7 +361,7 @@ Require `running`, an empty `ERROR` column, and `bridge listening on http://127.
 cd extension
 npm run typecheck
 npm run build
-node ../test/e2e.mjs                     # 68 cases; builds dist/ and dist-test/ itself
+node ../test/e2e.mjs                     # 72 cases; builds dist/ and dist-test/ itself
 STP_ONLY=6b,9f node ../test/e2e.mjs      # just those cases, for proving an assertion can fail; never a release gate
 ```
 
@@ -411,6 +414,7 @@ fixture at a real repository — every screenshot in `docs/screenshots/` is comm
 | 35 | First install opens the options page once (`onInstalled`), in simple mode, leading with pairing, Advanced collapsed. |
 | 34 | The header settings cog: present in every phase, opens the extension's own options page in a new tab (asserted on the real `page` event, not on the intent), does **not** close the popover or discard a typed draft, and activates on Enter. Its glyph is built with `createElementNS`, never `innerHTML` — a content script shares its document with the host page and github.com enforces Trusted Types, which no fixture can reproduce. |
 | 33 | The merged-branch case end to end from the popover's side: a rank-2 candidate carrying `stackPrState: "merged"` is the default rather than `create`, is findable by typing "merged", and is described as landed work. The note wording is reason-scoped — it used to read "another branch of this stack" for *every* existing candidate, which is a false claim about a rank-3 "same project" workspace. The route-reason line (`data-stp-route-reason`, shown in the target box and again after a send) now uses the Paseo card's own words: "On the PR's branch" / "On <branch>, another branch of this stack" / "On <branch>, a merged branch of this stack" (amber) / "New worktree for #N". |
+| 36–36d | "Workspace for this PR": resolve asks for the Follow-up view only while Follow Up browser access is on; one owner, three owners plus `more`, a tracked repo with no owner, and no section when Follow-up is absent or the repo untracked. **Open** is a real `paseo://` anchor by default; the web toggle rewrites it to `app.paseo.sh` in a new tab (click intercepted, never the network), keeps the draft and persists. |
 | 29–32 | The Target combobox, which is a hand-built listbox rather than a `<select>`: filtering by workspace name, branch fragment, bare PR number with and without `#`, and multi-word tokens in any order; the empty-result row committing nothing; a keyboard-only path from open to send including wrap-around at both ends; and the two dismissal layers — Esc and click-outside must close the dropdown *before* the popover, which the popover's document-level capturing listeners have to cooperate on. |
 
 When changing a test, confirm it still fails for the right reason: break the thing on purpose,
