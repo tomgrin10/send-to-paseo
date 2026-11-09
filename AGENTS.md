@@ -43,6 +43,9 @@ sync.
 
 ## Hard-won facts — do not re-derive
 
+- **Workflows pin `ubuntu-24.04`, not `ubuntu-latest`.** Measured on 2026-11-09: `ubuntu-latest` had moved
+  to Ubuntu 26.04 and `npx playwright install chromium` failed with "Playwright does not support chromium on
+  ubuntu26.04-x64", failing every CI run. Move the pin only after Playwright supports the newer image.
 - **This repository uses GitHub's immutable OIDC subject format.** Measured on 2026-10-06:
   `repo:tomgrin10@17593920/send-to-paseo@1353553015:environment:chrome-web-store`.
   The setup script formerly assumed `repo:tomgrin10/send-to-paseo:environment:chrome-web-store`,
