@@ -28,7 +28,7 @@ try {
   await writeFile(gh, old.replace(/^#![^\n]*\n/, `#!/usr/bin/env node\nif(process.argv[2]==='pr' && process.argv[3]==='view'){const n=Number(process.argv[4]);console.log(JSON.stringify({number:n,title:'Synthetic routing PR',headRefName:'routing-feature',baseRefName:'main',state:'OPEN',url:'https://github.com/example/routing-fixture/pull/'+n}));process.exit(0)}\n`));
   const w = await api.workspaces.create({ title: "Synthetic registration routing", source: { kind: "directory", path } });
   const owner = await w.agents.create({ config: { provider: "followthrough-fixture/fixture", model: "fixture", modeId: "default" }, title: "Original PR agent" });
-  const call = (method, input) => client.invokePluginRpc("follow-through", method, input);
+  const call = (method, input) => client.invokePluginRpc("follow-up", method, input).catch(error => { if (!/not (?:available|installed|configured)/i.test(error.message)) throw error; return client.invokePluginRpc("follow-through", method, input); });
   await call("follow.activate", { workspaceId: w.id });
   await call("follow.enroll", { agentId: owner.id, goal: "Verify synthetic PR routing" });
   await call("follow.register-pr", { agentId: owner.id, repo: "example/routing-fixture", number, stack: "Synthetic stack" });
