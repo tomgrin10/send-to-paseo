@@ -6,6 +6,7 @@ import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { BridgeError } from "../shared/contracts";
 import { resolveDaemonPassword } from "./daemon-password";
 import { settings } from "./settings";
+import { invokeFollowUp } from "./follow-up-id";
 
 /**
  * Short-lived Paseo SDK connections for the HTTP bridge.
@@ -150,7 +151,7 @@ export async function callFollowUp(method: "follow.pr-owner" | "follow.pr-worksp
   try {
     await client.connect();
     return await Promise.race([
-      client.invokePluginRpc("follow-through", method, input),
+      invokeFollowUp((plugin, m, i) => client.invokePluginRpc(plugin, m, i), method, input),
       new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Optional Follow Up request timed out.")), 2_000); timer.unref?.(); }),
     ]);
   } finally { if (timer) clearTimeout(timer); await client.close().catch(() => undefined); }
