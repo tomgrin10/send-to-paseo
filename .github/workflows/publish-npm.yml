@@ -183,7 +183,7 @@ jobs:
 
   chrome:
     name: Submit extension to Chrome Web Store
-    needs: release
+    needs: [publish, release]
     if: needs.publish.outputs.prerelease == 'false'
     permissions:
       contents: read

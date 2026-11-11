@@ -39,3 +39,15 @@ test("prerelease guards use the classified tag, never github.ref_name alone", ()
   const guards = workflow.match(/^\s+if: .*prerelease.*$/gm) ?? [];
   assert.equal(guards.length, 4); // package, upload, download, chrome
 });
+
+test("every job that reads needs.<job>.outputs lists <job> in its own needs", () => {
+  const jobs = workflow.split(/^jobs:\n/m)[1].split(/^  (?=[\w-]+:\n)/m).filter(Boolean);
+  assert.ok(jobs.length >= 3);
+  for (const job of jobs) {
+    const id = job.match(/^([\w-]+):/)[1];
+    const listed = job.match(/^    needs: (.+)$/m)?.[1].replace(/[\[\]\s]/g, "").split(",") ?? [];
+    for (const [, read] of job.matchAll(/needs\.([\w-]+)\.outputs/g)) {
+      assert.ok(listed.includes(read), `job ${id} reads needs.${read}.outputs but needs only [${listed}]`);
+    }
+  }
+});
