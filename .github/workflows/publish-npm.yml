@@ -46,7 +46,7 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: node scripts/check-release.mjs
       - name: Test publishing failure and retry handling
-        run: node --test test/chrome-web-store.test.mjs
+        run: node --test test/chrome-web-store.test.mjs test/release-channel.test.mjs
       - name: Verify npm trusted publishing authorization
         working-directory: plugin
         run: |
@@ -89,11 +89,14 @@ jobs:
       - name: Inspect plugin package
         working-directory: plugin
         run: npm pack --dry-run
+      # A prerelease (any tag with "-") ships the plugin only: never the extension or the Chrome store.
       - name: Package the shipping extension
+        if: ${{ !contains(github.ref_name, '-') }}
         env:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: python3 scripts/package-extension.py
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ !contains(github.ref_name, '-') }}
         with:
           name: extension-release
           path: dist/send-to-paseo-extension.zip
@@ -145,6 +148,7 @@ jobs:
       contents: write
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: ${{ !contains(github.ref_name, '-') }}
         with:
           name: extension-release
           path: dist
@@ -154,14 +158,21 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
+          case "$RELEASE_TAG" in
+            *-*) prerelease=(--prerelease --latest=false) ;;
+            *) prerelease=() ;;
+          esac
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --verify-tag --generate-notes
+            gh release create "$RELEASE_TAG" --verify-tag --generate-notes "${prerelease[@]}"
           fi
-          gh release upload "$RELEASE_TAG" dist/send-to-paseo-extension.zip --clobber
+          if [ ${#prerelease[@]} -eq 0 ]; then
+            gh release upload "$RELEASE_TAG" dist/send-to-paseo-extension.zip --clobber
+          fi
 
   chrome:
     name: Submit extension to Chrome Web Store
     needs: release
+    if: ${{ !contains(github.ref_name, '-') }}
     permissions:
       contents: read
       id-token: write
