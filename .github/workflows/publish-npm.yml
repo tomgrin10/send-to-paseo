@@ -24,7 +24,17 @@ jobs:
     name: Verify release and publish plugin
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    outputs:
+      prerelease: ${{ steps.channel.outputs.prerelease }}
     steps:
+      # A prerelease (any tag with "-") ships the plugin only: never the extension or the Chrome store.
+      # Decided once, from the tag being released, so a workflow_dispatch retry on main agrees.
+      - name: Classify the release channel
+        id: channel
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          case "$RELEASE_TAG" in *-*) echo prerelease=true ;; *) echo prerelease=false ;; esac >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -89,14 +99,13 @@ jobs:
       - name: Inspect plugin package
         working-directory: plugin
         run: npm pack --dry-run
-      # A prerelease (any tag with "-") ships the plugin only: never the extension or the Chrome store.
       - name: Package the shipping extension
-        if: ${{ !contains(github.ref_name, '-') }}
+        if: steps.channel.outputs.prerelease == 'false'
         env:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: python3 scripts/package-extension.py
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: ${{ !contains(github.ref_name, '-') }}
+        if: steps.channel.outputs.prerelease == 'false'
         with:
           name: extension-release
           path: dist/send-to-paseo-extension.zip
@@ -107,6 +116,7 @@ jobs:
           node --input-type=module <<'JS'
           import { spawnSync } from "node:child_process";
           import { readFileSync } from "node:fs";
+          import { expectedDistTag, waitForDistTags } from "../scripts/check-dist-tag.mjs";
           const pkg = JSON.parse(readFileSync("package.json", "utf8"));
           const spec = `${pkg.name}@${pkg.version}`;
           const run = args => spawnSync("npm", args, { encoding: "utf8" });
@@ -124,7 +134,7 @@ jobs:
             let error;
             try { error = JSON.parse(existing.stdout).error; } catch {}
             if (error?.code !== "E404") { process.stderr.write(existing.stderr); process.exit(1); }
-            const result = spawnSync("npm", ["publish", "--access", "public", "--registry", "https://registry.npmjs.org"], { stdio: "inherit" });
+            const result = spawnSync("npm", ["publish", "--access", "public", "--tag", expectedDistTag(pkg.version), "--registry", "https://registry.npmjs.org"], { stdio: "inherit" });
             if (result.status !== 0) {
               console.error("::error::npm publication failed. Check this package's GitHub trusted publisher repository, workflow filename, permissions, and environment in npm Settings.");
               process.exit(result.status || 1);
@@ -137,6 +147,8 @@ jobs:
             }
             if (!verified) { console.error(`::error::Registry verification failed for ${spec}.`); process.exit(1); }
           }
+          // Runs on the retry path too: the dist-tag must point here and a prerelease must never be latest.
+          console.log(`Registry verified: ${spec} is ${await waitForDistTags(pkg.name, pkg.version)}.`);
           JS
 
   release:
@@ -148,7 +160,7 @@ jobs:
       contents: write
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        if: ${{ !contains(github.ref_name, '-') }}
+        if: needs.publish.outputs.prerelease == 'false'
         with:
           name: extension-release
           path: dist
@@ -172,7 +184,7 @@ jobs:
   chrome:
     name: Submit extension to Chrome Web Store
     needs: release
-    if: ${{ !contains(github.ref_name, '-') }}
+    if: needs.publish.outputs.prerelease == 'false'
     permissions:
       contents: read
       id-token: write
