@@ -469,6 +469,11 @@ Google approval; verify its version and rollout through the store status workflo
   and submit it for automatic publication after approval. This requires the one-time Google setup
   in `docs/chrome-web-store/AUTOMATION.md`. Missing configuration fails the Chrome job explicitly;
   it does not undo npm publication or the GitHub release.
+- **Betas.** Tag `vX.Y.Z-beta.N` after bumping only `plugin/package.json` and `PLUGIN_VERSION`;
+  the extension and manifest stay on their stable version (Chrome rejects `-beta`). CI publishes
+  with `--tag beta`, verifies `latest` did not move, marks the GitHub release as a prerelease, and
+  skips the extension ZIP and the Chrome submission. Install with
+  `paseo plugin update send-to-paseo --version X.Y.Z-beta.N`.
 - Wait for the workflow and npm registry propagation before updating the installed plugin.
   Google controls Chrome review timing. Store installations update through Chrome; unpacked
   installations still need the new ZIP. The workflow preserves the store's existing visibility.
