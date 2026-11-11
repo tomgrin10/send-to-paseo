@@ -1,7 +1,7 @@
 {
   "name": "send-to-paseo",
   "type": "module",
-  "version": "2.4.0",
+  "version": "2.4.1-beta.0",
   "license": "MIT",
   "description": "Local HTTP bridge that dispatches PR work to the right Paseo workspace and agent.",
   "repository": {
