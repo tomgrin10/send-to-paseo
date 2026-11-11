@@ -443,6 +443,11 @@ deleting the record.
 
 ## Create a release
 
+**A release needs Tom's manual permission, every time.** No agent releases on its own. Features and fixes ship to a
+beta by default (`vX.Y.Z-beta.N`, npm `beta` dist-tag; see Betas below). A stable version (npm `latest` and the Chrome
+Web Store) or a hotfix needs Tom's explicit OK for that exact version before it's tagged (a hotfix skips the beta,
+not the permission). Quote his OK in the release commit body.
+
 Exercised through `v1.4.2`; npm and GitHub releases are published. Chrome publication follows
 Google approval; verify its version and rollout through the store status workflow. `origin` is
 `github.com/tomgrin10/send-to-paseo`, and tags live on `main`.
