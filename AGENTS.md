@@ -441,6 +441,34 @@ and failures recorded as failures. A limitation that is written down is worth mo
 is quietly not tested. When a past claim turns out to be wrong, correct it and say so rather than
 deleting the record.
 
+## Release notes
+
+Every GitHub release, betas included, shows real notes in one shape across Tom's plugins. `scripts/release-notes.mjs`
+(identical in each repo; keep the copies in sync) builds the body and the publish workflow creates the release with it:
+
+```
+<summary or "## What's new in X.Y.Z-beta.N">
+
+### New        what a user can now do
+### Improved   what got better
+### Fixed      what stopped going wrong
+
+## Install     the command for that channel, the Paseo minimum
+```
+
+- **Betas** are generated: the titles of the PRs merged since the previous tag, grouped by their prefix (`feat` is New,
+  `fix` is Fixed, anything else user-visible is Improved). `docs`, `chore`, `ci`, `test`, `refactor` and `build`
+  PRs, bots, merge lines and raw commit text never appear. So write PR titles as a sentence a user can read:
+  `fix: remember which Follow-up plugin id answered`. No PR numbers, no em dashes.
+- **Stable and rc** are curated: add `release-notes/<version>.md` (an rc uses its final version's file) before tagging. One
+  summary sentence, then `### New`, `### Improved`, `### Fixed` with plain-words bullets for the person using the plugin,
+  grouped by what they get and merged across every beta since the last stable. Omit empty groups. The publish workflow
+  runs `node scripts/release-notes.mjs --check <tag>` first and fails a stable or rc tag that has no file, before anything
+  is published.
+- Releases that already exist: edit the body with `gh release edit <tag> --notes-file <file>`. Never touch the tag, assets
+  or the prerelease/latest flags. In-app What's new popups stay major-only; this is GitHub only.
+- `node --test test/release-notes.test.mjs` covers the generator .
+
 ## Create a release
 
 **A release needs Tom's manual permission, every time.** No agent releases on its own. Features and fixes ship to a
@@ -468,7 +496,7 @@ Google approval; verify its version and rollout through the store status workflo
 - Tag the exact release commit as `vX.Y.Z` and push the tag. `.github/workflows/publish-npm.yml`
   verifies both halves, checks all four versions against the tag, inspects the packed plugin,
   packages only the shipping extension, and publishes the plugin through npm Trusted Publishing.
-  It then creates the GitHub release with generated notes and attaches `send-to-paseo-extension.zip`.
+  It then creates the GitHub release with notes from `scripts/release-notes.mjs` (see Release notes) and attaches `send-to-paseo-extension.zip`.
   Do not run `npm publish` manually except to recover from a diagnosed workflow failure.
 - The release then calls `.github/workflows/publish-chrome.yml` to upload that ZIP through API v2
   and submit it for automatic publication after approval. This requires the one-time Google setup
