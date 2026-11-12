@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Send to Paseo",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "description": "Send PR work from Graphite or GitHub to a new or existing Paseo agent on any of your machines.",
   "minimum_chrome_version": "111",
   "permissions": [
