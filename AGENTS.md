@@ -490,7 +490,7 @@ Google approval; verify its version and rollout through the store status workflo
   `extension/public/manifest.json`. Update the Paseo minimum in the README badge only when
   compatibility actually changes.
 - Before pushing the release tag, require a clean tree, passing typechecks on both halves, `node
-  check-deps.mjs` green, the full e2e suite green, a successful plugin reload with clean logs, and a
+  plugin/check-deps.mjs` green, the full e2e suite green, a successful plugin reload with clean logs, and a
   secret audit of the exact release snapshot — the pairing token and `settings.json` must never be
   committed.
 - Tag the exact release commit as `vX.Y.Z` and push the tag. `.github/workflows/publish-npm.yml`
@@ -534,6 +534,13 @@ Each of these cost time on the v0.3.0 release and none of them is guessable:
   pull-only access; the owner `tomgrin10` has admin. `gh auth switch --user tomgrin10` before
   pushing, and switch back afterwards — it is global state other tools share.
 - **`zip` is not installed.** Build the artifact with Python's `zipfile`.
+- **On Linux the e2e suite can't find Chromium by itself.** `findChromium` in `test/e2e.mjs` only
+  searches the macOS cache (`~/Library/Caches/ms-playwright`). Point it at the Linux one:
+  `STP_CHROMIUM=~/.cache/ms-playwright/chromium-<rev>/chrome-linux64/chrome` (2026-11-12, v2.4.1).
+- **A crashed e2e run leaves its mock bridges listening (7799, 7798).** The next run's bridge then
+  dies with the port taken, the orphan answers its ping, and case 18e waits forever on `stopBridge2`.
+  Before rerunning, `pkill -f test/mock-bridge.mjs` for your own worktree, and wrap the run in `timeout`
+  (2026-11-12, v2.4.1).
 - **`node test/e2e.mjs` cannot be fully green on a machine without a password-free Paseo
   daemon.** Case 13 needs one. See "Testing against a live daemon" below, and do not read a
   red 13 as a broken build.
