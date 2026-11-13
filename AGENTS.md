@@ -530,7 +530,7 @@ Each of these cost time on the v0.3.0 release and none of them is guessable:
 - **No git identity is configured.** Commits use
   `Tom Gringauz <17593920+tomgrin10@users.noreply.github.com>`; pass it per command with
   `git -c user.name=… -c user.email=…` rather than writing it into a shared config.
-- **Two GitHub accounts are logged into `gh`, and the default one cannot push.** `work-account` has
+- **Two GitHub accounts are logged into `gh`, and the default one cannot push.** A second (work) GitHub account has
   pull-only access; the owner `tomgrin10` has admin. `gh auth switch --user tomgrin10` before
   pushing, and switch back afterwards — it is global state other tools share.
 - **`zip` is not installed.** Build the artifact with Python's `zipfile`.
