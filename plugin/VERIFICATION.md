@@ -124,7 +124,7 @@ node plugin/check-deps.mjs     70/70 passed
 node test/e2e.mjs              63/63 passed
 ```
 
-The updated plugin was reloaded on the local Primary and on `paseo-1`; both report `running` with
+The updated plugin was reloaded on the local Primary and on `dev-box`; both report `running` with
 no load error. The deployed VM source matches the typechecked local source. A final read-only
 routed resolve returned HTTP 200 in 3 seconds with 47 local candidates and 28 VM candidates, and
 no route error. No verification send or agent was created.
