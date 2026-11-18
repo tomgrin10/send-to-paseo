@@ -118,8 +118,10 @@ export function warmPopoverResolution(
   };
   // A transient auth/network failure must not be sticky: opening the composer
   // should retry after the user fixes it instead of replaying the warm-up.
+  // Nor is "couldn't reach Follow-up": the next popover asks again rather than replaying it.
   void promise.then((result) => {
-    if (!result.ok && warmResolve?.promise === promise) warmResolve = null;
+    const followUpMissed = result.ok && result.data.hosts.some((h) => h.resolved?.followUpUnreachable === true);
+    if ((!result.ok || followUpMissed) && warmResolve?.promise === promise) warmResolve = null;
   });
   return promise;
 }
@@ -184,6 +186,8 @@ class Popover {
   private modeId = "";
   private defaultProviderPref = "";
   private openTarget: OpenTarget = "app";
+  /** The owner section's Retry is asking Follow-up again. */
+  private ownersRetrying = false;
 
   private textarea: HTMLTextAreaElement | null = null;
   /** The Target combobox of the *current* render, or null outside "ready". */
@@ -834,9 +838,10 @@ class Popover {
     const box = el("div", { class: "field owners", "data-stp-owners": String(section.rows.length) });
     box.append(el("span", { class: "lbl" }, [section.rows.length > 1 ? "Workspaces for this PR" : "Workspace for this PR"]));
     if (section.rows.length === 0) {
-      box.append(el("div", { class: "owners-empty", "data-stp-owners-empty": "" }, [
-        "No workspace owns this PR yet.",
-      ]));
+      // "Couldn't check" is not "none": never claim nothing owns the PR when a host was not asked.
+      box.append(section.unreachable.length > 0
+        ? this.renderOwnersUnreachable(section.unreachable, false)
+        : el("div", { class: "owners-empty", "data-stp-owners-empty": "" }, ["No workspace owns this PR yet."]));
       return box;
     }
     const list = el("ul", { class: "owner-list" });
@@ -863,7 +868,10 @@ class Popover {
         el("span", { class: "owner-text" }, [
           name,
           el("span", { class: "owner-line" }, [
-            el("span", { class: `owner-state ${tone}`, "data-stp-owner-state": "" }, [row.state]),
+            // An empty state is the registered owner shown while Follow-up was unreachable.
+            row.state
+              ? el("span", { class: `owner-state ${tone}`, "data-stp-owner-state": "" }, [row.state])
+              : el("span", { class: "owner-state muted", "data-stp-owner-state": "" }, ["Registered for this PR"]),
             ...(status ? [el("span", { class: "owner-agent", "data-stp-owner-agent": row.agentStatus }, [` · ${status}`])] : []),
           ]),
         ]),
@@ -871,6 +879,7 @@ class Popover {
       ]));
     }
     box.append(list);
+    if (section.unreachable.length > 0) box.append(this.renderOwnersUnreachable(section.unreachable, true));
     const foot = el("div", { class: "owners-foot" });
     if (section.more > 0) {
       foot.append(el("span", { "data-stp-owners-more": String(section.more) }, [`+${section.more} more, see Follow-up in Paseo`]), document.createTextNode(" · "));
@@ -889,6 +898,54 @@ class Popover {
     foot.append(document.createTextNode(this.openTarget === "web" ? "Opens in the Paseo web app. " : "Opens in the Paseo app. "), toggle);
     box.append(foot);
     return box;
+  }
+
+  /**
+   * The quiet "couldn't reach Follow-up" line with its Retry (optional-lookup-never-silent, AGENTS.md).
+   * Retry asks again in place: only the Follow-up fields are replaced, so the target, provider and a
+   * typed draft all stay as they are.
+   */
+  private renderOwnersUnreachable(hosts: readonly string[], partial: boolean): HTMLElement {
+    const where = this.multiHost ? ` on ${hosts.join(", ")}` : "";
+    // Under rows it is a footnote, sized like the open-target line below it, so the two read as one block.
+    const line = el("div", { class: partial ? "owners-unreachable partial" : "owners-unreachable", "data-stp-owners-unreachable": hosts.join(",") }, [
+      partial ? `Couldn't reach Follow-up${where} just now; there may be more. ` : `Couldn't reach Follow-up${where} just now. `,
+    ]);
+    const retry = el("button", {
+      type: "button",
+      class: "linkish",
+      "data-stp-owners-retry": "",
+      ...(this.ownersRetrying ? { disabled: "", "aria-busy": "true" } : {}),
+    }, [this.ownersRetrying ? "Checking…" : "Retry"]) as HTMLButtonElement;
+    retry.addEventListener("click", () => void this.retryOwners());
+    line.append(retry);
+    return line;
+  }
+
+  private async retryOwners(): Promise<void> {
+    if (this.ownersRetrying || !this.resolved) return;
+    this.ownersRetrying = true;
+    this.draft = this.textarea?.value ?? this.draft;
+    this.render();
+    invalidateWarmResolve(this.ctx);
+    const res = await resolveNow(this.ctx.pr, this.ctx.stackPrNumbers);
+    this.ownersRetrying = false;
+    if (!this.host.isConnected || !this.resolved || this.phase !== "ready") return;
+    if (res.ok) {
+      const same = (a: HostSlice, b: HostSlice) => a.hostId === b.hostId && (a.routeId ?? "local") === (b.routeId ?? "local");
+      this.resolved = {
+        ...this.resolved,
+        hosts: this.resolved.hosts.map((slice) => {
+          const fresh = res.data.hosts.find((h) => same(h, slice))?.resolved;
+          if (!slice.resolved || !fresh) return slice;
+          const { followUp: _f, followUpUnreachable: _u, ...rest } = slice.resolved;
+          return { ...slice, resolved: { ...rest, ...(fresh.followUp ? { followUp: fresh.followUp } : {}), ...(fresh.followUpUnreachable ? { followUpUnreachable: true as const } : {}) } };
+        }),
+      };
+    }
+    this.draft = this.textarea?.value ?? this.draft;
+    this.render();
+    this.position();
   }
 
   private renderTargetSummary(): HTMLElement {

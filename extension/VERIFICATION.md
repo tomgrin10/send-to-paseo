@@ -1,5 +1,28 @@
 # Verification record
 
+## 2026-11-18 — "Workspace for this PR" never silently disappears
+
+Additive wire change (no `contract` bump): `followUpUnreachable` on the /v1/resolve response
+(CONTRACT.md). Measured on this headless VM.
+
+- Root cause: in 2.4.1 a Follow-up lookup that outran its 2 s budget (a fresh daemon connection per
+  call took 0.85-2.5 s) returned null, the same answer as "Follow-up absent", so the section and its
+  Open link vanished from an owned PR. Fix: the shared daemon client is kept warm (opened at plugin
+  start, reconnected in the background, rotated without a gap), the popover's lookup never waits on
+  a connect, and "couldn't check" is its own state with a Retry and the registered owner's row.
+- Plugin `npm run verify`: green (74 checks; 32 + 10 + 1 node tests). New: a Follow-up behind a
+  connect slower than its budget, the kept-warm connection (start, drop, failed open, rotation,
+  teardown), lookup unknown vs none, and the resolve's owner fallback. Against main's code those
+  fail; the slow-connect case returned null (none) after the 2 s timeout.
+- Extension typecheck, build, `npm run test:unit` 21/21 (new unreachable-host case).
+- Chromium suite: **73 of 73**, live case 13 included. New 36e; on main's extension it fails with
+  `the section must not vanish when Follow-up could not be reached`.
+- Timing, live daemon, a resolve-shaped call (connected client, `workspaces.list` plus
+  `follow.pr-workspaces` on a fictional repository), 3 runs each: before, first call on a cold
+  client 941-1309 ms, then 28-131 ms; after, with the connection warmed at plugin start, first call
+  35-137 ms, then 24-77 ms.
+- Screenshots (synthetic): `docs/screenshots/popover-open-workspace-unreachable{,-owner}-{light,dark}.png`.
+
 ## 2026-11-09 — Open workspace: "Workspace for this PR" from Follow-up
 
 Additive wire change (no `contract` bump): `followUp` on the /v1/resolve request and response

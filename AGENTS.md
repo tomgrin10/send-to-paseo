@@ -267,9 +267,24 @@ One failure mode that has already cost time elsewhere in this codebase's lineage
    socket wedges reload exactly like a listening server. 2026-11-17 live: a connection per request meant about 20
    hellos a minute for each of two client names while a browser had the extension open.
    `server/daemon-connection.test.mjs` pins 20 requests to one connection.
+3. **Invariant: the popover's click path never pays for a daemon connect (warm-daemon-connection).** The held
+   connection is kept warm (`sharedDaemon(…, { keepWarm: true })`): `warmDaemon()` opens it at plugin start, a drop
+   or a failed open reconnects in the background on the same backoff (one unref'd one-shot timer, cleared in
+   `closeDaemon`), and a connection past its 30 min age keeps serving until its replacement is connected. The
+   popover's Follow-up lookup runs with `ifConnected`: with no connected client it does not wait, it answers
+   "unknown" at once. Still one held connection: no extra hellos per request. 2026-11-18 live (2.4.1): a fresh
+   connection per Follow-up call took 0.85-2.5 s against the 2 s budget (connect ~585 ms, first RPC ~360 ms,
+   then 3-8 ms per RPC on a held client).
+4. **Invariant: an optional companion lookup never degrades silently into "none"
+   (optional-lookup-never-silent).** "Couldn't check" (timeout, not connected, socket gone) is a distinct state:
+   `lookupPrWorkspaces` returns `"unknown"`, resolve answers `followUpUnreachable: true` (plus the registered owner
+   from `follow.pr-owner` when its agent is a candidate), and the popover says "Couldn't reach Follow-up just now"
+   with a Retry. Only Follow-up absent, older, broken, off or the repository untracked mean no section. 2.4.1 turned
+   a timeout into null and the "Workspace for this PR" section and its Open link vanished from an owned PR.
 There are no `setInterval`s in the plugin server, and there must not be: the rate-limit window
 is pruned lazily on each request precisely because a live timer in this subprocess is what hangs
-teardown. Every external command goes through `server/deps.ts`, which resolves a real executable
+teardown. The one exception is the shared daemon's background reconnect: a one-shot, unref'd
+`setTimeout` that `closeDaemon` clears. Every external command goes through `server/deps.ts`, which resolves a real executable
 and `execFile`s it with an argv array; a lookup that bypasses it also bypasses the well-known-path
 probe and the self-check.
 
@@ -356,7 +371,7 @@ the mock bridge.
 
 ```sh
 cd plugin
-npm run verify                           # typecheck + 74 server checks + 7 host-client + 6 main-agent + 7 chat/overview tests; never touches ~/.config/gh
+npm run verify                           # typecheck + 74 server checks + 32 node tests (host-client, main-agent, follow-up, daemon-connection) + 10 agent-tools/chat + 1 native-tools; never touches ~/.config/gh
 paseo plugin reload send-to-paseo && paseo plugin ls   # needs PASEO_PASSWORD on an authed daemon
 paseo plugin logs send-to-paseo          # expect the three dependency self-check lines, no stack traces
 time paseo plugin reload send-to-paseo   # must finish in seconds, twice — proves no reload hang
@@ -370,7 +385,7 @@ Require `running`, an empty `ERROR` column, and `bridge listening on http://127.
 cd extension
 npm run typecheck
 npm run build
-node ../test/e2e.mjs                     # 72 cases; builds dist/ and dist-test/ itself
+node ../test/e2e.mjs                     # 73 cases; builds dist/ and dist-test/ itself
 STP_ONLY=6b,9f node ../test/e2e.mjs      # just those cases, for proving an assertion can fail; never a release gate
 ```
 
@@ -424,6 +439,7 @@ fixture at a real repository — every screenshot in `docs/screenshots/` is comm
 | 34 | The header settings cog: present in every phase, opens the extension's own options page in a new tab (asserted on the real `page` event, not on the intent), does **not** close the popover or discard a typed draft, and activates on Enter. Its glyph is built with `createElementNS`, never `innerHTML` — a content script shares its document with the host page and github.com enforces Trusted Types, which no fixture can reproduce. |
 | 33 | The merged-branch case end to end from the popover's side: a rank-2 candidate carrying `stackPrState: "merged"` is the default rather than `create`, is findable by typing "merged", and is described as landed work. The note wording is reason-scoped — it used to read "another branch of this stack" for *every* existing candidate, which is a false claim about a rank-3 "same project" workspace. The route-reason line (`data-stp-route-reason`, shown in the target box and again after a send) now uses the Paseo card's own words: "On the PR's branch" / "On <branch>, another branch of this stack" / "On <branch>, a merged branch of this stack" (amber) / "New worktree for #N". |
 | 36–36d | "Workspace for this PR": resolve asks for the Follow-up view only while Follow Up browser access is on; one owner, three owners plus `more`, a tracked repo with no owner, and no section when Follow-up is absent or the repo untracked. **Open** is a real `paseo://` anchor by default; the web toggle rewrites it to `app.paseo.sh` in a new tab (click intercepted, never the network), keeps the draft and persists. |
+| 36e | Follow-up not reached in time (`followUpUnreachable`) keeps the section: a quiet "Couldn't reach Follow-up just now" line with **Retry** (re-asks once, replaces the line with the real answer, keeps the draft), never "No workspace owns this PR yet"; and the registered owner's row with its Open link when `follow.pr-owner` answered. |
 | 29–32 | The Target combobox, which is a hand-built listbox rather than a `<select>`: filtering by workspace name, branch fragment, bare PR number with and without `#`, and multi-word tokens in any order; the empty-result row committing nothing; a keyboard-only path from open to send including wrap-around at both ends; and the two dismissal layers — Esc and click-outside must close the dropdown *before* the popover, which the popover's document-level capturing listeners have to cooperate on. |
 
 When changing a test, confirm it still fails for the right reason: break the thing on purpose,

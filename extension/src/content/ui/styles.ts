@@ -630,6 +630,10 @@ select:focus, textarea:focus { outline: 2px solid var(--stp-accent); outline-off
 .btn.owner-open { flex: none; height: 26px; padding: 0 9px; gap: 5px; font-size: 12px; align-self: center; }
 .owner-open svg { width: 12px; height: 12px; opacity: 0.8; }
 .owners-empty { font: 400 12px/1.45 var(--stp-font); color: var(--stp-fg-muted); }
+.owners-unreachable { font: 400 12px/1.45 var(--stp-font); color: var(--stp-fg-muted); }
+.owners-unreachable.partial { font-size: 11px; line-height: 1.4; }
+.owners-unreachable .linkish[disabled] { cursor: progress; opacity: 0.7; text-decoration: none; }
+.owner-state.muted { color: var(--stp-fg-muted); font-weight: 400; }
 .owners-rule { border: 0; border-top: 1px solid var(--stp-border); margin: 2px 0; }
 .composer-lbl { font: 600 12px/1.3 var(--stp-font); color: var(--stp-fg); margin-bottom: -4px; }
 .owners-foot { font: 400 11px/1.4 var(--stp-font); color: var(--stp-fg-muted); }

@@ -97,7 +97,9 @@ const CONFIG = {
   /**
    * The additive `followUp` view on /v1/resolve: null (Follow-up absent, the
    * field is omitted), "one", "several" (3 shown + 2 more), "none" (tracked
-   * repository, no owner) or "untracked" (outside Follow-up's scope: omitted).
+   * repository, no owner), "untracked" (outside Follow-up's scope: omitted),
+   * "unreachable" (Follow-up not reached in time: `followUpUnreachable`, no
+   * view) or "unreachable-owner" (the same, plus the registered owner's row).
    * Sent only when the request asked for it, like the real plugin.
    */
   followUpView: null,
@@ -117,6 +119,7 @@ function followUpView(kind) {
   if (kind === "one") return { workspaces: [link(OWNER_ROWS.needs)], more: 0 };
   if (kind === "several") return { workspaces: [link(OWNER_ROWS.needs), link(OWNER_ROWS.fixing), link(OWNER_ROWS.running)], more: 2 };
   if (kind === "none") return { workspaces: [], more: 0 };
+  if (kind === "unreachable-owner") return { workspaces: [link({ ...OWNER_ROWS.needs, group: "", state: "" })], more: 0 };
   return null;
 }
 
@@ -532,6 +535,7 @@ function handleResolve(res, origin, body) {
   }
   const view = body.followUp === true ? followUpView(CONFIG.followUpView) : null;
   if (view) payload.followUp = view;
+  if (body.followUp === true && String(CONFIG.followUpView).startsWith("unreachable")) payload.followUpUnreachable = true;
   if (CONFIG.routed) {
     const additional = {
       ...payload,

@@ -26,7 +26,10 @@ import { sharedDaemon } from "./shared-daemon";
 
 const CONNECT_TIMEOUT_MS = 10_000;
 const STATUS_TIMEOUT_MS = 2_000;
-/** An optional Follow Up call, connect included, gives up after this long. */
+/**
+ * An optional Follow Up call gives up after this long. The popover's lookups never spend it on a
+ * connect (they run only on a connected client, warm-daemon-connection), so it covers the RPC alone.
+ */
 const FOLLOW_UP_TIMEOUT_MS = 2_000;
 const STATUS_TTL_MS = 15_000;
 
@@ -45,6 +48,7 @@ interface DaemonClient {
   connect(): Promise<void>;
   close(): Promise<void>;
   invokePluginRpc(plugin: string, method: string, input: unknown): Promise<unknown>;
+  getConnectionState?(): { status: string };
 }
 
 interface ClientModule {
@@ -194,21 +198,57 @@ async function openDaemon(): Promise<DaemonClient> {
   }
 }
 
-const shared = sharedDaemon(openDaemon);
+const shared = sharedDaemon(openDaemon, { keepWarm: true });
+
+/** Opens the held connection in the background. The plugin calls it at start so no popover pays for the connect. */
+export function warmDaemon(): void {
+  shared.warm();
+}
 
 /** Closes the held connection. The plugin's teardown runs it after the bridge stops. */
 export function closeDaemon(): Promise<void> {
   return shared.close();
 }
 
-/** Optional companion RPCs always target this daemon, never a browser-selected host. */
-export async function callFollowUp(method: "follow.pr-owner" | "follow.pr-workspaces" | "follow.browser-exchange", input: unknown): Promise<unknown> {
+/**
+ * Thrown when Follow-up could not be asked: no connected client yet, the call outran its budget, or
+ * the socket went away. That is "couldn't check", never "Follow-up has nothing" (AGENTS.md,
+ * optional-lookup-never-silent). Follow-up's own answers, absence included, are thrown as they are.
+ */
+export class FollowUpUnreachableError extends Error {
+  readonly code = "follow_up_unreachable";
+}
+export const isFollowUpUnreachable = (error: unknown): boolean =>
+  (error as { code?: unknown } | null)?.code === "follow_up_unreachable";
+
+/**
+ * Optional companion RPCs always target this daemon, never a browser-selected host. With
+ * `ifConnected` (the popover's lookups) the call never waits on a connect: no connected client
+ * means unreachable at once, and the background warm-up is already reconnecting.
+ */
+export async function callFollowUp(method: "follow.pr-owner" | "follow.pr-workspaces" | "follow.browser-exchange", input: unknown, options: { ifConnected?: boolean } = {}): Promise<unknown> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let reached = false;
   try {
     return await Promise.race([
-      shared.run((client) => invokeFollowUp((plugin, m, i) => client.invokePluginRpc(plugin, m, i), method, input)),
-      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Optional Follow Up request timed out.")), FOLLOW_UP_TIMEOUT_MS); timer.unref?.(); }),
+      shared.run(async (client) => {
+        reached = true;
+        try {
+          return await invokeFollowUp((plugin, m, i) => client.invokePluginRpc(plugin, m, i), method, input);
+        } catch (error) {
+          // The socket went away under the call: the question never got its answer.
+          const status = client.getConnectionState?.().status;
+          if (status !== undefined && status !== "connected") throw new FollowUpUnreachableError(error instanceof Error ? error.message : String(error));
+          throw error;
+        }
+      }, { ifConnected: options.ifConnected === true }),
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new FollowUpUnreachableError("Optional Follow Up request timed out.")), FOLLOW_UP_TIMEOUT_MS); timer.unref?.(); }),
     ]);
+  } catch (error) {
+    if (isFollowUpUnreachable(error)) throw error;
+    // Never reached a connected client (not connected, failed open, backoff): couldn't check.
+    if (!reached) throw new FollowUpUnreachableError(error instanceof Error ? error.message : String(error));
+    throw error;
   } finally { if (timer) clearTimeout(timer); }
 }
 

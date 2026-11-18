@@ -5052,6 +5052,8 @@ async function readOwners(page) {
       count: box.getAttribute("data-stp-owners"),
       label: box.querySelector(".lbl")?.textContent.trim() ?? null,
       empty: box.querySelector("[data-stp-owners-empty]")?.textContent.trim() ?? null,
+      unreachable: box.querySelector("[data-stp-owners-unreachable]")?.textContent.trim() ?? null,
+      retry: box.querySelector("[data-stp-owners-retry]")?.textContent.trim() ?? null,
       more: box.querySelector("[data-stp-owners-more]")?.textContent.trim() ?? null,
       target: box.querySelector("[data-stp-open-target]")?.getAttribute("data-stp-open-target") ?? null,
       toggle: box.querySelector("[data-stp-open-target]")?.textContent.trim() ?? null,
@@ -5204,6 +5206,46 @@ await test("36d. Open workspace: no section when Follow-up is absent, the repo i
     await sw.evaluate(async () => chrome.storage.local.remove("enableGraphiteFollowUp"));
   }
   return ["absent: no section", "untracked: no section", "browser access off: not requested, no section"];
+});
+
+await test("36e. Open workspace: Follow-up not reached in time says so with Retry, keeps the registered owner's Open link, never reads as none", async () => {
+  // optional-lookup-never-silent (AGENTS.md). 2.4.1: a timed-out lookup looked exactly like "Follow-up absent",
+  // so the section and its Open link silently vanished from a PR that had an owner.
+  await openWithFollowUp("unreachable");
+  const ui = await readOwners(page);
+  assert(ui, "the section must not vanish when Follow-up could not be reached");
+  assertEq(ui.count, "0", "no rows without the owner");
+  assertEq(ui.unreachable, "Couldn't reach Follow-up just now. Retry", "a quiet line says it couldn't check");
+  assertEq(ui.empty, null, "and never claims that nothing owns the PR");
+  assertEq(ui.composerLabel, "Send an instruction", "the composer stays the move");
+  await shotPopoverThemes(page, "popover-open-workspace-unreachable");
+
+  // Retry asks again in place: the draft survives, and the real answer replaces the line.
+  await page.locator(POPOVER).locator("[data-stp-prompt]").click();
+  await page.keyboard.type("keep me");
+  const before = (await bridgeLog()).filter((r) => r.path === "/v1/resolve").length;
+  await bridgeConfig({ followUpView: "one" });
+  await page.locator(POPOVER).locator("[data-stp-owners-retry]").click();
+  await page.waitForFunction(() => document.querySelector("send-to-paseo-popover")?.shadowRoot.querySelector("[data-stp-owner]"), null, { timeout: 5000 });
+  const after = await readOwners(page);
+  assertEq((await bridgeLog()).filter((r) => r.path === "/v1/resolve").length, before + 1, "Retry re-asks the bridge once");
+  assertEq(after.unreachable, null, "the line goes once Follow-up answers");
+  assertEq(after.rows.map((r) => r.state).join(), "Needs you · Merge ready", "with Follow-up's own row");
+  const draft = await page.evaluate(() => document.querySelector("send-to-paseo-popover").shadowRoot.querySelector("[data-stp-prompt]").value);
+  assertEq(draft, "keep me", "Retry must not discard a typed instruction");
+  await closePopover(page);
+
+  // pr-owner answered: the registered owner's row and Open link still render.
+  await openWithFollowUp("unreachable-owner");
+  const fb = await readOwners(page);
+  assertEq(fb.rows.length, 1, "the registered owner is shown");
+  assertEq(fb.rows[0].name, "brawny-dodo", "under Paseo's workspace name");
+  assertEq(fb.rows[0].state, "Registered for this PR", "without inventing Follow-up's state");
+  assertEq(fb.rows[0].href, "paseo://h/srv_Ab3xY9pQ2mNt/agent/agt_owner_needs", "with its Open link to the main agent");
+  assertEq(fb.unreachable, "Couldn't reach Follow-up just now; there may be more. Retry", "and says the list may be incomplete");
+  await shotPopoverThemes(page, "popover-open-workspace-unreachable-owner");
+  await closePopover(page);
+  return [ui.unreachable, `retry: ${after.rows[0].name} — ${after.rows[0].state}`, `fallback: ${fb.rows[0].name} — ${fb.rows[0].state} — ${fb.rows[0].href}`];
 });
 
 /* -------------------------------------------------------------------------- */

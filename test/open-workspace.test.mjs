@@ -7,7 +7,7 @@ const row = (id, patch = {}) => ({
   workspaceId: `wks_${id}`, agentId: `agt_${id}`, title: id, agentStatus: "idle", group: "waiting", state: "Waiting on others",
   deepLink: `paseo://h/srv_1/agent/agt_${id}`, webUrl: `https://app.paseo.sh/h/srv_1/agent/agt_${id}`, ...patch,
 });
-const slice = (followUp) => ({ hostId: "h", bridgeHostId: "h", hostLabel: "h", bridgeAuthority: "127.0.0.1:7788", resolved: followUp === undefined ? {} : { followUp }, error: null });
+const slice = (followUp, extra = {}) => ({ hostId: "h", bridgeHostId: "h", hostLabel: "h", bridgeAuthority: "127.0.0.1:7788", resolved: { ...(followUp === undefined ? {} : { followUp }), ...extra }, error: null });
 
 test("no host sent a view: no section (Follow-up absent, untracked repo, or browser access off)", () => {
   assert.equal(ownerSection([slice(undefined)]), null);
@@ -15,7 +15,16 @@ test("no host sent a view: no section (Follow-up absent, untracked repo, or brow
 });
 
 test("a tracked repository with no owner is an empty section, not a missing one", () => {
-  assert.deepEqual(ownerSection([slice({ workspaces: [], more: 0 })]), { rows: [], more: 0 });
+  assert.deepEqual(ownerSection([slice({ workspaces: [], more: 0 })]), { rows: [], more: 0, unreachable: [] });
+});
+
+// optional-lookup-never-silent (AGENTS.md): "couldn't reach Follow-up" used to look exactly like "Follow-up absent".
+test("a host whose Follow-up could not be reached keeps the section, says so, and keeps its registered owner", () => {
+  assert.deepEqual(ownerSection([slice(undefined, { followUpUnreachable: true })]), { rows: [], more: 0, unreachable: ["h"] });
+  const fallback = ownerSection([slice({ workspaces: [row("reg", { group: "", state: "" })], more: 0 }, { followUpUnreachable: true })]);
+  assert.deepEqual([fallback.rows.map((r) => r.title), fallback.unreachable], [["reg"], ["h"]]);
+  const mixed = ownerSection([{ ...slice({ workspaces: [], more: 0 }), hostLabel: "laptop" }, { ...slice(undefined, { followUpUnreachable: true }), hostLabel: "dev-box" }]);
+  assert.deepEqual([mixed.rows, mixed.unreachable], [[], ["dev-box"]]);
 });
 
 test("owners merge across hosts, most urgent first, three at most, the rest counted", () => {
