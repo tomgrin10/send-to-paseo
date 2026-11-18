@@ -258,6 +258,15 @@ One failure mode that has already cost time elsewhere in this codebase's lineage
 1. **A listening HTTP server wedges plugin reload.** It keeps the subprocess event loop alive and
    hangs Paseo's "Stopping plugin" step. Cleanup must await `server.close()` *and*
    `server.closeAllConnections()`.
+2. **Invariant: one held daemon connection per process (one-held-daemon-connection).** Every bridge
+   request (`withPaseo`) and every optional Follow Up call (`callFollowUp`) runs on `server/daemon.ts`'s one
+   DaemonClient through `server/shared-daemon.ts`; `openDaemon` is the only place a client is built. A request gets
+   a scoped SDK view (`createPaseoApi`) disposed when it ends, never its own socket. The connection reopens only after
+   a real drop (its connection status, or a call that failed on a socket no longer `connected`), backs off after a
+   failed open, is replaced after 30 min, and closes in teardown (`closeDaemon`, after the bridge stops), since a held
+   socket wedges reload exactly like a listening server. 2026-11-17 live: a connection per request meant about 20
+   hellos a minute for each of two client names while a browser had the extension open.
+   `server/daemon-connection.test.mjs` pins 20 requests to one connection.
 There are no `setInterval`s in the plugin server, and there must not be: the rate-limit window
 is pruned lazily on each request precisely because a live timer in this subprocess is what hangs
 teardown. Every external command goes through `server/deps.ts`, which resolves a real executable
