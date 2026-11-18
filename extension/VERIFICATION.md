@@ -1,5 +1,22 @@
 # Verification record
 
+## 2026-11-18 — settings version labels
+
+`npm run verify` passed: typecheck, 21 unit tests, shipping build and **74/74 Chromium cases**,
+including the live read-only case 13. After the design critique refined label placement and
+comparison copy, cases `10a,10b,10c,10d,10e,10f,10v` passed again (7 passed, 67 intentionally
+skipped). The complete suite ran before that final presentation refinement.
+
+New 10v compares the displayed version with the installed manifest and exercises matching,
+older, newer and beta plugin versions. Differences name the extension version without assuming
+which side should update. Removing the label failed with a locator timeout; removing mismatch
+copy failed the comparison assertion. Both deliberate mutations were restored.
+
+Playwright refreshed every existing `options-page*.png` and added matching/mismatch captures
+at 1100px and 390px, light and dark. All were inspected. The two independent impeccable
+assessments found no remaining design blocker; static detection had zero findings/advisories.
+The plugin label uses its own version and is covered by the plugin verification record.
+
 ## 2026-11-18 — "Workspace for this PR" never silently disappears
 
 Additive wire change (no `contract` bump): `followUpUnreachable` on the /v1/resolve response

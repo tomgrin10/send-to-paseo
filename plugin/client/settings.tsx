@@ -14,6 +14,7 @@ import {
   addAdditionalMachine,
   clearRecentSends,
   DEFAULT_PORT,
+  PLUGIN_VERSION,
   enablePrivateAccess,
   externalBridgeUrlProblem,
   getConnectionCode,
@@ -1186,6 +1187,7 @@ export function SendToPaseoSettings({ theme, host, layout, navigation }: PluginS
         </>
       ) : null}
 
+      <Text selectable style={styles.muted}>Send to Paseo {PLUGIN_VERSION}</Text>
     </ScrollView>
   );
 }

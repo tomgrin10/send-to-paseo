@@ -1,5 +1,21 @@
 # Verification log — `send-to-paseo` plugin
 
+## 2026-11-18 — settings version label
+
+`npm run verify` passed: typecheck, 74 server checks, 33 host/settings/routing/agent tests,
+10 agent-tools/chat tests and one native-tools test. The first attempt used a stale dependency
+cache (SDK 0.10.1) and failed typecheck; after `npm ci --ignore-scripts` from the lockfile
+(SDK 0.14.0), the same verification passed.
+
+`node --test --experimental-strip-types plugin/client/settings.test.mjs` also passed after
+moving the label to the footer. Four deliberate mutations each failed: remove the label,
+substitute the version, disable selection, and use a fixed text color. All were restored.
+
+Playwright captured the actual settings component using React Native Web, synthetic host
+RPC/query data and stubbed icons, at 1100px and 390px in both themes. All four
+`docs/screenshots/paseo-settings-version-*.png` were inspected. This checks web rendering;
+it does not claim an installed-plugin or native-device check. No product installation or reload.
+
 ## 2026-11-03 — existing Follow Up connection
 
 `npm run verify` passed: typecheck, 74 server checks, 18 host/routing/agent tests,
