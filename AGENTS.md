@@ -371,7 +371,7 @@ the mock bridge.
 
 ```sh
 cd plugin
-npm run verify                           # typecheck + 74 server checks + 32 node tests (host-client, main-agent, follow-up, daemon-connection) + 10 agent-tools/chat + 1 native-tools; never touches ~/.config/gh
+npm run verify                           # typecheck + 74 server checks + 33 node tests (host-client, settings, main-agent, follow-up, daemon-connection) + 10 agent-tools/chat + 1 native-tools; never touches ~/.config/gh
 paseo plugin reload send-to-paseo && paseo plugin ls   # needs PASEO_PASSWORD on an authed daemon
 paseo plugin logs send-to-paseo          # expect the three dependency self-check lines, no stack traces
 time paseo plugin reload send-to-paseo   # must finish in seconds, twice — proves no reload hang
@@ -385,7 +385,7 @@ Require `running`, an empty `ERROR` column, and `bridge listening on http://127.
 cd extension
 npm run typecheck
 npm run build
-node ../test/e2e.mjs                     # 73 cases; builds dist/ and dist-test/ itself
+node ../test/e2e.mjs                     # 74 cases; builds dist/ and dist-test/ itself
 STP_ONLY=6b,9f node ../test/e2e.mjs      # just those cases, for proving an assertion can fail; never a release gate
 ```
 
@@ -422,6 +422,7 @@ fixture at a real repository — every screenshot in `docs/screenshots/` is comm
 | 4 | Resolve prewarming: mounting the PR button reaches `/v1/resolve` before the user clicks, and the popover consumes that result. |
 | 8b, 8c | First PR opened from a full inbox load, cleanup on return to inbox, and recovery when Graphite replaces the populated app root without changing the URL. Test manifest paths mirror shipping registration. |
 | 8, 24 | SPA re-targeting. The MAIN-world `pushState` shim on Graphite's router and on GitHub's Turbo; a stale PR number can never reach `/v1/resolve`. |
+| 10v | Settings version from the installed manifest; per-host matching, older, newer and beta plugin versions. Version differences are informational, never a contract failure or an instruction to downgrade. |
 | 10g | Remote plain HTTP is rejected before Chrome permission is requested; an HTTPS proxy URL can request only its exact origin. |
 | 11 | The bearer token is unreachable from the page — DOM, shadow roots, attributes, `window`, both storages, plus a static scan of the built bundles. |
 | 12 | Every bridge security rule: Origin on preflight and real request, Host, body cap, rate limit and its keying. |
@@ -584,3 +585,7 @@ This repository is public, and so is everything built from it: npm packages, rel
 - **Output from real data stays local.** Logs, sample results and screenshots from a run on the developer's real setup don't go into a commit or PR as-is. Describe them, or swap every real value for a fictional one first.
 - **Commit only source.** Never commit symlinks, `node_modules`, or anything that points into the local machine. Before every commit, read `git diff --cached` for absolute paths and real names.
 - **Found one already in the repo?** Fix it in a commit whose message doesn't quote the value (for example "replace a real name with a fictional one"), and tell the developer so they can decide whether history and npm need cleaning too.
+
+## Settings version labels
+
+The extension header reads its version from `chrome.runtime.getManifest().version`; the Paseo settings footer reads `PLUGIN_VERSION`. Both are selectable text. Per-host plugin versions stay visible, and differences name the extension version without prescribing an update: beta plugins can intentionally differ from the stable Chrome extension.

@@ -42,6 +42,9 @@ const advancedDetails = $<HTMLDetailsElement>("advancedDetails");
 const hostsHeading = $<HTMLElement>("hostsHeading");
 const hostsHelp = $<HTMLElement>("hostsHelp");
 
+const extensionVersion = chrome.runtime.getManifest().version;
+$("extensionVersion").textContent = extensionVersion;
+
 let savedTimer: number | undefined;
 
 function flashSaved(): void {
@@ -288,7 +291,8 @@ async function checkConnection(row: HostRow, host: HostConfig): Promise<void> {
   await refreshProviderPicker();
 
   const name = host.label.trim() || machineName;
-  const pluginBit = `plugin ${d.version}`;
+  const pluginBit = `plugin ${d.version}` +
+    (d.version === extensionVersion ? "" : `, differs from extension ${extensionVersion}`);
   const paseoBit = d.daemon.version ? `Paseo ${d.daemon.version}` : "Paseo";
   const models = d.providers?.length ?? 0;
   row.status.title =

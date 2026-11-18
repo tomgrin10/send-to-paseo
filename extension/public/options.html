@@ -68,6 +68,7 @@
       main { grid-template-columns: minmax(0, 1fr); max-width: 620px; margin: 0 auto; display: grid; gap: 18px; }
       section, details.advanced, .hosts, .host { min-width: 0; }
       h1 { font-size: 19px; margin: 0; display: flex; align-items: center; gap: 9px; }
+      #extensionVersion { color: var(--muted); font-size: 13px; font-weight: 400; }
       h1 svg { width: 20px; height: 20px; color: var(--accent); }
       .sub { color: var(--muted); font-size: 13px; margin: -10px 0 0; }
       /* Empty live regions (no pending request, no grants) must not leave a
@@ -249,6 +250,7 @@
           <path d="M1.8 7.2 13.4 2.1a.55.55 0 0 1 .74.72L9.3 14.2a.55.55 0 0 1-1.02-.05L6.7 9.7 2.0 8.2a.55.55 0 0 1-.2-1Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
         </svg>
         Send to Paseo
+        <span id="extensionVersion"></span>
       </h1>
       <p class="sub">
         Connect this browser once. Paseo routes to your other machines for you.

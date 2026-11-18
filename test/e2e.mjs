@@ -1641,7 +1641,7 @@ await test("10a. Options page: paired token -> ok, and providers come from /v1/p
 
   assertEq(st.tone, "ok", `expected ok tone, got ${st.tone} / ${st.title}`);
   assertEq(st.title, "Connected to mock-machine", "headline names the machine in plain words");
-  assert(/^Paseo \S+ · plugin \S+ · 3 models$/.test(st.detail), `detail reads Paseo/plugin versions and model count: ${st.detail}`);
+  assert(/^Paseo \S+ · plugin \S+, differs from extension \S+ · 3 models$/.test(st.detail), `detail reads Paseo/plugin versions and model count: ${st.detail}`);
   assert(st.tech.includes("contract v1"), `tooltip keeps the contract version for support: ${st.tech}`);
   assert(st.tech.includes("srv_"), `tooltip keeps the daemon serverId for support: ${st.tech}`);
   assertEq(st.hint, "Open any pull request on GitHub or Graphite and press Send to Paseo.", "next step after a successful test");
@@ -1676,6 +1676,43 @@ await test("10a. Options page: paired token -> ok, and providers come from /v1/p
     `provider picker: ${st.providerOptions.join(" | ")}`,
     "authenticated ping (authState=valid) is what populated it",
   ];
+});
+
+await test("10v. Settings show the extension version and explain per-host plugin mismatches", async () => {
+  await bridgeReset();
+  const version = JSON.parse(readFileSync(join(extDir, "public/manifest.json"))).version;
+  await seedSettings(context, extId, { token: DEFAULT_TOKEN });
+  const opt = await context.newPage();
+  try {
+    await opt.goto(optionsUrl());
+    assertEq(await opt.locator("#extensionVersion").textContent({ timeout: 2000 }), version, "label comes from the installed manifest");
+    for (const pluginVersion of [version, "0.0.1", "99.0.0", `${version}-beta.1`]) {
+      await opt.route("**/v1/ping", async route => {
+        const response = await route.fetch();
+        const json = await response.json();
+        await route.fulfill({ response, json: { ...json, version: pluginVersion } });
+      });
+      const st = await runTestConnection(opt);
+      assert(st.detail.includes(`plugin ${pluginVersion}`), "host keeps its own plugin version");
+      assertEq(st.detail.includes(`differs from extension ${version}`), pluginVersion !== version, "different versions are explained without assuming which side needs updating");
+      if (pluginVersion === version || pluginVersion === "0.0.1") {
+        const suffix = pluginVersion === version ? "matching" : "mismatch";
+        for (const width of [1100, 390]) {
+          await opt.setViewportSize({ width, height: 900 });
+          for (const colorScheme of ["light", "dark"]) {
+            await opt.emulateMedia({ colorScheme });
+            assert(await opt.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "version copy fits compact width");
+            await opt.screenshot({ path: join(shots, `options-page-version-${suffix}-${width}-${colorScheme}.png`), fullPage: true });
+          }
+        }
+      }
+      await opt.unroute("**/v1/ping");
+    }
+  } finally {
+    await opt.close();
+    await seedSettings(context, extId, {});
+    await bridgeReset();
+  }
 });
 
 await test("10b. Options page: no token -> warn 'Paste your token to finish', empty provider list", async () => {
