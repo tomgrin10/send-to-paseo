@@ -17,7 +17,7 @@ import {
   updateConfig,
 } from "./shared/contracts";
 import { getBridgeStatus, restartBridge, runBridge } from "./server/bridge";
-import { closeDaemon } from "./server/daemon";
+import { closeDaemon, warmDaemon } from "./server/daemon";
 import { dependencySnapshot } from "./server/deps";
 import {
   listAgentProfiles,
@@ -179,6 +179,8 @@ export default function contribute(server: PluginServerContext) {
   });
 
   const stopBridge = runBridge();
+  // Connect now, not on the first popover: the click path never pays for a daemon connect (warm-daemon-connection).
+  warmDaemon();
   // The held daemon connection closes after the bridge has stopped serving requests.
   return async () => { removeTools(); await stopBridge(); await closeDaemon(); };
 }

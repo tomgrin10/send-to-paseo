@@ -365,6 +365,12 @@ export interface LocalResolveResponse {
    * advertises to the browser). Absent otherwise; never an error.
    */
   followUp?: FollowUpView;
+  /**
+   * Additive. Present (true) when the request asked for the Follow-up view and Follow-up could not
+   * be asked in time: "couldn't check", which is not "none". `followUp`, when also present, then
+   * holds only the registered owner from `follow.pr-owner`.
+   */
+  followUpUnreachable?: true;
 }
 
 /** One workspace that owns the PR, as the popover shows it. Titles, ids, status and one line: nothing else. */

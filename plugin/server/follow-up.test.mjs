@@ -92,8 +92,11 @@ test("an Additional bridge downgrade refuses a registered-agent send before forw
 });
 
 const view = (id, patch = {}) => ({ workspaceId: id, agentId: `agent-${id}`, title: `Follow-up ${id}`, agentStatus: "idle", group: "waiting", state: "Waiting on others", ...patch });
-const workspacesModule = reply => load("server/follow-up.ts", { "./daemon": { callFollowUp: async (method, input) => {
+const unreachable = message => Object.assign(new Error(message), { code: "follow_up_unreachable" });
+const isFollowUpUnreachable = e => e?.code === "follow_up_unreachable";
+const workspacesModule = reply => load("server/follow-up.ts", { "./daemon": { isFollowUpUnreachable, callFollowUp: async (method, input, options) => {
   assert.equal(method, "follow.pr-workspaces"); assert.deepEqual(input, { repo: "example/app", number: 7 });
+  assert.deepEqual(options, { ifConnected: true }, "the popover's lookup never waits on a daemon connect");
   if (reply instanceof Error) throw reply; return reply;
 } } });
 test("PR workspaces lookup: owner found, several owners, none, repository not granted, Follow-up absent", async () => {
@@ -105,6 +108,31 @@ test("PR workspaces lookup: owner found, several owners, none, repository not gr
   assert.equal(await (await workspacesModule({ tracked: false, more: 0, workspaces: [] })).lookupPrWorkspaces("example", "app", 7), null, "outside Follow-up's advertised scope: nothing");
   for (const reply of [new Error("Plugin follow-through is not installed"), new Error("Unknown RPC follow.pr-workspaces"), null, {}, { tracked: true, more: 0, workspaces: [view("a"), view("b"), view("c"), view("d")] }, { tracked: true, more: 0, workspaces: [{ workspaceId: "w" }] }])
     assert.equal(await (await workspacesModule(reply)).lookupPrWorkspaces("example", "app", 7), null, `fails closed for ${JSON.stringify(reply) ?? reply}`);
+});
+
+// optional-lookup-never-silent (AGENTS.md): 2.4.1 turned a timed-out lookup into null, the same answer as
+// "Follow-up absent", and the popover's "Workspace for this PR" section silently vanished.
+test("PR workspaces lookup: couldn't ask in time is unknown, never none", async () => {
+  for (const error of [unreachable("Optional Follow Up request timed out."), unreachable("The Paseo daemon connection is not open yet."), unreachable("socket closed")])
+    assert.equal(await (await workspacesModule(error)).lookupPrWorkspaces("example", "app", 7), "unknown", error.message);
+});
+
+test("resolve's Follow-up fields: unknown is said, and the registered owner still gets its Open link", async () => {
+  const m = await load("server/follow-up.ts", { "./daemon": { isFollowUpUnreachable, callFollowUp: async () => null } });
+  const names = new Map([["owned", "brawny-dodo"]]);
+  const owner = { workspaceId: "owned", agentId: "agt_reg" };
+  const candidate = { kind: "existing", workspaceId: "owned", label: "brawny-dodo", followUpAgent: { agentId: "agt_reg", title: "Registered", status: "idle" } };
+  const plain = { kind: "existing", workspaceId: "owned", label: "brawny-dodo" };
+
+  assert.deepEqual(m.followUpAnswer("unknown", owner, [candidate], "srv", names), {
+    followUpUnreachable: true,
+    followUp: { more: 0, workspaces: [{ workspaceId: "owned", agentId: "agt_reg", title: "brawny-dodo", agentStatus: "idle", group: "", state: "", deepLink: "paseo://h/srv/agent/agt_reg", webUrl: "https://app.paseo.sh/h/srv/agent/agt_reg" }] },
+  }, "unknown + a registered owner among the candidates: that owner's row with both links");
+  assert.deepEqual(m.followUpAnswer("unknown", null, [candidate], "srv", names), { followUpUnreachable: true }, "unknown, no owner: say unknown");
+  assert.deepEqual(m.followUpAnswer("unknown", owner, [plain], "srv", names), { followUpUnreachable: true }, "owner's agent is not a candidate: no row");
+  assert.deepEqual(m.followUpAnswer("unknown", owner, [candidate], null, names), { followUpUnreachable: true }, "no server id: no link, still unknown");
+  assert.deepEqual(m.followUpAnswer(null, owner, [candidate], "srv", names), {}, "Follow-up absent or repo untracked: no fields at all");
+  assert.deepEqual(m.followUpAnswer({ workspaces: [], more: 0 }, owner, [candidate], "srv", names), { followUp: { workspaces: [], more: 0 } }, "tracked, nothing owns it: the real none");
 });
 
 test("the popover view carries Paseo's workspace name and both open links for this machine only", async () => {

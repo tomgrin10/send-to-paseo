@@ -434,7 +434,16 @@ agent route redirects to that agent's workspace. The field is **absent** when th
 ask, Follow-up is missing, older or failing, the machine's server id is unknown, or the repository
 is outside the set Follow-up tracks (the same scope it advertises to the browser). An empty
 `workspaces` means Follow-up tracks the repository and nothing owns the PR. The field never turns a
-resolve into an error. The extension accepts only `paseo://h/<s>/agent/<a>` and
+resolve into an error.
+
+`followUpUnreachable` (additive, optional, response) is `true` when the request asked for the view
+and the bridge could not ask Follow-up in time (no connected daemon client yet, the call outran
+its budget, or the socket went away). That is "couldn't check", never "none": the extension shows
+a quiet "Couldn't reach Follow-up just now" line with a Retry, and never "No workspace owns this PR
+yet". When `follow.pr-owner` did answer and that owner's agent is one of this PR's candidates,
+`followUp` is also present holding only that registered owner, with empty `group` and `state` and
+the same two links. An extension that predates the field ignores it, which is the older behaviour
+(no section, or the owner row alone). The extension accepts only `paseo://h/<s>/agent/<a>` and
 `https://app.paseo.sh/h/<s>/agent/<a>` links and drops any other row.
 
 `agentDispatch` is additive and optional. Missing means the historical `"new"` default.

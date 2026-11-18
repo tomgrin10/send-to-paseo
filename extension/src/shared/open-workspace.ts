@@ -23,6 +23,11 @@ export interface OwnerSection {
   rows: OwnerRow[];
   /** Owners not shown: the bridges' own `more` plus anything past the limit here. */
   more: number;
+  /**
+   * Hosts (their labels) whose Follow-up could not be reached in time. Not "none": rows from such a
+   * host are only its registered owner, and an empty `rows` must not say nothing owns the PR.
+   */
+  unreachable: string[];
 }
 
 const GROUP_ORDER = ["needs", "fixing", "running", "waiting", "later", "quiet"];
@@ -40,13 +45,21 @@ export function isWebLink(href: string): boolean {
  * Null when no host sent a Follow-up view at all: Follow-up is absent, older,
  * browser access is off, or the repository is outside its scope. The popover
  * then shows no section. An empty `rows` is different: Follow-up tracks the
- * repository and no workspace owns this PR, which is worth saying.
+ * repository and no workspace owns this PR, which is worth saying. A host whose
+ * Follow-up could not be reached in time is listed in `unreachable`, so the
+ * popover says "couldn't check" instead of dropping the section
+ * (optional-lookup-never-silent, AGENTS.md).
  */
 export function ownerSection(hosts: readonly HostSlice[]): OwnerSection | null {
   let seen = false;
   let more = 0;
   const rows: OwnerRow[] = [];
+  const unreachable: string[] = [];
   hosts.forEach((slice, hostIndex) => {
+    if (slice.resolved?.followUpUnreachable === true) {
+      seen = true;
+      unreachable.push(slice.hostLabel);
+    }
     const view = slice.resolved?.followUp;
     if (!view || !Array.isArray(view.workspaces)) return;
     seen = true;
@@ -59,7 +72,7 @@ export function ownerSection(hosts: readonly HostSlice[]): OwnerSection | null {
   if (!seen) return null;
   const rank = (g: string) => { const i = GROUP_ORDER.indexOf(g); return i < 0 ? GROUP_ORDER.length : i; };
   rows.sort((a, b) => rank(a.group) - rank(b.group) || a.hostIndex - b.hostIndex);
-  return { rows: rows.slice(0, OWNER_LIMIT), more: more + Math.max(0, rows.length - OWNER_LIMIT) };
+  return { rows: rows.slice(0, OWNER_LIMIT), more: more + Math.max(0, rows.length - OWNER_LIMIT), unreachable };
 }
 
 export function openHref(row: Pick<FollowUpWorkspace, "deepLink" | "webUrl">, target: OpenTarget): string {

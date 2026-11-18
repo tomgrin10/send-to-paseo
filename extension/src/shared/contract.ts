@@ -238,6 +238,8 @@ export interface ResolveResponse {
   followUpAgentId?: string;
   /** Additive: present only when asked, Follow-up answered, and it tracks this repository. */
   followUp?: FollowUpView;
+  /** Additive: Follow-up was asked for but could not be reached in time. Not "none"; `followUp` then holds only the registered owner, if any. */
+  followUpUnreachable?: true;
   /** Additive router result returned by a primary Paseo machine. */
   routes?: ResolveRoute[];
 }

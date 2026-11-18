@@ -34,7 +34,9 @@ registers only agent deep links, and both the desktop app and the web app resolv
 its workspace, so Open lands in the workspace with its main agent selected.
 
 The RPC returns nothing for repositories outside Follow-up's advertised scope, and the extension
-does not ask while browser access is off. No messages, paths, branches, PR content or credentials
+does not ask while browser access is off. A Follow-up that could not be asked in time is said, not
+hidden: the section shows "Couldn't reach Follow-up just now" with a Retry, plus the registered
+owner's Open link when `follow.pr-owner` answered (`followUpUnreachable` in CONTRACT.md). No messages, paths, branches, PR content or credentials
 cross it.
 
 ## Browser authority
