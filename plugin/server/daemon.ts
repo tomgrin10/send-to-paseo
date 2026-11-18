@@ -7,20 +7,27 @@ import { BridgeError } from "../shared/contracts";
 import { resolveDaemonPassword } from "./daemon-password";
 import { settings } from "./settings";
 import { invokeFollowUp } from "./follow-up-id";
+import { sharedDaemon } from "./shared-daemon";
 
 /**
- * Short-lived Paseo SDK connections for the HTTP bridge.
+ * The plugin's one held daemon connection (one-held-daemon-connection, AGENTS.md).
  *
  * Only RPC handlers receive a `paseo` handle, and the bridge serves requests
- * that arrive long before any surface is opened, so it opens its own SDK
- * connection per request and closes it again. That is deliberate on two counts:
- * a long-lived reconnecting socket in this subprocess would keep the event loop
- * alive and hang Paseo's "Stopping plugin" step, and a per-request connection
- * cannot go stale between sends.
+ * that arrive long before any surface is opened, so it keeps its own
+ * connection. Every bridge request (`withPaseo`) and every optional Follow Up
+ * call (`callFollowUp`) runs on the same held DaemonClient: a request gets a
+ * scoped SDK view (`createPaseoApi`) that is disposed when it ends, never a new
+ * socket. A drop retires the connection and the next request opens one fresh;
+ * `closeDaemon` in the plugin's teardown closes it, so a held socket never
+ * hangs Paseo's "Stopping plugin" step. 2026-11-17 live: a connection per
+ * request meant about 20 hellos a minute for each of the two client names
+ * while a browser had the extension open.
  */
 
 const CONNECT_TIMEOUT_MS = 10_000;
 const STATUS_TIMEOUT_MS = 2_000;
+/** An optional Follow Up call, connect included, gives up after this long. */
+const FOLLOW_UP_TIMEOUT_MS = 2_000;
 const STATUS_TTL_MS = 15_000;
 
 function timeoutSignal(ms: number): AbortSignal {
@@ -33,45 +40,54 @@ function timeoutSignal(ms: number): AbortSignal {
 
 type PaseoApi = PluginHandlerContext["paseo"];
 
+/** The subset of Paseo's DaemonClient this plugin uses. */
+interface DaemonClient {
+  connect(): Promise<void>;
+  close(): Promise<void>;
+  invokePluginRpc(plugin: string, method: string, input: unknown): Promise<unknown>;
+}
+
 interface ClientModule {
-  createPaseoClient(options: {
+  createPaseoApi(client: DaemonClient): PaseoApi & { dispose(): Promise<void> };
+  DaemonClient: new (options: {
     url: string;
     clientId: string;
+    clientType: "cli";
     reconnect: { enabled: boolean };
     connectTimeoutMs: number;
     suppressSendErrors: boolean;
     password?: string;
-  }): PaseoApi & {
-    connect(): Promise<void>;
-    close(): Promise<void>;
-  };
+  }) => DaemonClient;
 }
 
 let clientModule: ClientModule | null = null;
 
 /**
- * Borrows Paseo's own SDK from the host at runtime.
+ * Borrows Paseo's own SDK and daemon client from the host at runtime.
  *
- * The specifier is assembled rather than written as a literal so the plugin
- * compiler cannot resolve it at build time. That keeps the plugin installable
+ * The specifiers are assembled rather than written as literals so the plugin
+ * compiler cannot resolve them at build time. That keeps the plugin installable
  * from a directory or from Git without a package manager step, and it removes
  * any chance of a protocol version skew between a bundled copy of the SDK and
  * the daemon actually running.
  */
 function loadClientModule(): ClientModule {
   if (clientModule !== null) return clientModule;
-  const specifier = ["@getpaseo", "client"].join("/");
+  const sdk = ["@getpaseo", "client"].join("/");
+  const internal = [sdk, "internal", "daemon-client"].join("/");
   // Paseo compiles plugin backends to CommonJS, so `require` is normally right
   // here. `createRequire` keeps this working if a host ever loads the module as
   // real ESM instead, where `require` is not defined.
   const load: NodeRequire =
     typeof require === "function" ? require : createRequire(join(process.cwd(), "noop.cjs"));
   try {
-    clientModule = load(specifier) as ClientModule;
+    const { createPaseoApi } = load(sdk) as Pick<ClientModule, "createPaseoApi">;
+    const { DaemonClient } = load(internal) as Pick<ClientModule, "DaemonClient">;
+    clientModule = { createPaseoApi, DaemonClient };
   } catch (error) {
     throw new BridgeError(
       "daemon_unreachable",
-      `This Paseo host does not expose its client SDK (${specifier}), which the Send to Paseo bridge needs: ${
+      `This Paseo host does not expose its client SDK (${sdk}), which the Send to Paseo bridge needs: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -137,33 +153,17 @@ async function resolvePassword(): Promise<string | undefined> {
   return resolveDaemonPassword(async () => (await settings.read()).daemonPassword);
 }
 
-/** Optional companion RPCs always target this daemon, never a browser-selected host. */
-export async function callFollowUp(method: "follow.pr-owner" | "follow.pr-workspaces" | "follow.browser-exchange", input: unknown): Promise<unknown> {
-  const load = typeof require === "function" ? require : createRequire(join(process.cwd(), "noop.cjs"));
-  const { DaemonClient } = load(["@getpaseo", "client", "internal", "daemon-client"].join("/")) as {
-    DaemonClient: new (options: Record<string, unknown>) => {
-      connect(): Promise<void>; close(): Promise<void>; invokePluginRpc(plugin: string, method: string, input: unknown): Promise<unknown>;
-    };
-  };
+/**
+ * Builds and connects the one client. The only place a DaemonClient is built;
+ * a failure here is a `daemon_unreachable` BridgeError.
+ */
+async function openDaemon(): Promise<DaemonClient> {
+  const { DaemonClient } = loadClientModule();
   const password = await resolvePassword();
-  const client = new DaemonClient({ url: await resolveUrl(), clientId: "send-to-paseo-follow-up", clientType: "cli", reconnect: { enabled: false }, connectTimeoutMs: 2_000, suppressSendErrors: true, ...(password ? { password } : {}) });
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    await client.connect();
-    return await Promise.race([
-      invokeFollowUp((plugin, m, i) => client.invokePluginRpc(plugin, m, i), method, input),
-      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Optional Follow Up request timed out.")), 2_000); timer.unref?.(); }),
-    ]);
-  } finally { if (timer) clearTimeout(timer); await client.close().catch(() => undefined); }
-}
-
-/** Runs `work` against an SDK connection that is always closed before returning. */
-export async function withPaseo<T>(work: (paseo: PaseoApi) => Promise<T>): Promise<T> {
-  const { createPaseoClient } = loadClientModule();
-  const password = await resolvePassword();
-  const client = createPaseoClient({
+  const client = new DaemonClient({
     url: await resolveUrl(),
-    clientId: "send-to-paseo-bridge",
+    clientId: "send-to-paseo",
+    clientType: "cli",
     reconnect: { enabled: false },
     connectTimeoutMs: CONNECT_TIMEOUT_MS,
     suppressSendErrors: true,
@@ -173,6 +173,7 @@ export async function withPaseo<T>(work: (paseo: PaseoApi) => Promise<T>): Promi
   });
   try {
     await client.connect();
+    return client;
   } catch (error) {
     await client.close().catch(() => undefined);
     const detail = error instanceof Error ? error.message : String(error);
@@ -191,12 +192,38 @@ export async function withPaseo<T>(work: (paseo: PaseoApi) => Promise<T>): Promi
       detail,
     );
   }
+}
+
+const shared = sharedDaemon(openDaemon);
+
+/** Closes the held connection. The plugin's teardown runs it after the bridge stops. */
+export function closeDaemon(): Promise<void> {
+  return shared.close();
+}
+
+/** Optional companion RPCs always target this daemon, never a browser-selected host. */
+export async function callFollowUp(method: "follow.pr-owner" | "follow.pr-workspaces" | "follow.browser-exchange", input: unknown): Promise<unknown> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await work(client);
-  } finally {
-    // Teardown must not mask the original result or error.
-    await client.close().catch(() => undefined);
-  }
+    return await Promise.race([
+      shared.run((client) => invokeFollowUp((plugin, m, i) => client.invokePluginRpc(plugin, m, i), method, input)),
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Optional Follow Up request timed out.")), FOLLOW_UP_TIMEOUT_MS); timer.unref?.(); }),
+    ]);
+  } finally { if (timer) clearTimeout(timer); }
+}
+
+/** Runs `work` against a scoped SDK view of the held connection, released before returning. */
+export async function withPaseo<T>(work: (paseo: PaseoApi) => Promise<T>): Promise<T> {
+  const { createPaseoApi } = loadClientModule();
+  return shared.run(async (client) => {
+    const paseo = createPaseoApi(client);
+    try {
+      return await work(paseo);
+    } finally {
+      // Releases this request's handles and listeners, never the socket.
+      await paseo.dispose().catch(() => undefined);
+    }
+  });
 }
 
 export interface DaemonStatus {
