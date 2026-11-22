@@ -3889,6 +3889,8 @@ await test("21. GitHub: button injects into the PR header action row", async () 
         // so appending must land us immediately after that wrapper.
         prevText: host.previousElementSibling?.textContent?.replace(/\s+/g, " ").trim() ?? null,
         shadowButtonText: btn?.textContent?.trim() ?? null,
+        glyphViewBox: btn?.querySelector(".glyph svg")?.getAttribute("viewBox") ?? null,
+        glyphFill: btn?.querySelector(".glyph svg path")?.getAttribute("fill") ?? null,
         count: document.querySelectorAll(sel).length,
         css: cs
           ? {
@@ -3907,6 +3909,8 @@ await test("21. GitHub: button injects into the PR header action row", async () 
     },
     [BUTTON, GH_ACTIONS],
   );
+  // The idle glyph is Paseo's own mark (paseoMark, cropped viewBox), in the button's accent via currentColor.
+  assertEq([info.glyphViewBox, info.glyphFill], ["96 82 540 540", "currentColor"], "the button shows Paseo's mark, not the old paper plane");
 
   assertEq(info.marker, "button", "marker attribute must be present");
   assertEq(info.mode, "anchored", "expected the primary (action row) anchor rung");
@@ -5088,6 +5092,13 @@ async function readOwners(page) {
     return {
       count: box.getAttribute("data-stp-owners"),
       label: box.querySelector(".lbl")?.textContent.trim() ?? null,
+      mark: (() => {
+        const m = box.querySelector(".lbl [data-stp-follow-up-mark]");
+        if (!m) return null;
+        const r = m.getBoundingClientRect();
+        const l = box.querySelector(".lbl").getBoundingClientRect();
+        return { name: m.getAttribute("aria-label"), svg: Boolean(m.querySelector("svg")), w: r.width, h: r.height, lblH: l.height };
+      })(),
       empty: box.querySelector("[data-stp-owners-empty]")?.textContent.trim() ?? null,
       unreachable: box.querySelector("[data-stp-owners-unreachable]")?.textContent.trim() ?? null,
       retry: box.querySelector("[data-stp-owners-retry]")?.textContent.trim() ?? null,
@@ -5144,6 +5155,10 @@ await test("36. Open workspace: the owning workspace, its state, and an Open lin
     assert(ui, "the section must render when the bridge sends a Follow-up view");
     assert(ui.bodyIsFirst, "the section leads the popover body, above the target");
     assertEq(ui.label, "Workspace for this PR", "singular label");
+    assert(ui.mark?.svg, "Follow-up's icon marks the section as Follow-up's data");
+    assertEq(ui.mark.name, "From Follow-up", "the mark names its source for screen readers");
+    assertEq([ui.mark.w, ui.mark.h], [14, 14], "the mark is 14px square");
+    assert(ui.mark.lblH <= 16, `the mark must not make the label taller than its 15.6px line (got ${ui.mark.lblH})`);
     assertEq(ui.rows.length, 1, "one owner");
     const [row] = ui.rows;
     assertEq(row.name, "brawny-dodo", "Paseo's workspace name");
@@ -5228,6 +5243,7 @@ await test("36d. Open workspace: no section when Follow-up is absent, the repo i
   for (const view of [null, "untracked"]) {
     await openWithFollowUp(view);
     assertEq(await readOwners(page), null, `no section for followUpView=${view}`);
+    assertEq(await page.evaluate(() => Boolean(document.querySelector("send-to-paseo-popover").shadowRoot.querySelector("[data-stp-follow-up-mark]"))), false, `no Follow-up mark without Follow-up data (followUpView=${view})`);
     if (view === null) await shotPopoverThemes(page, "popover-open-workspace-absent");
     await closePopover(page);
   }

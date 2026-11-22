@@ -52,6 +52,7 @@ import {
   externalIcon,
   folderIcon,
   folderPlusIcon,
+  followUpMark,
   renderProse,
 } from "./ui/dom";
 import { containKeyboard } from "./ui/keyboard";
@@ -836,7 +837,11 @@ class Popover {
    */
   private renderOwners(section: OwnerSection): HTMLElement {
     const box = el("div", { class: "field owners", "data-stp-owners": String(section.rows.length) });
-    box.append(el("span", { class: "lbl" }, [section.rows.length > 1 ? "Workspaces for this PR" : "Workspace for this PR"]));
+    // Follow-up's icon marks the section as Follow-up's data. Only here: this section exists only
+    // when the bridge returned a Follow-up view. The mark is decorative to the label's text (tests
+    // and screen readers read the label alone); its wrapper names the source.
+    const mark = el("span", { class: "fu-mark", role: "img", "aria-label": "From Follow-up", title: "From Follow-up", "data-stp-follow-up-mark": "" }, [followUpMark(14)]);
+    box.append(el("span", { class: "lbl owners-lbl" }, [mark, section.rows.length > 1 ? "Workspaces for this PR" : "Workspace for this PR"]));
     if (section.rows.length === 0) {
       // "Couldn't check" is not "none": never claim nothing owns the PR when a host was not asked.
       box.append(section.unreachable.length > 0
