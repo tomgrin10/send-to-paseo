@@ -281,6 +281,11 @@ One failure mode that has already cost time elsewhere in this codebase's lineage
    from `follow.pr-owner` when its agent is a candidate), and the popover says "Couldn't reach Follow-up just now"
    with a Retry. Only Follow-up absent, older, broken, off or the repository untracked mean no section. 2.4.1 turned
    a timeout into null and the "Workspace for this PR" section and its Open link vanished from an owned PR.
+5. **Invariant: Follow-up's row fields reach the browser unless the bridge has a reason to drop them
+   (follow-up-tone-passes-through).** `workspacesReply` in `server/follow-up.ts` is a zod object, and zod strips
+   unknown keys, so every field the extension reads must be listed there. `tone` is: an unknown value is dropped
+   with `.catch(undefined)`, never the row. 2026-11-22: Follow-up added `tone` for the page button and the
+   bridge would have silently stripped it. `server/follow-up.test.mjs` checks it survives to the resolve answer.
 There are no `setInterval`s in the plugin server, and there must not be: the rate-limit window
 is pruned lazily on each request precisely because a live timer in this subprocess is what hangs
 teardown. The one exception is the shared daemon's background reconnect: a one-shot, unref'd
@@ -308,6 +313,16 @@ probe and the self-check.
   must re-run injection as well as observation, even when the replacement makes no later mutations.
 - Every shadow host we attach to the page gets `containKeyboard()`. A new surface that accepts
   input and skips it will be silently unusable on both sites.
+- **The page button's workspace state reads, never asks (button-state-reads-the-warm-resolve).** It comes
+  from `shared/button-state.ts` (pure, unit-tested in `test/button-state.test.mjs`) over the resolve the
+  page already made (`warmPopoverResolution`), and over every later resolve the popover makes
+  (`onResolve`). It refreshes only on tab focus and after a send, at most once per `WORKSPACE_REFRESH_MS`
+  (60 s, the bridge's `gh` cache; one deferred refresh when asked inside the window, none while hidden). Hovering or focusing the button counts as asking (the user is about to read it).
+  No polling, no new endpoint: every refresh is a resolve, which runs `gh` on the bridge, and GitHub's
+  rate limit is shared with the user's agents. The test build shortens the window (`__STP_REFRESH_MS__`).
+- **Follow-up's group for "sending repairs" is `sending`, not `fixing`.** The extension knew only the
+  pre-2.0 `fixing`, so until 2026-11-22 a Sending row sorted after Quiet in the popover and wore its grey
+  dot. `GROUP_ORDER` (`shared/open-workspace.ts`) and the button accept both.
 - `mainworld.js` must stay a `world: "MAIN"` content script at `document_start`. An isolated-world
   patch of `history.pushState` never sees the page's own navigations, and the button would keep
   pointing at the PR you first loaded.
@@ -371,7 +386,7 @@ the mock bridge.
 
 ```sh
 cd plugin
-npm run verify                           # typecheck + 74 server checks + 33 node tests (host-client, settings, main-agent, follow-up, daemon-connection) + 10 agent-tools/chat + 1 native-tools; never touches ~/.config/gh
+npm run verify                           # typecheck + 74 server checks + 34 node tests (host-client, settings, main-agent, follow-up, daemon-connection) + 10 agent-tools/chat + 1 native-tools; never touches ~/.config/gh
 paseo plugin reload send-to-paseo && paseo plugin ls   # needs PASEO_PASSWORD on an authed daemon
 paseo plugin logs send-to-paseo          # expect the three dependency self-check lines, no stack traces
 time paseo plugin reload send-to-paseo   # must finish in seconds, twice — proves no reload hang
@@ -385,7 +400,7 @@ Require `running`, an empty `ERROR` column, and `bridge listening on http://127.
 cd extension
 npm run typecheck
 npm run build
-node ../test/e2e.mjs                     # 74 cases; builds dist/ and dist-test/ itself
+node ../test/e2e.mjs                     # 79 cases; builds dist/ and dist-test/ itself
 STP_ONLY=6b,9f node ../test/e2e.mjs      # just those cases, for proving an assertion can fail; never a release gate
 ```
 
@@ -435,12 +450,17 @@ fixture at a real repository — every screenshot in `docs/screenshots/` is comm
 | 20a–20c | The mode select is filtered per provider with the resolved default preselected and unattended modes marked, `modeId` reaches `/v1/send`, and a degraded resolve with an empty `pr.headBranch` reads as unknown rather than "a different branch". |
 | 21–27 | The GitHub adapter: anchor, Paseo's mark as the idle glyph (`paseoMark`), Primer token colours, hash rotation, URL parsing, sub-routes, fallback rungs, and a full resolve-and-send. |
 | 6b | Page button states: `sending` (spinner, `aria-busy`), `sent` (check + "Sent", held ~4 s, then idle), `failed` (red dot surviving close, cleared on next open), with the host's width unchanged across states. Uses the mock bridge's `sendDelayMs`. |
-| 9b, 9f | Pairing failures (`unauthorized`, `not_configured`) render the setup card (`data-stp-setup`), not an error card, with no raw code visible; 9f also checks the button's amber `unpaired` state, **Open setup** opening the options page, and the re-check when the tab becomes visible again. |
+| 9b, 9f | Pairing failures (`unauthorized`, `not_configured`) render the setup card (`data-stp-setup`), not an error card, with no raw code visible; 9f also checks the button's `unpaired` state (an ×, "Send to Paseo, Not set up", the fix in its tooltip), **Open setup** opening the options page, and the re-check when the tab becomes visible again. |
 | 35 | First install opens the options page once (`onInstalled`), in simple mode, leading with pairing, Advanced collapsed. |
 | 34 | The header settings cog: present in every phase, opens the extension's own options page in a new tab (asserted on the real `page` event, not on the intent), does **not** close the popover or discard a typed draft, and activates on Enter. Its glyph is built with `createElementNS`, never `innerHTML` — a content script shares its document with the host page and github.com enforces Trusted Types, which no fixture can reproduce. |
 | 33 | The merged-branch case end to end from the popover's side: a rank-2 candidate carrying `stackPrState: "merged"` is the default rather than `create`, is findable by typing "merged", and is described as landed work. The note wording is reason-scoped — it used to read "another branch of this stack" for *every* existing candidate, which is a false claim about a rank-3 "same project" workspace. The route-reason line (`data-stp-route-reason`, shown in the target box and again after a send) now uses the Paseo card's own words: "On the PR's branch" / "On <branch>, another branch of this stack" / "On <branch>, a merged branch of this stack" (amber) / "New worktree for #N". |
 | 36–36d | "Workspace for this PR": Follow-up's 14px icon (`followUpMark`, named "From Follow-up") leads the heading only when the section renders, without making the label taller; resolve asks for the Follow-up view only while Follow Up browser access is on; one owner, three owners plus `more`, a tracked repo with no owner, and no section when Follow-up is absent or the repo untracked. **Open** is a real `paseo://` anchor by default; the web toggle rewrites it to `app.paseo.sh` in a new tab (click intercepted, never the network), keeps the draft and persists. |
 | 36e | Follow-up not reached in time (`followUpUnreachable`) keeps the section: a quiet "Couldn't reach Follow-up just now" line with **Retry** (re-asks once, replaces the line with the real answer, keeps the draft), never "No workspace owns this PR yet"; and the registered owner's row with its Open link when `follow.pr-owner` answered. |
+| 37 | The page button's workspace state (direction D) for every state in DESIGN.md's table, on Graphite and GitHub, light and dark: the label never changes; a 9px solid dot for needs-you, a 7px dot for working, an × for unreachable / not set up, nothing otherwise; the chip word only in needs-you states, sharing the dot's tone, clamped, the only thing that widens the row; an older Follow-up without `tone` still gets a dot; accessible name "Send to Paseo, <state>"; the tooltip (not `title`) describes it; nothing `aria-live`. |
+| 37b | The tooltip shows on keyboard focus at once and on hover after a beat, under the button and inside the window, Esc hides it, it never covers the open composer; click opens the composer with the owning workspace first (never a deep link). |
+| 37c | Refresh rules: no resolve while the page sits (no polling); tab focus refreshes once, more focuses inside the window wait for one deferred refresh; after a send the popover's own resolve repaints the button. |
+| 37d | Sending and Sent win over the chip, which keeps its room so the host row never shifts. |
+| 37h | Only with `STP_HERO_SHOT=<file>`: captures the README hero's left panel from the real extension (GitHub fixture, dark, Agent working, composer open, fictional data). Otherwise a no-op pass. |
 | 29–32 | The Target combobox, which is a hand-built listbox rather than a `<select>`: filtering by workspace name, branch fragment, bare PR number with and without `#`, and multi-word tokens in any order; the empty-result row committing nothing; a keyboard-only path from open to send including wrap-around at both ends; and the two dismissal layers — Esc and click-outside must close the dropdown *before* the popover, which the popover's document-level capturing listeners have to cooperate on. |
 
 When changing a test, confirm it still fails for the right reason: break the thing on purpose,

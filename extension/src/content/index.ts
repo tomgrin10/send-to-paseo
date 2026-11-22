@@ -7,12 +7,15 @@ import { startGraphiteCompanion } from "./graphite-companion";
  */
 
 import type { PrRef } from "../shared/contract";
+import type { MultiResolveResponse, Result } from "../shared/messages";
+import { workspaceState } from "../shared/button-state";
 import { adapterFor } from "./adapters";
 import type { SiteAdapter } from "./adapters/types";
 import {
   closePopover,
   invalidateWarmResolve,
   isPairingFailure,
+  onResolve,
   togglePopover,
   warmPopoverResolution,
 } from "./popover";
@@ -21,12 +24,23 @@ import { BUTTON_TAG, MARKER_ATTR, createButton, type ButtonHandle, type ButtonMo
 const LOCATION_EVENT = "send-to-paseo:locationchange";
 const OBSERVER_DEBOUNCE_MS = 150;
 const LOCATION_POLL_MS = 1000;
+/**
+ * The button's workspace state refreshes on tab focus and after a send, at most
+ * once a minute: each refresh is a resolve, which runs `gh` on the bridge, and
+ * the bridge caches that for 60 s. No polling: a hidden tab never refreshes.
+ */
+declare const __STP_REFRESH_MS__: number;
+const WORKSPACE_REFRESH_MS = typeof __STP_REFRESH_MS__ === "number" ? __STP_REFRESH_MS__ : 60_000;
 
 interface Mounted {
   pr: PrRef;
   mode: ButtonMode;
   handle: ButtonHandle;
   adapter: SiteAdapter;
+  /** When this button last asked for a resolve (the warm-up counts). */
+  refreshedAt: number;
+  /** One deferred refresh, when one was asked for inside the minute. */
+  refreshTimer?: number;
 }
 
 let mounted: Mounted | null = null;
@@ -45,6 +59,7 @@ function samePr(a: PrRef, b: PrRef): boolean {
 
 function unmount(): void {
   closePopover();
+  if (mounted?.refreshTimer !== undefined) clearTimeout(mounted.refreshTimer);
   mounted?.handle.remove();
   mounted = null;
   // Belt and braces: if a previous script instance (extension reload, or a
@@ -115,14 +130,56 @@ function inject(): void {
       setButtonState: (state) => {
         // A late answer for a button that has since been replaced (SPA nav to
         // another PR) must not paint the new one.
-        if (mounted?.handle === handle) handle.setState(state);
+        if (mounted?.handle !== handle) return;
+        handle.setState(state);
+        // A send changes what the workspace is doing: ask again (rate-limited).
+        if (state === "sent") refreshWorkspace();
       },
     });
+  }, () => {
+    // About to read the tooltip: make it current (once a window at most, like focus).
+    if (mounted?.handle === handle) refreshWorkspace();
   });
 
   place(handle.host, placement);
-  mounted = { pr, mode: desiredMode, handle, adapter };
+  mounted = { pr, mode: desiredMode, handle, adapter, refreshedAt: Date.now() };
   warmAndReflect(handle, { pr, stackPrNumbers: adapter.findStackPrNumbers() });
+}
+
+/** Paint one resolve answer on the button: the pairing dot, and the workspace state under it. */
+function reflect(handle: ButtonHandle, result: Result<MultiResolveResponse>): void {
+  if (mounted?.handle !== handle) return;
+  const state = handle.getState();
+  if (isPairingFailure(result)) {
+    if (state === "idle") handle.setState("unpaired");
+  } else if (state === "unpaired") {
+    handle.setState("idle");
+  }
+  handle.setWorkspace(workspaceState(result));
+}
+
+/**
+ * Re-ask for the workspace state, at most once per WORKSPACE_REFRESH_MS. Asked
+ * inside the minute, it runs once when the minute is up (and only if the tab is
+ * visible then; a hidden tab waits for focus instead).
+ */
+function refreshWorkspace(): void {
+  const m = mounted;
+  if (!m) return;
+  const wait = m.refreshedAt + WORKSPACE_REFRESH_MS - Date.now();
+  if (wait > 0) {
+    if (m.refreshTimer === undefined) {
+      m.refreshTimer = setTimeout(() => {
+        m.refreshTimer = undefined;
+        if (mounted === m && document.visibilityState === "visible") refreshWorkspace();
+      }, wait) as unknown as number;
+    }
+    return;
+  }
+  m.refreshedAt = Date.now();
+  const ctx = { pr: m.pr, stackPrNumbers: m.adapter.findStackPrNumbers() };
+  invalidateWarmResolve(ctx);
+  warmAndReflect(m.handle, ctx);
 }
 
 /**
@@ -132,24 +189,21 @@ function inject(): void {
  * worker answers `not_configured` without touching the network at all.
  */
 function warmAndReflect(handle: ButtonHandle, ctx: { pr: PrRef; stackPrNumbers: number[] }): void {
-  void warmPopoverResolution(ctx).then((result) => {
-    if (mounted?.handle !== handle) return;
-    const state = handle.getState();
-    if (isPairingFailure(result)) {
-      if (state === "idle") handle.setState("unpaired");
-    } else if (state === "unpaired") {
-      handle.setState("idle");
-    }
-  });
+  void warmPopoverResolution(ctx).then((result) => reflect(handle, result));
 }
 
 /**
- * Pairing is finished in the options tab. When the user comes back here, the
- * dot should already be gone — so re-check, but only while it is showing.
+ * Back on the tab. Pairing may have been finished in the options tab, so the
+ * not-set-up × re-checks at once. Otherwise the workspace state refreshes,
+ * at most once a minute.
  */
 function onVisibilityChange(): void {
   if (document.visibilityState !== "visible" || !mounted) return;
-  if (mounted.handle.getState() !== "unpaired") return;
+  if (mounted.handle.getState() !== "unpaired" && mounted.handle.getWorkspace().mark !== "cross") {
+    refreshWorkspace();
+    return;
+  }
+  mounted.refreshedAt = Date.now();
   const ctx = { pr: mounted.pr, stackPrNumbers: mounted.adapter.findStackPrNumbers() };
   invalidateWarmResolve(ctx);
   warmAndReflect(mounted.handle, ctx);
@@ -223,6 +277,10 @@ function onLocationChange(): void {
 }
 
 function start(): void {
+  // Every resolve the popover makes for this PR repaints the button for free.
+  onResolve((pr, _stack, result) => {
+    if (mounted && samePr(mounted.pr, pr)) reflect(mounted.handle, result);
+  });
   runInjection();
   attachObserver();
 

@@ -179,7 +179,7 @@ Neutral grounds with one accent reserved for the action, and three status hues t
 - **Hairlines** (`border` / `hairline`, `hairline-strong`): row dividers, card footers, secondary button strokes, inputs.
 
 ### Status
-- **Needs-you Amber** (`statusWarning`; `needs-you-amber` with `-wash`/`-edge`): not paired yet, a merged or closed target branch, unattended permission modes, dry run, a host that did not answer while another did. Page-button dot uses `dot-amber` (Primer `--bgColor-attention-emphasis` on GitHub).
+- **Needs-you Amber** (`statusWarning`; `needs-you-amber` with `-wash`/`-edge`): not paired yet, a merged or closed target branch, unattended permission modes, dry run, a host that did not answer while another did. On the page button amber is Follow-up's `attention` tone (Primer `--fgColor-attention`); not paired is an ×, not amber, so it can't read as "Asks you".
 - **Failed Red** (`statusDanger`; `failed-red` with `-wash`/`-edge`): a failed send, the bridge not running, a rejected token, a required dependency missing. Page-button dot uses `dot-red` (Primer `--bgColor-danger-emphasis`).
 - **Done Green** (`statusSuccess`; `done-green`): sent, agent started, bridge running, a completed setup step, dependency found. Primer `--fgColor-success` for the sent icon on GitHub.
 
@@ -246,7 +246,18 @@ Gently rounded. Paseo: cards 12px, buttons, inputs, radios rows and tool rows 8p
 ### Page button (signature, extension)
 - **GitHub:** measured from the "Code" button: 32px high, 0 12px, 8px gap, 500 14px, 6px radius, colours from Primer `--button-default-*` tokens with measured fallbacks; 16px icon.
 - **Graphite:** 28px, 0 10px, 500 12.5px, transparent fill (inherits Graphite's row), hairline stroke, neutral grey hover tint `rgba(127,133,145,.14)`; 14px icon.
-- **States:** Paseo mark in accent at rest; muted spinner while sending; green check with a 180ms pop when sent; a 7px dot ringed in the button's surface for unpaired (amber) and failed (red). The label cell reserves "Send to Paseo" width so "Sent" never shifts the host row. Reduced motion slows the spinner to 2.4s and drops the pop.
+- **States:** Paseo mark in accent at rest; muted spinner while sending; green check with a 180ms pop when sent; a 9px red dot for failed. The label cell reserves "Send to Paseo" width so "Sent" never shifts the host row. Reduced motion slows the spinner to 2.4s and drops the pop.
+- **Workspace state on the button (direction D, 2026-11-22).** Under the send states, the button shows the PR's workspace from the resolve the page already made (no request of its own; plain label until it lands, never a spinner). The label never changes. A mark on the Paseo glyph's bottom-right corner, ringed 2px in the button's surface, read by **shape before colour**:
+
+  | State | Mark | Chip | Accessible name |
+  | --- | --- | --- | --- |
+  | No owner, waiting on others, done, quiet | none | none | Send to Paseo |
+  | Agent working / Follow-up sending | 7px blue dot (`accent`) | none | Send to Paseo, Agent working |
+  | Needs you (Asks you, Conflict, Merge ready, Agent closed, Permission, Error, Finished) | 9px solid dot in Follow-up's `tone` | the word after "Needs you · " | Send to Paseo, \<word\> |
+  | Two or more need you | 9px dot, the first row's tone | "N need you" | Send to Paseo, N need you |
+  | Couldn't reach Paseo / not set up | × of two 2px bars in `foregroundMuted` (`--fgColor-muted`) | none | Send to Paseo, Couldn't reach Paseo / Not set up |
+
+  Tones are Follow-up's (`attention` amber, `danger` red, `success` green, `accent` blue, `muted`), read from Primer's `--fgColor-*` on GitHub. The glyph is cut away around the mark (a mask), never ringed in a guessed surface colour: Graphite's button is transparent. The chip: 600 12px (11.5px on Graphite), 0 7px, fully round, a 10 % tint (16 % dark) of the tone with a 35 % inset ring, and its word in the tone's stronger text step (`--stp-c-*`: light #7d4e00 / #a40e26 / #116329, dark #e3b341 / #ff7b72 / #56d364) so it clears AA 4.5:1 on the tint (the plain tone measured 3.5-4.2). At most 112px with an ellipsis; it eases in over 160ms when the resolve lands (none with reduced motion). Only needs-you states widen the row; while sending or sent show, the chip keeps its room hidden, so the row never shifts; failed and not set up drop it. With an older Follow-up (no `tone`) a needs-you chip is amber whatever the word, "Merge ready" included: that is the fallback, not a bug. The tooltip (GitHub's dark tooltip, 12px, fixed under the button) shows on hover after 350ms and on keyboard focus at once, Esc hides it: Follow-up's full line, "\<workspace\> on \<machine\>", "Also \<workspace\> on \<machine\>: \<word\>" for each other workspace that needs you, then "Send an instruction, or open it in Paseo"; for the × it says how to fix it. Hovering or focusing the button also refreshes the state (inside the same once-a-minute window). Nothing is `aria-live`. Click always opens the composer; the button never deep-links.
 
 ### Cards / Containers
 - **Corner Style:** 12px (Paseo), 10px (popover, options sections).

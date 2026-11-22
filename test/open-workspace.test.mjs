@@ -36,6 +36,13 @@ test("owners merge across hosts, most urgent first, three at most, the rest coun
   assert.equal(out.more, 2, "one from the bridge, one past the limit here");
 });
 
+// Follow-up's group for "Follow-up is sending repairs" is "sending" (HOME_GROUPS); the extension knew only
+// the pre-2.0 "fixing", so a Sending row sorted after Quiet and wore the popover's grey dot.
+test("a Sending row ranks after Needs you and before Running, like Follow-up's Home", () => {
+  const out = ownerSection([slice({ workspaces: [row("q", { group: "quiet" }), row("r", { group: "running" }), row("s", { group: "sending" }), row("n", { group: "needs" })], more: 0 })]);
+  assert.deepEqual(out.rows.map((r) => r.title), ["n", "s", "r"]);
+});
+
 test("links that are not Paseo agent links are dropped, never rendered", () => {
   const bad = [
     { deepLink: "javascript:alert(1)" }, { deepLink: "https://evil.example/h/s/agent/a" }, { deepLink: "paseo://h/s/agent/a?message=hi" },
@@ -54,7 +61,7 @@ test("the open target picks the desktop or the web link", () => {
 
 test("main agent status reads as a phrase", () => {
   assert.equal(agentStatusText("permission", "Needs you · Merge ready"), "agent waiting for permission");
-  assert.equal(agentStatusText("running", "Follow-up is fixing · 3 threads"), "agent running");
+  assert.equal(agentStatusText("running", "Sending · 3 threads"), "agent running");
   assert.equal(agentStatusText("running", "Running"), "", "not repeated under a Running state");
   assert.equal(agentStatusText("permission", "Needs you · Permission"), "");
   assert.equal(agentStatusText(""), "");

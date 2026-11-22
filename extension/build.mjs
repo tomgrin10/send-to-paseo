@@ -356,6 +356,9 @@ const options = {
   logLevel: "info",
   define: {
     __STP_EXTRA_HOSTS__: JSON.stringify(extraHosts),
+    // The button's workspace refresh window (content/index.ts). The test build
+    // shortens it so e2e can prove the once-a-minute rule without waiting one.
+    __STP_REFRESH_MS__: String(isTest ? 4000 : 60000),
   },
 };
 
