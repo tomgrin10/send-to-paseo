@@ -3889,6 +3889,8 @@ await test("21. GitHub: button injects into the PR header action row", async () 
         // so appending must land us immediately after that wrapper.
         prevText: host.previousElementSibling?.textContent?.replace(/\s+/g, " ").trim() ?? null,
         shadowButtonText: btn?.textContent?.trim() ?? null,
+        glyphViewBox: btn?.querySelector(".glyph svg")?.getAttribute("viewBox") ?? null,
+        glyphFill: btn?.querySelector(".glyph svg path")?.getAttribute("fill") ?? null,
         count: document.querySelectorAll(sel).length,
         css: cs
           ? {
@@ -3907,6 +3909,8 @@ await test("21. GitHub: button injects into the PR header action row", async () 
     },
     [BUTTON, GH_ACTIONS],
   );
+  // The idle glyph is Paseo's own mark (paseoMark, cropped viewBox), in the button's accent via currentColor.
+  assertEq([info.glyphViewBox, info.glyphFill], ["96 82 540 540", "currentColor"], "the button shows Paseo's mark, not the old paper plane");
 
   assertEq(info.marker, "button", "marker attribute must be present");
   assertEq(info.mode, "anchored", "expected the primary (action row) anchor rung");

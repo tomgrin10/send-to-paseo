@@ -14,6 +14,12 @@ popover. No wire change.
   failed 36 with `Follow-up's icon marks the section as Follow-up's data`. The full suite runs in CI.
 - Screenshots (synthetic): `docs/screenshots/popover-open-workspace-{owned,several,none,unreachable,unreachable-owner}-{light,dark}.png` re-rendered.
 
+Same PR: the page button's paper plane is now Paseo's own mark (`paseoMark`: the path from Paseo's `PaseoLogo`,
+`currentColor` in the accent, viewBox cropped to the mark so it fills the 16px / 14px slot like the plane). Spinner
+and check states unchanged. Case 21 asserts the cropped viewBox and `currentColor` fill; widening the viewBox back to
+the source's 700 square failed it. Cases 1, 6b, 21, 22, 23 PASS; `{github-,}injected-button-{light,dark}.png`
+re-rendered and compared at 4x with the previous ones.
+
 ## 2026-11-18 — settings version labels
 
 `npm run verify` passed: typecheck, 21 unit tests, shipping build and **74/74 Chromium cases**,

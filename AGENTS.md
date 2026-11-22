@@ -433,7 +433,7 @@ fixture at a real repository — every screenshot in `docs/screenshots/` is comm
 | 19, 19b, 28, 28b | Keyboard containment on Graphite and on GitHub, with faithful stand-ins for both shortcut layers. `19b`/`28b` cover the Target combobox's own search input, which is a second text-entry surface inside the same shadow root and would otherwise be assumed covered rather than proved covered. |
 | 20 | One workspace per stack: a stack sibling is the default, not `create`. |
 | 20a–20c | The mode select is filtered per provider with the resolved default preselected and unattended modes marked, `modeId` reaches `/v1/send`, and a degraded resolve with an empty `pr.headBranch` reads as unknown rather than "a different branch". |
-| 21–27 | The GitHub adapter: anchor, Primer token colours, hash rotation, URL parsing, sub-routes, fallback rungs, and a full resolve-and-send. |
+| 21–27 | The GitHub adapter: anchor, Paseo's mark as the idle glyph (`paseoMark`), Primer token colours, hash rotation, URL parsing, sub-routes, fallback rungs, and a full resolve-and-send. |
 | 6b | Page button states: `sending` (spinner, `aria-busy`), `sent` (check + "Sent", held ~4 s, then idle), `failed` (red dot surviving close, cleared on next open), with the host's width unchanged across states. Uses the mock bridge's `sendDelayMs`. |
 | 9b, 9f | Pairing failures (`unauthorized`, `not_configured`) render the setup card (`data-stp-setup`), not an error card, with no raw code visible; 9f also checks the button's amber `unpaired` state, **Open setup** opening the options page, and the re-check when the tab becomes visible again. |
 | 35 | First install opens the options page once (`onInstalled`), in simple mode, leading with pairing, Advanced collapsed. |

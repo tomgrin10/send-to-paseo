@@ -6,7 +6,7 @@
  * a custom tag, which also makes the marker guard trivially greppable.
  */
 
-import { checkIcon, el, sendIcon, spinnerIcon } from "./dom";
+import { checkIcon, el, paseoMark, spinnerIcon } from "./dom";
 import { containKeyboard } from "./keyboard";
 import { BUTTON_CSS } from "./styles";
 
@@ -92,7 +92,7 @@ export function createButton(
   // `textContent`, which screen readers and the e2e suite read as the label.
   const text = el("span", { class: "text" }, [IDLE_LABEL]);
   const label = el("span", { class: "label" }, [text]);
-  glyphBox.append(sendIcon());
+  glyphBox.append(paseoMark());
   button.append(icon, label);
   button.addEventListener("click", (e) => {
     e.preventDefault();
@@ -113,7 +113,7 @@ export function createButton(
     if (glyph === next) return;
     glyph = next;
     glyphBox.textContent = "";
-    glyphBox.append(next === "spinner" ? spinnerIcon() : next === "check" ? checkIcon() : sendIcon());
+    glyphBox.append(next === "spinner" ? spinnerIcon() : next === "check" ? checkIcon() : paseoMark());
   };
 
   const setState = (next: ButtonState) => {
