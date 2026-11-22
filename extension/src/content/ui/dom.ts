@@ -146,3 +146,58 @@ export function branchIcon(size = 12): SVGElement {
 export function copyIcon(size = 12): SVGElement {
   return lucide(["M10 8h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2Z", "M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"], size, "2");
 }
+
+/**
+ * Follow-up's app icon, drawn small beside "Workspace for this PR" so the
+ * section reads as Follow-up's data rather than Send to Paseo's own. It is the
+ * same artwork as paseo-follow-up's `assets/icon.svg` (256-unit tile, the
+ * trail stroke, its start ring and the lilac end dot), built node by node for
+ * the same Trusted Types reason as `cogIcon()`. Vector, so it stays crisp at 2x.
+ * Decorative: the wrapper in the popover carries the accessible name.
+ */
+export function followUpMark(size = 14): SVGElement {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 256 256");
+  svg.setAttribute("width", String(size));
+  svg.setAttribute("height", String(size));
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  const tile = document.createElementNS(NS, "rect");
+  tile.setAttribute("width", "256");
+  tile.setAttribute("height", "256");
+  tile.setAttribute("rx", "52");
+  tile.setAttribute("fill", "#222126");
+  const g = document.createElementNS(NS, "g");
+  g.setAttribute("transform", "translate(24.8 24.8) scale(8.6)");
+  const trail = document.createElementNS(NS, "path");
+  trail.setAttribute(
+    "d",
+    "M6.95 19.21C7.25 19.11 8.19 18.91 8.75 18.59C9.3 18.27 9.7 18 10.29 17.29C10.89 16.58 11.8 15.23 12.34 " +
+      "14.32C12.87 13.41 13.14 12.75 13.51 11.84C13.88 10.93 14.29 9.96 14.57 8.87C14.84 7.78 15.17 6.23 15.18 " +
+      "5.28C15.2 4.33 14.88 3.61 14.63 3.18C14.38 2.74 14.04 2.66 13.7 2.68C13.36 2.7 12.92 2.85 12.58 3.3C12.25 " +
+      "3.75 11.93 4.48 11.72 5.4C11.5 6.33 11.32 7.8 11.29 8.87C11.25 9.94 11.36 10.93 11.53 11.84C11.71 12.75 " +
+      "11.97 13.58 12.34 14.32C12.71 15.06 13.23 15.8 13.76 16.3C14.29 16.79 14.98 17.03 15.49 17.29C16.01 17.55 " +
+      "16.63 17.75 16.86 17.85",
+  );
+  trail.setAttribute("fill", "none");
+  trail.setAttribute("stroke-linecap", "round");
+  trail.setAttribute("stroke-linejoin", "round");
+  const ring = document.createElementNS(NS, "circle");
+  ring.setAttribute("cx", "4.85");
+  ring.setAttribute("cy", "19.15");
+  ring.setAttribute("r", "2.14");
+  ring.setAttribute("fill", "none");
+  for (const node of [trail, ring]) {
+    node.setAttribute("stroke", "#ffffff");
+    node.setAttribute("stroke-width", "1.42");
+  }
+  const dot = document.createElementNS(NS, "circle");
+  dot.setAttribute("cx", "20.01");
+  dot.setAttribute("cy", "18.03");
+  dot.setAttribute("r", "1.92");
+  dot.setAttribute("fill", "#B79CF0");
+  g.append(trail, ring, dot);
+  svg.append(tile, g);
+  return svg as unknown as SVGElement;
+}

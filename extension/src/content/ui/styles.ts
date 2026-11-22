@@ -613,6 +613,12 @@ select:focus, textarea:focus { outline: 2px solid var(--stp-accent); outline-off
 /* Workspace for this PR (Follow-up). A compact list, not cards: up to three
    rows of name, Follow-up's one line and an Open link. The dot carries the
    same urgency as the line's colour so the list scans without reading. */
+/* Follow-up's icon before the label: 14px inside the label's 15.6px line, so
+   the heading keeps its height. In dark the tile (#222126) sits on a near
+   equal surface, so a white hairline (invisible on light) keeps its edge. */
+.field > span.owners-lbl { display: flex; align-items: center; gap: 6px; }
+.fu-mark { flex: none; display: inline-flex; width: 14px; height: 14px; border-radius: 3px; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1); }
+.fu-mark svg { display: block; width: 14px; height: 14px; }
 .owner-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--stp-border); border-radius: var(--stp-radius); background: var(--stp-bg-subtle); }
 .owner { display: flex; align-items: flex-start; gap: 8px; padding: 7px 9px; }
 .owner + .owner { border-top: 1px solid var(--stp-border); }

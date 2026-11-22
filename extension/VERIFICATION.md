@@ -1,5 +1,19 @@
 # Verification record
 
+## 2026-11-22 — Follow-up's icon on "Workspace for this PR"
+
+The section heading now starts with Follow-up's app icon (14px, vector, built node by node like the
+cog; same artwork as paseo-follow-up's `assets/icon.svg`), so the rows read as Follow-up's data. It
+appears only where the section renders; a white hairline keeps the dark tile's edge on the dark
+popover. No wire change.
+
+- Extension typecheck clean; `npm run test:unit` 21/21.
+- Chromium (headless, Linux): `STP_ONLY=36,36b,36c,36d,36e` 5/5 PASS. Case 36 asserts the mark,
+  its accessible name, 14×14 and a label no taller than its 15.6px line; 36d asserts no mark when
+  Follow-up is absent or the repo untracked. Proven able to fail: dropping the mark from the label
+  failed 36 with `Follow-up's icon marks the section as Follow-up's data`. The full suite runs in CI.
+- Screenshots (synthetic): `docs/screenshots/popover-open-workspace-{owned,several,none,unreachable,unreachable-owner}-{light,dark}.png` re-rendered.
+
 ## 2026-11-18 — settings version labels
 
 `npm run verify` passed: typecheck, 21 unit tests, shipping build and **74/74 Chromium cases**,
