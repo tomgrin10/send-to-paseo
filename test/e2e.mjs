@@ -1555,15 +1555,18 @@ await test("9f. First-run path: no token stored -> not_configured, no request se
     const dot = host.shadowRoot.querySelector(".dot");
     return {
       state: host.getAttribute("data-stp-state"),
-      title: host.shadowRoot.querySelector("button").title,
-      label: host.shadowRoot.querySelector("button").textContent.trim(),
+      tip: [...host.shadowRoot.querySelectorAll("[data-stp-tip] .tip-line")].map((n) => n.textContent).join(" · "),
+      name: host.shadowRoot.querySelector("button").getAttribute("aria-label"),
+      label: host.shadowRoot.querySelector("button .text").textContent.trim(),
       dotShown: getComputedStyle(dot).display !== "none",
+      cross: getComputedStyle(dot, "::before").content !== "none",
     };
   }, BUTTON);
   assertEq(btn.state, "unpaired", "button state");
-  assertEq(btn.title, "Set up Send to Paseo to start sending", "button tooltip");
+  assertEq(btn.tip, "Not set up · Open Send to Paseo's settings to pair this browser with Paseo", "button tooltip says how to fix it");
+  assertEq(btn.name, "Send to Paseo, Not set up", "accessible name carries the state");
   assertEq(btn.label, "Send to Paseo", "label unchanged");
-  assert(btn.dotShown, "amber dot visible on the button icon");
+  assert(btn.dotShown && btn.cross, "an × on the button icon (direction D: not set up reads by shape, not as amber)");
   await shot(page, "error-not-paired", POPOVER_CLIP);
 
   // "Open setup" opens the options page and leaves the card up.
@@ -1586,7 +1589,7 @@ await test("9f. First-run path: no token stored -> not_configured, no request se
   return [
     `code=${ui.code}`,
     "no HTTP request is made when unpaired",
-    "button: amber dot + setup tooltip; Open setup -> options page",
+    "button: × + setup tooltip; Open setup -> options page",
     "returning to the tab after pairing re-resolves: popover ready, dot cleared",
   ];
 });
@@ -5218,7 +5221,7 @@ await test("36b. Open workspace: several owners, most urgent first, capped at th
   const ui = await readOwners(page);
   assertEq(ui.label, "Workspaces for this PR", "plural label");
   assertEq(ui.rows.map((r) => r.name).join(","), "brawny-dodo,review-pass,stack-base", "the bridge's urgency order is kept");
-  assertEq(ui.rows.map((r) => r.state).join(" | "), "Needs you · Merge ready | Follow-up is fixing · 3 threads | Running", "each row has Follow-up's line");
+  assertEq(ui.rows.map((r) => r.state).join(" | "), "Needs you · Merge ready | Sending · 3 threads | Running", "each row has Follow-up's line");
   assertEq(ui.more, "+2 more, see Follow-up in Paseo", "the rest are counted, not listed");
   assertEq(ui.rows.map((r) => r.agent).join("|"), "· agent idle|· agent running|", "the agent status is dropped where the state already says Running");
   assert(ui.rows.every((r) => r.href.startsWith("paseo://h/srv_Ab3xY9pQ2mNt/agent/agt_owner_")), "every row opens its own main agent");
@@ -5299,6 +5302,346 @@ await test("36e. Open workspace: Follow-up not reached in time says so with Retr
   await shotPopoverThemes(page, "popover-open-workspace-unreachable-owner");
   await closePopover(page);
   return [ui.unreachable, `retry: ${after.rows[0].name} — ${after.rows[0].state}`, `fallback: ${fb.rows[0].name} — ${fb.rows[0].state} — ${fb.rows[0].href}`];
+});
+
+/* ---- 37. the page button shows the PR's workspace state (direction D) ------- */
+/* Fictional rows only (quiet-heron, bold-otter on the mock machine). Every    */
+/* state in DESIGN.md's "Workspace state on the button" table, on Graphite and */
+/* GitHub, light and dark.                                                     */
+
+const WS = (id, patch) => ({ workspaceId: `wks_ws_${id}`, agentId: `agt_ws_${id}`, title: id, agentStatus: "idle", group: "waiting", state: "Waiting on others · Review requested", ...patch });
+const WS_STATES = [
+  { id: "none", rows: [], want: { ws: "none", chip: "", name: null, tip: "Send an instruction to a Paseo agent for PR #" } },
+  { id: "working", rows: [WS("quiet-heron", { group: "running", agentStatus: "running", state: "Running", tone: "accent" })], want: { ws: "working", tone: "accent", chip: "", name: "Send to Paseo, Agent working", tip: "Running" } },
+  { id: "asks", rows: [WS("quiet-heron", { group: "needs", state: "Needs you · Asks you", tone: "attention" })], want: { ws: "needs", tone: "attention", chip: "Asks you", name: "Send to Paseo, Asks you", tip: "Needs you · Asks you" } },
+  { id: "two", rows: [WS("quiet-heron", { group: "needs", state: "Needs you · Asks you", tone: "attention" }), WS("bold-otter", { group: "needs", state: "Needs you · Conflict", tone: "danger" })], want: { ws: "needs", tone: "attention", chip: "2 need you", name: "Send to Paseo, 2 need you", tip: "Needs you · Asks you · quiet-heron on mock-machine · Also bold-otter on mock-machine: Conflict" } },
+  { id: "fixing", rows: [WS("quiet-heron", { group: "sending", agentStatus: "running", state: "Sending · 2 failing checks", tone: "accent" })], want: { ws: "working", tone: "accent", chip: "", name: "Send to Paseo, Agent working", tip: "Sending · 2 failing checks" } },
+  { id: "conflict", rows: [WS("quiet-heron", { group: "needs", state: "Needs you · Conflict", tone: "danger" })], want: { ws: "needs", tone: "danger", chip: "Conflict", name: "Send to Paseo, Conflict", tip: "Needs you · Conflict" } },
+  { id: "merge", rows: [WS("quiet-heron", { group: "needs", state: "Needs you · Merge ready", tone: "success" })], want: { ws: "needs", tone: "success", chip: "Merge ready", name: "Send to Paseo, Merge ready", tip: "Needs you · Merge ready" } },
+  { id: "waiting", rows: [WS("quiet-heron", { tone: "muted" })], want: { ws: "none", chip: "", name: null, tip: "Waiting on others · Review requested" } },
+  { id: "done", rows: [WS("quiet-heron", { group: "quiet", state: "Done · ready to archive", tone: "success" })], want: { ws: "none", chip: "", name: null, tip: "Done · ready to archive" } },
+  { id: "closed", rows: [WS("quiet-heron", { group: "needs", agentStatus: "closed", state: "Needs you · Agent closed", tone: "attention" })], want: { ws: "needs", tone: "attention", chip: "Agent closed", name: "Send to Paseo, Agent closed", tip: "Needs you · Agent closed" } },
+  { id: "old-follow-up", rows: [WS("quiet-heron", { group: "needs", state: "Needs you · Merge ready" })], want: { ws: "needs", tone: "attention", chip: "Merge ready", name: "Send to Paseo, Merge ready", tip: "Needs you · Merge ready" } },
+  { id: "unreachable", setup: "down", want: { ws: "cross", tone: "muted", chip: "", name: "Send to Paseo, Couldn't reach Paseo", tip: "Couldn't reach Paseo" } },
+  { id: "unpaired", setup: "unpaired", want: { state: "unpaired", chip: "", name: "Send to Paseo, Not set up", tip: "Not set up" } },
+];
+
+async function readWs(page) {
+  return page.evaluate((sel) => {
+    const host = document.querySelector(sel);
+    const root = host.shadowRoot;
+    const btn = root.querySelector("button");
+    const chip = root.querySelector("[data-stp-chip]");
+    const dot = root.querySelector(".dot");
+    const tip = root.querySelector("[data-stp-tip]");
+    const ds = getComputedStyle(dot);
+    const cs = getComputedStyle(chip);
+    return {
+      state: host.getAttribute("data-stp-state"),
+      ws: host.getAttribute("data-stp-ws"),
+      tone: host.getAttribute("data-stp-ws-tone"),
+      label: btn.querySelector(".text").textContent.trim(),
+      name: btn.getAttribute("aria-label"),
+      describedBy: btn.getAttribute("aria-describedby"),
+      live: root.querySelector("[aria-live]") !== null || btn.hasAttribute("aria-live"),
+      title: btn.getAttribute("title"),
+      chip: cs.display === "none" ? "" : chip.textContent,
+      chipVisible: cs.display !== "none" && cs.visibility !== "hidden",
+      chipColor: cs.color,
+      chipWidth: chip.getBoundingClientRect().width,
+      dot: ds.display === "none" ? null : { w: parseFloat(ds.width), bg: ds.backgroundColor, x: getComputedStyle(dot, "::before").content !== "none" },
+      tipText: [...tip.querySelectorAll(".tip-line")].map((n) => n.textContent),
+      tipOpen: tip.hasAttribute("data-open"),
+      width: host.getBoundingClientRect().width,
+      height: host.getBoundingClientRect().height,
+    };
+  }, BUTTON);
+}
+
+/** Load the page with the bridge in state `s`; resolves when the button has painted it. */
+async function showWs(url, s) {
+  await bridgeReset();
+  if (s.setup === "unpaired") await seedSettings(context, extId, { token: "" });
+  if (s.setup === "down") await bridge.close();
+  if (!s.setup) await bridgeConfig({ followUpView: "rows", followUpRows: s.rows, followUpMore: 0 });
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await waitForButton(page);
+  try {
+    if (s.want.state) await page.waitForFunction(([sel, st]) => document.querySelector(sel).getAttribute("data-stp-state") === st, [BUTTON, s.want.state], { timeout: 12000 });
+    else await page.waitForFunction(([sel, ws]) => document.querySelector(sel).getAttribute("data-stp-ws") === ws, [BUTTON, s.want.ws], { timeout: 20000 });
+  } catch (e) {
+    const got = await readWs(page).catch(() => null);
+    const asked = (await bridgeLog().catch(() => [])).filter((r) => r.path === "/v1/resolve").map((r) => r.body?.followUp);
+    throw new Error(`${s.id}: wanted ${s.want.state ?? s.want.ws}, button shows ${JSON.stringify(got)}; resolves asked followUp=${JSON.stringify(asked)}`);
+  }
+  // Let the chip's entrance (160ms) finish before anything measures the button.
+  await page.evaluate((sel) => Promise.all(document.querySelector(sel).shadowRoot.getAnimations().map((a) => a.finished)), BUTTON);
+  // "none" is also the first paint: wait for the resolve to land before reading it.
+  if (s.want.ws === "none") {
+    const until = Date.now() + 10000;
+    while (!(await bridgeLog()).some((r) => r.path === "/v1/resolve") && Date.now() < until) await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 300));
+  }
+}
+async function restoreWs(s) {
+  if (s.setup === "down") {
+    bridge = createMockBridge({ port: BRIDGE_PORT, token: DEFAULT_TOKEN, quiet: true });
+    await bridge.listen();
+  }
+  if (s.setup === "unpaired") await seedSettings(context, extId, {});
+  await bridgeConfig({ followUpView: null, followUpRows: [] });
+}
+
+/**
+ * STP_STATE_SHOTS=<dir>: also save every state of case 37 at 2x, at rest and with the tooltip
+ * (keyboard focus), light and dark, plus a 390px-wide window. For design review only: written
+ * outside the repo, never committed (docs/screenshots holds the committed ones).
+ */
+const STATE_SHOTS = process.env.STP_STATE_SHOTS || null;
+async function stateShots(site, id) {
+  if (!STATE_SHOTS) return;
+  mkdirSync(STATE_SHOTS, { recursive: true });
+  const cdp = await page.context().newCDPSession(page);
+  const vp = page.viewportSize() ?? { width: 1280, height: 800 };
+  const take = async (name, width) => {
+    await cdp.send("Emulation.setDeviceMetricsOverride", { width, height: vp.height, deviceScaleFactor: 2, mobile: false });
+    await new Promise((r) => setTimeout(r, 150));
+    if (width < 600) {
+      // A phone-width window. The fixtures don't reflow like the real sites, so bring the
+      // button into view (the page scrolls sideways) and take the window around it.
+      await page.evaluate((sel) => document.querySelector(sel).scrollIntoView({ block: "center", inline: "end" }), BUTTON);
+      await new Promise((r) => setTimeout(r, 100));
+      const m = await page.locator(BUTTON).boundingBox();
+      await page.screenshot({ path: join(STATE_SHOTS, `${name}.png`), clip: { x: 0, y: Math.max(0, m.y - 60), width, height: 180 } });
+      await page.evaluate(() => window.scrollTo(0, 0));
+      return;
+    }
+    const b = await page.locator(BUTTON).boundingBox();
+    const clipW = Math.min(width, 560);
+    const x = Math.max(0, Math.min(b.x + b.width + 40 - clipW, width - clipW));
+    await page.screenshot({ path: join(STATE_SHOTS, `${name}.png`), clip: { x, y: Math.max(0, b.y - 14), width: clipW, height: b.height + 90 } });
+  };
+  for (const scheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.mouse.move(1, 1);
+    await page.locator("body").click({ position: { x: 2, y: 2 } }).catch(() => {});
+    await take(`${site}-${id}-${scheme}`, vp.width);
+    await page.locator("[data-stp-button]").focus();
+    await page.keyboard.press("Shift+Tab");
+    await page.keyboard.press("Tab");
+    await take(`${site}-${id}-${scheme}-tip`, vp.width);
+    await page.keyboard.press("Escape");
+    if (["merge", "two", "closed", "unreachable"].includes(id)) {
+      await page.locator("body").click({ position: { x: 2, y: 2 } }).catch(() => {});
+      await take(`${site}-${id}-${scheme}-390`, 390);
+    }
+  }
+  await cdp.send("Emulation.clearDeviceMetricsOverride");
+  await cdp.detach();
+  await page.emulateMedia({ colorScheme: "light" });
+}
+
+const WS_SITES = [
+  { site: "graphite", url: () => fixtures.url() },
+  { site: "github", url: () => fixtures.githubUrl() },
+];
+
+await test("37. Button workspace state: every state on Graphite and GitHub, light and dark (dot by shape, chip only when it's your turn)", async () => {
+  const notes = [];
+  let plainWidth = 0;
+  for (const { site, url } of WS_SITES) {
+    for (const s of WS_STATES) {
+      try {
+        await showWs(url(), s);
+        const light = await readWs(page);
+        const id = `${site}/${s.id}`;
+        assertEq(light.label, "Send to Paseo", `${id}: the label never changes`);
+        if (s.want.ws) assertEq(light.ws, s.want.ws, `${id}: mark`);
+        if (s.want.state) assertEq(light.state, s.want.state, `${id}: send state`);
+        if (s.want.tone) assertEq(light.tone, s.want.tone, `${id}: tone`);
+        assertEq(light.chip, s.want.chip, `${id}: chip word`);
+        assertEq(light.name, s.want.name, `${id}: accessible name (null = the visible label)`);
+        assertEq(light.describedBy, "stp-tip", `${id}: the tooltip describes the button`);
+        assert(!light.live, `${id}: nothing on the button is aria-live`);
+        assertEq(light.title, null, `${id}: no native title (it never shows on focus); the tooltip replaces it`);
+        assert(light.tipText.join(" · ").startsWith(s.want.tip), `${id}: tooltip "${light.tipText.join(" · ")}" starts with "${s.want.tip}"`);
+        // Shape before colour.
+        if (light.ws === "needs") assert(light.dot && light.dot.w === 9 && !light.dot.x, `${id}: a 9px solid dot (${JSON.stringify(light.dot)})`);
+        if (light.ws === "working") assert(light.dot && light.dot.w === 7, `${id}: the small working dot (${JSON.stringify(light.dot)})`);
+        if (light.ws === "cross" || light.state === "unpaired") assert(light.dot && light.dot.x, `${id}: an × (${JSON.stringify(light.dot)})`);
+        if (light.ws === "none" && light.state === "idle") assertEq(light.dot, null, `${id}: no mark`);
+        if (light.chip) {
+          assert(light.chipColor !== "rgb(0, 0, 0)" && light.chipColor !== light.dot.bg, `${id}: the chip word uses the stronger text step of the dot's tone (${light.chipColor} vs dot ${light.dot.bg})`);
+          assert(light.chipWidth <= 112.5, `${id}: chip clamped (${light.chipWidth}px)`);
+          assert(light.width > plainWidth, `${id}: the row widens only with a chip (${plainWidth} -> ${light.width})`);
+        } else if (s.id === "none") {
+          plainWidth = light.width;
+        } else if (light.state === "idle") {
+          assert(Math.abs(light.width - plainWidth) < 0.5, `${id}: no chip, no width change (${plainWidth} -> ${light.width})`);
+        }
+        await page.emulateMedia({ colorScheme: "dark" });
+        const dark = await readWs(page);
+        if (light.chip) assert(dark.chipColor !== light.chipColor, `${id}: the dark tone is its own (${light.chipColor} vs ${dark.chipColor})`);
+        assertEq([dark.ws, dark.chip, dark.name], [light.ws, light.chip, light.name], `${id}: same state in dark`);
+        await page.emulateMedia({ colorScheme: "light" });
+        await stateShots(site, s.id);
+        notes.push(`${id}: ${light.ws ?? light.state}${light.chip ? ` "${light.chip}"` : ""} · ${light.name ?? "Send to Paseo"} · tip "${light.tipText[0]}"`);
+      } catch (e) {
+        throw new Error(`${site}/${s.id}: ${e.message}${e.message === "fetch failed" ? ` (${e.stack?.split("\n").slice(1, 4).join(" | ")})` : ""}`);
+      } finally {
+        await page.emulateMedia({ colorScheme: "light" });
+        await restoreWs(s);
+      }
+    }
+    plainWidth = 0;
+  }
+  return notes;
+});
+
+await test("37b. Button workspace state: tooltip on hover and keyboard focus, Esc hides it, click opens the composer with the workspace first", async () => {
+  const s = WS_STATES.find((x) => x.id === "merge");
+  try {
+    for (const { site, url } of WS_SITES) {
+      await showWs(url(), s);
+      // Keyboard: focus the button the way a user does, the tooltip shows at once.
+      await page.locator("[data-stp-button]").focus();
+      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press("Tab");
+      let st = await readWs(page);
+      assert(st.tipOpen, `${site}: keyboard focus shows the tooltip`);
+      assertEq(st.tipText, ["Needs you · Merge ready", "quiet-heron on mock-machine", "Send an instruction, or open it in Paseo"], `${site}: Follow-up's full line, the workspace and the machine`);
+      const box = await page.evaluate((sel) => {
+        const host = document.querySelector(sel);
+        const b = host.shadowRoot.querySelector("button").getBoundingClientRect();
+        const t = host.shadowRoot.querySelector("[data-stp-tip]").getBoundingClientRect();
+        return { below: t.top >= b.bottom, inView: t.left >= 0 && t.right <= innerWidth };
+      }, BUTTON);
+      assert(box.below && box.inView, `${site}: the tooltip sits under the button, inside the window ${JSON.stringify(box)}`);
+      await page.keyboard.press("Escape");
+      assert(!(await readWs(page)).tipOpen, `${site}: Esc hides it`);
+      await page.locator("body").click({ position: { x: 5, y: 5 } });
+      // Hover: after a beat.
+      await page.locator("[data-stp-button]").hover();
+      await page.waitForFunction((sel) => document.querySelector(sel).shadowRoot.querySelector("[data-stp-tip]").hasAttribute("data-open"), BUTTON, { timeout: 2000 });
+      await page.mouse.move(2, 2);
+      await page.waitForFunction((sel) => !document.querySelector(sel).shadowRoot.querySelector("[data-stp-tip]").hasAttribute("data-open"), BUTTON, { timeout: 2000 });
+      // Click: the composer, as today, with the owning workspace first. Never a deep link.
+      await openPopover(page);
+      await waitForPhase(page, "ready");
+      st = await readWs(page);
+      assert(!st.tipOpen, `${site}: no tooltip over the open composer`);
+      const owners = await readOwners(page);
+      assert(owners?.bodyIsFirst, `${site}: the workspace row leads the composer`);
+      assertEq(owners.rows[0].state, "Needs you · Merge ready", `${site}: with Follow-up's line`);
+      await closePopover(page);
+    }
+    return ["tooltip: keyboard focus + hover, Esc, not over the composer", "click: composer, workspace row first"];
+  } finally {
+    await restoreWs(s);
+  }
+});
+
+/**
+ * STP_HERO_SHOT=<file.png>: the README hero's left panel, from the real extension. GitHub fixture,
+ * dark, the button in a calm steady state (Agent working), the composer open with an instruction
+ * typed. Full viewport at 2x; the hero is composed from it outside the repo. Fictional data only.
+ */
+await test("37h. Hero capture (only with STP_HERO_SHOT)", async () => {
+  if (!process.env.STP_HERO_SHOT) return ["skipped: STP_HERO_SHOT not set"];
+  const s = WS_STATES.find((x) => x.id === "working");
+  try {
+    await page.emulateMedia({ colorScheme: "dark" });
+    // Room for the composer under the button, like a laptop window.
+    await page.setViewportSize({ width: 1440, height: 1100 });
+    await showWs(fixtures.githubUrl(), s);
+    await openPopover(page);
+    await waitForPhase(page, "ready");
+    await page.locator("[data-stp-prompt]").click();
+    await page.keyboard.type("Address the review comments on the retry backoff and push a fixup");
+    await page.mouse.move(2, 400);
+    const cdp = await page.context().newCDPSession(page);
+    const vp = page.viewportSize();
+    await cdp.send("Emulation.setDeviceMetricsOverride", { width: vp.width, height: vp.height, deviceScaleFactor: 2, mobile: false });
+    await new Promise((r) => setTimeout(r, 300));
+    const box = await page.locator("[data-stp-button]").boundingBox();
+    const card = await page.locator(POPOVER).locator(".card").boundingBox();
+    await page.screenshot({ path: process.env.STP_HERO_SHOT });
+    writeFileSync(`${process.env.STP_HERO_SHOT}.json`, JSON.stringify({ box, card, vp }));
+    await cdp.send("Emulation.clearDeviceMetricsOverride");
+    await cdp.detach();
+    await closePopover(page);
+    return [`hero capture: ${process.env.STP_HERO_SHOT}`];
+  } finally {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.emulateMedia({ colorScheme: "light" });
+    await restoreWs(s);
+  }
+});
+
+await test("37c. Button workspace state: refresh on tab focus and after a send, at most once per window, never polling", async () => {
+  const merge = WS_STATES.find((x) => x.id === "merge");
+  const working = WS_STATES.find((x) => x.id === "working");
+  const resolves = async () => (await bridgeLog()).filter((r) => r.path === "/v1/resolve").length;
+  try {
+    await showWs(fixtures.url(), working);
+    const first = await resolves();
+    // Nothing happens while the page sits there: no polling.
+    await new Promise((r) => setTimeout(r, 5000));
+    assertEq(await resolves(), first, "no resolve while idle (no polling)");
+    // The workspace moves on; the tab regains focus inside the window: one deferred refresh.
+    await bridgeConfig({ followUpRows: merge.rows });
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await page.waitForFunction((sel) => document.querySelector(sel).getAttribute("data-stp-ws") === "needs", BUTTON, { timeout: 8000 });
+    const afterFocus = await resolves();
+    assertEq(afterFocus, first + 1, "focus asked once");
+    assertEq((await readWs(page)).chip, "Merge ready", "and the button shows the new state");
+    // Focus again at once: inside the window, so it waits (one deferred ask, not one per focus).
+    await page.evaluate(() => { for (let i = 0; i < 5; i++) document.dispatchEvent(new Event("visibilitychange")); });
+    await new Promise((r) => setTimeout(r, 1000));
+    assertEq(await resolves(), afterFocus, "five focuses inside the window ask nothing yet");
+    await new Promise((r) => setTimeout(r, 4500));
+    assertEq(await resolves(), afterFocus + 1, "then exactly one when the window is up");
+
+    // After a send: the popover's own resolve on the next open repaints the button for free.
+    await bridgeConfig({ followUpRows: working.rows });
+    await openPopover(page);
+    await waitForPhase(page, "ready");
+    await page.locator("[data-stp-prompt]").fill("Merge it");
+    await page.locator("[data-stp-send]").click();
+    await waitForPhase(page, "sent", 6000);
+    await closePopover(page);
+    await page.waitForFunction((sel) => document.querySelector(sel).getAttribute("data-stp-ws") === "working", BUTTON, { timeout: 10000 });
+    return [`resolves: page load ${first}, +1 on focus, +0 for 5 more focuses inside the window, +1 when it ends`, "after a send the button follows the workspace (working)"];
+  } finally {
+    await restoreWs(merge);
+  }
+});
+
+await test("37d. Button workspace state: sending, sent and failed win over the chip, and the row never shifts", async () => {
+  const s = WS_STATES.find((x) => x.id === "merge");
+  try {
+    await bridgeConfig({ sendDelayMs: 1200 });
+    await showWs(fixtures.githubUrl(), s);
+    await bridgeConfig({ sendDelayMs: 1200 });
+    const idle = await readWs(page);
+    await openPopover(page);
+    await waitForPhase(page, "ready");
+    await page.locator("[data-stp-prompt]").fill("Merge it");
+    await page.locator("[data-stp-send]").click();
+    await page.waitForFunction((sel) => document.querySelector(sel).getAttribute("data-stp-state") === "sending", BUTTON, { timeout: 3000 });
+    const sending = await readWs(page);
+    assert(!sending.chipVisible, "the chip steps back while sending");
+    assert(Math.abs(sending.width - idle.width) < 0.5, `but keeps its room: ${idle.width} -> ${sending.width}`);
+    await waitForPhase(page, "sent", 6000);
+    const sent = await readWs(page);
+    assertEq(sent.label, "Sent", "Sent shows");
+    assert(!sent.chipVisible && Math.abs(sent.width - idle.width) < 0.5, `Sent keeps the width too: ${sent.width}`);
+    return [`width ${idle.width.toFixed(1)}px idle with chip = sending = sent`];
+  } finally {
+    await bridgeConfig({ sendDelayMs: 0 });
+    await closePopover(page).catch(() => {});
+    await restoreWs(s);
+  }
 });
 
 /* -------------------------------------------------------------------------- */

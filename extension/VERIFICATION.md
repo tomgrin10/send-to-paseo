@@ -1,5 +1,47 @@
 # Verification record
 
+## 2026-11-22 — the page button shows the PR's workspace state (direction D)
+
+The button reads the resolve it already makes and shows Follow-up's state for the PR: a 9px solid
+dot in Follow-up's `tone` plus a word chip ("Asks you", "Conflict", "Merge ready", "Agent closed",
+"2 need you") only when the PR needs the user, a 7px blue dot while an agent or Follow-up works, an ×
+for couldn't reach Paseo or not set up, nothing otherwise. Tooltip on hover and keyboard focus; name
+"Send to Paseo, <state>"; click still opens the composer. Refresh on tab focus, hover/focus and after
+a send, at most once a minute; no polling, no new endpoint. The bridge now passes Follow-up's `tone`
+through (it was stripped by zod), and the extension learned Follow-up's `sending` group (it knew only
+the pre-2.0 `fixing`, so Sending rows sorted last in the popover).
+
+- Extension typecheck clean; `npm run test:unit` 44/44 (21 new in `test/button-state.test.mjs`, one
+  new `sending` ordering test). Plugin: typecheck clean, `check-deps` 74/74, node tests 34/34 (one new:
+  tone passes through, an unknown tone is dropped without the row).
+- Proven able to fail: mapping a toneless needs row to `muted` failed the unit test "an older
+  Follow-up without tone falls back to the group" and e2e 37 (`graphite/old-follow-up: tone`). On
+  main's `open-workspace.ts` the `sending` ordering test fails; on main's `server/follow-up.ts` the
+  tone pass-through test fails.
+- Chromium (headless, Linux, chromium-1208): full suite 78/78 PASS. New cases 37 (13 states x
+  Graphite + GitHub x light + dark: mark shape and size, chip word and tone, width only grows with a
+  chip, accessible name, tooltip text, no `title`, no `aria-live`), 37b (tooltip on focus and hover,
+  Esc, under the button, not over the composer; click opens the composer with the workspace first),
+  37c (no resolve while idle; focus asks once; five focuses inside the window ask nothing until one
+  deferred refresh; after a send the button follows the workspace), 37d (sending and Sent hide the
+  chip but keep its room). 9f updated: not set up is now an × with its fix in the tooltip.
+- /impeccable critique, two isolated Opus passes (design review 32/40; detector + browser
+  measurements). Fixed from it: chip text failed AA on its tint (3.5-4.2:1), now a stronger text
+  step at 4.9-7.7:1; the painted knockout ring showed as a halo on Graphite's transparent button,
+  now the glyph is masked; the × was 1.5px light grey (3.2:1), now 2px Primer muted (5.7:1); GitHub
+  dark fell back to the light red for the failed dot (2.8:1); the chip now eases in instead of
+  jumping; the tooltip names the other workspaces behind "2 need you"; hovering or focusing
+  refreshes the state; no "Click" wording for keyboard users. Kept as designed (Tom's pick): the
+  working mark stays a small solid blue dot, and not set up stays an × without a chip.
+- Renders (fictional data, outside the repo): the real extension on the fixtures, every state, light
+  and dark, at rest and with the tooltip; and the shipped `createButton` at 1000px and in a 390px
+  window. The fixture pages don't reflow at 390px (their header clips), so the 390px check uses the
+  harness. `docs/screenshots/error-not-paired.png` re-rendered (the × in place of the amber dot).
+- README hero (`plugin/docs/media/send-to-paseo-hero-dark.png`) re-rendered: its left panel is the
+  real extension on the GitHub fixture in dark (case 37h with `STP_HERO_SHOT`, Agent working,
+  composer open), composed at the old hero's scale with the unchanged Paseo card on the right.
+  Case 37h was added after the 78/78 run; it is a no-op without `STP_HERO_SHOT`.
+
 ## 2026-11-22 — Follow-up's icon on "Workspace for this PR"
 
 The section heading now starts with Follow-up's app icon (14px, vector, built node by node like the

@@ -16,6 +16,8 @@ Choose a workspace, start a new agent or continue with an existing one, and send
 - Reuse an existing workspace or check out the pull request in a new worktree.
 - Keep stacked pull requests in the same workspace.
 - With [Follow-up](https://github.com/tomgrin10/paseo-follow-up), see which workspace owns the PR and what it needs, and open it in Paseo from the PR page.
+  The button itself shows when it's your turn: a word like **Merge ready**, **Asks you** or
+  **Conflict** beside the label, a small blue dot while an agent works, nothing while you wait.
 - Send work to your laptop or another connected Paseo machine.
 - See where every send went: the agent's chat opens on a card with the PR, your instruction,
   and why it landed in that workspace, and the Send to Paseo screen in Paseo lists recent sends.
@@ -76,6 +78,8 @@ for requirements and manual setup.
 ## Troubleshooting
 
 - **No button:** check that the extension is enabled and refresh the GitHub or Graphite PR page.
+- **An × on the button:** Send to Paseo couldn't reach Paseo, or isn't set up yet. Hover or
+  focus the button to see which.
 - **Can't reach Paseo:** run `paseo plugin ls` to check that the plugin is running, then
   `paseo plugin logs send-to-paseo` for details.
 - **Token rejected:** copy the pairing token again from the plugin on the computer running Chrome.

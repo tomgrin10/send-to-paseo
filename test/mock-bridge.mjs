@@ -103,11 +103,14 @@ const CONFIG = {
    * Sent only when the request asked for it, like the real plugin.
    */
   followUpView: null,
+  /** With followUpView "rows": these rows (links added), and this `more`. For the button's state cases. */
+  followUpRows: [],
+  followUpMore: 0,
 };
 
 const OWNER_ROWS = {
   needs: { workspaceId: "wks_4d1a8b7c2e0f9351", agentId: "agt_owner_needs", title: "brawny-dodo", agentStatus: "idle", group: "needs", state: "Needs you · Merge ready" },
-  fixing: { workspaceId: "wks_owner_fixing", agentId: "agt_owner_fixing", title: "review-pass", agentStatus: "running", group: "fixing", state: "Follow-up is fixing · 3 threads" },
+  fixing: { workspaceId: "wks_owner_fixing", agentId: "agt_owner_fixing", title: "review-pass", agentStatus: "running", group: "sending", state: "Sending · 3 threads" },
   running: { workspaceId: "wks_owner_running", agentId: "agt_owner_running", title: "stack-base", agentStatus: "running", group: "running", state: "Running" },
 };
 function followUpView(kind) {
@@ -119,6 +122,7 @@ function followUpView(kind) {
   if (kind === "one") return { workspaces: [link(OWNER_ROWS.needs)], more: 0 };
   if (kind === "several") return { workspaces: [link(OWNER_ROWS.needs), link(OWNER_ROWS.fixing), link(OWNER_ROWS.running)], more: 2 };
   if (kind === "none") return { workspaces: [], more: 0 };
+  if (kind === "rows") return { workspaces: CONFIG.followUpRows.map(link), more: CONFIG.followUpMore };
   if (kind === "unreachable-owner") return { workspaces: [link({ ...OWNER_ROWS.needs, group: "", state: "" })], more: 0 };
   return null;
 }
@@ -672,6 +676,8 @@ async function handleControl(req, res, url, origin) {
     if (body.followUpOwner !== undefined) CONFIG.followUpOwner = Boolean(body.followUpOwner);
     if (body.routed !== undefined) CONFIG.routed = Boolean(body.routed);
     if (body.followUpView !== undefined) CONFIG.followUpView = body.followUpView;
+    if (body.followUpRows !== undefined) CONFIG.followUpRows = Array.isArray(body.followUpRows) ? body.followUpRows : [];
+    if (body.followUpMore !== undefined) CONFIG.followUpMore = Math.max(0, Number(body.followUpMore) || 0);
     if (body.agentDispatch !== undefined) {
       CONFIG.agentDispatch = body.agentDispatch === "main" ? "main" : "new";
     }

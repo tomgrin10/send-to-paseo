@@ -30,7 +30,8 @@ export interface OwnerSection {
   unreachable: string[];
 }
 
-const GROUP_ORDER = ["needs", "fixing", "running", "waiting", "later", "quiet"];
+/** Follow-up's Home groups, most urgent first. It says "sending"; "fixing" is what it said before 2.0. */
+const GROUP_ORDER = ["needs", "sending", "fixing", "running", "waiting", "later", "quiet"];
 
 export function isDesktopLink(href: string): boolean {
   try { const u = new URL(href); return u.protocol === "paseo:" && u.hostname === "h" && /^\/[^/]+\/agent\/[^/]+$/.test(u.pathname) && !u.search && !u.hash; }

@@ -26,7 +26,11 @@ matching usable; a send already bound to a registration fails until refreshed.
 
 With Follow Up browser access on, each resolve asks its machine's Follow-up for
 `follow.pr-workspaces`: the tracked workspaces that registered this PR, each with its title, main
-agent id and status, and Follow-up's one-line state from the same model as Home. The bridge adds
+agent id and status, Follow-up's one-line state from the same model as Home, and that state's
+`tone` (Follow-up 2.3.1+). The page button shows the most urgent row before anyone clicks: a dot
+by shape, plus a word chip only when the PR needs you (DESIGN.md, "Workspace state on the
+button"). It reads the resolve the page already makes and refreshes on tab focus and after a send,
+at most once a minute, so it adds no GitHub calls beyond the bridge's 60 s `gh` cache. The bridge adds
 the machine's `paseo://` agent link and the matching `app.paseo.sh` link; the popover lists up to
 three owners above the composer with an **Open** link each. The desktop app is the default; the
 footer switches every link to the web app and the choice is stored in the extension. Paseo 0.15.2

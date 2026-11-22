@@ -421,6 +421,7 @@ each route's `resolved` answer, computed on that machine):
   "workspaces": [
     { "workspaceId": "wks_…", "agentId": "agt_…", "title": "quiet-heron",
       "agentStatus": "idle", "group": "needs", "state": "Needs you · Merge ready",
+      "tone": "success",
       "deepLink": "paseo://h/srv_…/agent/agt_…",
       "webUrl": "https://app.paseo.sh/h/srv_…/agent/agt_…" }
   ],
@@ -435,6 +436,15 @@ ask, Follow-up is missing, older or failing, the machine's server id is unknown,
 is outside the set Follow-up tracks (the same scope it advertises to the browser). An empty
 `workspaces` means Follow-up tracks the repository and nothing owns the PR. The field never turns a
 resolve into an error.
+
+`group` is Follow-up's Home group: `needs | sending | running | waiting | later | quiet` (Follow-up
+before 2.0 said `fixing` for `sending`; the extension accepts both). `tone` (additive, optional, per
+row) is the colour Follow-up paints `state` with: `attention | danger | success | accent | muted`.
+The bridge passes it through from Follow-up 2.3.1+ and drops a value outside that list (the row
+stays). The page button colours its dot and chip from it, falling back to `group` when it is absent
+(needs → attention, running/sending → accent, the rest muted), so it never parses `state`'s English.
+A row whose main agent is closed arrives as `agentStatus: "closed"`, group `needs`,
+"Needs you · Agent closed".
 
 `followUpUnreachable` (additive, optional, response) is `true` when the request asked for the view
 and the bridge could not ask Follow-up in time (no connected daemon client yet, the call outran

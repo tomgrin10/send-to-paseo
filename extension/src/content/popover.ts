@@ -96,8 +96,26 @@ function resolveKey(pr: PrRef, stackPrNumbers: number[]): string {
   return `${pr.forge}:${pr.owner}/${pr.repo}#${pr.number}:${[...stackPrNumbers].sort((a, b) => a - b).join(",")}`;
 }
 
+/**
+ * Everyone who wants every resolve answer for a PR: the page button reads its
+ * workspace state from them (index.ts), so a resolve the popover makes anyway
+ * (opening it, Retry, after a send) refreshes the button at no extra cost.
+ */
+type ResolveListener = (pr: PrRef, stackPrNumbers: number[], result: Result<MultiResolveResponse>) => void;
+const resolveListeners = new Set<ResolveListener>();
+export function onResolve(listener: ResolveListener): () => void {
+  resolveListeners.add(listener);
+  return () => resolveListeners.delete(listener);
+}
+
 function resolveNow(pr: PrRef, stackPrNumbers: number[]): Promise<Result<MultiResolveResponse>> {
-  return sendIntent({ type: "resolve", pr, stackPrNumbers });
+  const promise: Promise<Result<MultiResolveResponse>> = sendIntent({ type: "resolve", pr, stackPrNumbers });
+  void promise.then((result) => {
+    for (const listener of resolveListeners) {
+      try { listener(pr, stackPrNumbers, result); } catch (e) { console.warn("[send-to-paseo] resolve listener failed", e); }
+    }
+  });
+  return promise;
 }
 
 /** Begin resolution as soon as the PR button is mounted, before the user clicks it. */
@@ -852,7 +870,7 @@ class Popover {
     const list = el("ul", { class: "owner-list" });
     const multi = this.multiHost;
     for (const row of section.rows) {
-      const tone = row.agentStatus === "error" ? "danger" : row.group === "needs" ? "warn" : row.group === "fixing" || row.group === "running" ? "active" : "muted";
+      const tone = row.agentStatus === "error" ? "danger" : row.group === "needs" ? "warn" : row.group === "sending" || row.group === "fixing" || row.group === "running" ? "active" : "muted";
       const status = agentStatusText(row.agentStatus, row.state);
       const href = openHref(row, this.openTarget);
       const open = el("a", {

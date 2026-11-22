@@ -110,6 +110,18 @@ test("PR workspaces lookup: owner found, several owners, none, repository not gr
     assert.equal(await (await workspacesModule(reply)).lookupPrWorkspaces("example", "app", 7), null, `fails closed for ${JSON.stringify(reply) ?? reply}`);
 });
 
+// follow-up-tone-passes-through (AGENTS.md): zod strips unknown keys, so a Follow-up row's `tone` never reached
+// the browser and the page button would have had to parse Follow-up's English to colour itself.
+test("PR workspaces lookup keeps Follow-up's tone, and drops an unknown one without dropping the row", async () => {
+  const toned = await (await workspacesModule({ tracked: true, more: 0, workspaces: [view("w1", { group: "needs", state: "Needs you · Conflict", tone: "danger" })] })).lookupPrWorkspaces("example", "app", 7);
+  assert.equal(toned.workspaces[0].tone, "danger");
+  const odd = await (await workspacesModule({ tracked: true, more: 0, workspaces: [view("w1", { tone: "chartreuse" })] })).lookupPrWorkspaces("example", "app", 7);
+  assert.deepEqual([odd.workspaces.length, "tone" in odd.workspaces[0] && odd.workspaces[0].tone !== undefined], [1, false]);
+  const m = await workspacesModule({ tracked: true, more: 0, workspaces: [] });
+  const out = m.followUpView({ more: 0, workspaces: [view("w1", { tone: "success" })] }, "srv", new Map());
+  assert.equal(out.workspaces[0].tone, "success", "the resolve answer carries it to the extension");
+});
+
 // optional-lookup-never-silent (AGENTS.md): 2.4.1 turned a timed-out lookup into null, the same answer as
 // "Follow-up absent", and the popover's "Workspace for this PR" section silently vanished.
 test("PR workspaces lookup: couldn't ask in time is unknown, never none", async () => {

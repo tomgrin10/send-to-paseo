@@ -176,15 +176,37 @@ button[aria-expanded="true"] { background: rgba(127, 133, 145, 0.2); border-colo
 /* ---- icon slot and state ----------------------------------------------- */
 :host {
   --stp-btn-icon: 14px;
-  --stp-dot-warn: #b45309;
   --stp-dot-bad: #d1242f;
-  --stp-dot-ring: var(--stp-bg);
   --stp-ok-icon: var(--stp-success);
+  /* Workspace tones (direction D). GitHub's branch reads Primer's own below. */
+  --stp-t-attention: #9a6700;
+  --stp-t-danger: #d1242f;
+  --stp-t-success: #1a7f37;
+  --stp-t-accent: #0969da;
+  --stp-t-muted: #59636e;
+  /* Chip text: a step stronger than the dot's tone, so the word clears WCAG AA
+     4.5:1 on its own tint (Follow-up's tone colour alone measured 3.5-4.2). */
+  --stp-c-attention: #7d4e00;
+  --stp-c-danger: #a40e26;
+  --stp-c-success: #116329;
+  --stp-c-accent: #0550ae;
+  --stp-c-muted: #424a53;
+  --stp-chip-mix: 10%;
 }
 @media (prefers-color-scheme: dark) {
   :host {
-    --stp-dot-warn: #e3a008;
     --stp-dot-bad: #f85149;
+    --stp-t-attention: #d29922;
+    --stp-t-danger: #f85149;
+    --stp-t-success: #3fb950;
+    --stp-t-accent: #4493f8;
+    --stp-t-muted: #9198a1;
+    --stp-c-attention: #e3b341;
+    --stp-c-danger: #ff7b72;
+    --stp-c-success: #56d364;
+    --stp-c-accent: #79c0ff;
+    --stp-c-muted: #b7bdc8;
+    --stp-chip-mix: 16%;
   }
 }
 
@@ -198,21 +220,123 @@ button[aria-expanded="true"] { background: rgba(127, 133, 145, 0.2); border-colo
 .glyph { display: inline-flex; width: 100%; height: 100%; }
 svg { width: 100%; height: 100%; flex: none; color: var(--stp-accent); }
 
-/* The status dot sits on the icon's top-right corner, ringed in the button's
-   own surface colour so it reads as a badge rather than a smudge on the glyph.
-   Colour only, no text: the state is also in the button's title. */
+/* The mark's corner badge, bottom right like Paseo's own favicons. Read by
+   SHAPE before colour, so it survives colour-blindness and greyscale:
+     needs    9px solid dot in the state's tone (and a word chip, below)
+     working  7px blue dot: an agent or Follow-up is on it
+     cross    an ×: couldn't reach Paseo, or not set up
+     failed   9px red dot: the last send failed
+   The glyph is cut away around the badge (a mask, below) rather than ringed
+   in a guessed surface colour: Graphite's button is transparent, so a painted
+   ring showed as a halo in dark mode. The words are in the accessible name
+   and the tooltip, never colour alone. */
 .dot {
   display: none;
   position: absolute;
-  top: -2px;
-  right: -3px;
+  right: -4px;
+  bottom: -4px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  --tone: var(--stp-t-muted);
+  background: var(--tone);
+}
+:host([data-stp-state="idle"]:not([data-stp-ws="none"])) .glyph,
+:host([data-stp-state="failed"]) .glyph,
+:host([data-stp-state="unpaired"]) .glyph {
+  -webkit-mask: radial-gradient(circle at calc(100% - 0.5px) calc(100% - 0.5px), transparent 6.5px, #000 7px);
+  mask: radial-gradient(circle at calc(100% - 0.5px) calc(100% - 0.5px), transparent 6.5px, #000 7px);
+}
+:host([data-stp-ws-tone="attention"]) { --stp-tone: var(--stp-t-attention); --stp-tone-text: var(--stp-c-attention); }
+:host([data-stp-ws-tone="danger"]) { --stp-tone: var(--stp-t-danger); --stp-tone-text: var(--stp-c-danger); }
+:host([data-stp-ws-tone="success"]) { --stp-tone: var(--stp-t-success); --stp-tone-text: var(--stp-c-success); }
+:host([data-stp-ws-tone="accent"]) { --stp-tone: var(--stp-t-accent); --stp-tone-text: var(--stp-c-accent); }
+:host([data-stp-ws-tone="muted"]) { --stp-tone: var(--stp-t-muted); --stp-tone-text: var(--stp-c-muted); }
+
+:host([data-stp-state="idle"][data-stp-ws="needs"]) .dot { display: block; --tone: var(--stp-tone); }
+:host([data-stp-state="idle"][data-stp-ws="working"]) .dot {
+  display: block;
+  --tone: var(--stp-t-accent);
   width: 7px;
   height: 7px;
-  border-radius: 50%;
-  box-shadow: 0 0 0 1.5px var(--stp-dot-ring);
+  right: -3px;
+  bottom: -3px;
 }
-:host([data-stp-state="unpaired"]) .dot { display: block; background: var(--stp-dot-warn); }
-:host([data-stp-state="failed"]) .dot { display: block; background: var(--stp-dot-bad); }
+/* The ×: two 2px bars in the cut-out, so it reads as a mark, not a smudge.
+   Not set up wears it too: both mean "the next step is yours". */
+:host([data-stp-state="idle"][data-stp-ws="cross"]) .dot,
+:host([data-stp-state="unpaired"]) .dot {
+  display: block;
+  background: transparent;
+}
+:host([data-stp-state="idle"][data-stp-ws="cross"]) .dot::before,
+:host([data-stp-state="idle"][data-stp-ws="cross"]) .dot::after,
+:host([data-stp-state="unpaired"]) .dot::before,
+:host([data-stp-state="unpaired"]) .dot::after {
+  content: "";
+  position: absolute;
+  left: 3.5px;
+  top: -0.5px;
+  width: 2px;
+  height: 10px;
+  border-radius: 1px;
+  background: var(--stp-t-muted);
+  transform: rotate(45deg);
+}
+:host([data-stp-state="idle"][data-stp-ws="cross"]) .dot::after,
+:host([data-stp-state="unpaired"]) .dot::after { transform: rotate(-45deg); }
+:host([data-stp-state="failed"]) .dot { display: block; --tone: var(--stp-dot-bad); }
+
+/* The word chip: only in needs-you states, so the row widens only when there
+   is something to do. Clamped with an ellipsis; the full line is in the
+   tooltip. While sending / sent show (seconds), it keeps its room (hidden, not
+   removed) so the host page's action row never shifts. */
+.chip {
+  display: none;
+  max-width: 112px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-left: -2px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font: 600 11.5px/18px var(--stp-font);
+  color: var(--stp-tone-text, var(--stp-tone));
+  background: color-mix(in srgb, var(--stp-tone) var(--stp-chip-mix), transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--stp-tone) 35%, transparent);
+}
+:host([data-stp-ws="needs"]) .chip { display: inline-block; animation: stp-chip-in 160ms ease-out; }
+/* The chip lands after the first paint (the resolve), so the row grows once:
+   let that read as arrival, not a jump. */
+@keyframes stp-chip-in { from { max-width: 0; opacity: 0; padding-inline: 0; } to { max-width: 112px; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { :host([data-stp-ws="needs"]) .chip { animation: none; } }
+:host([data-stp-style="graphite"]) .chip { margin-left: 0; }
+:host([data-stp-ws="needs"]:is([data-stp-state="sending"], [data-stp-state="sent"])) .chip { visibility: hidden; }
+/* Failed lasts until the next open, so a held gap would look broken: the chip
+   steps out, and the red dot says what happened. */
+:host([data-stp-ws="needs"]:is([data-stp-state="failed"], [data-stp-state="unpaired"])) .chip { display: none; }
+
+/* The tooltip. Fixed, so a clipping header row can't cut it; dark on both
+   themes like GitHub's own. Shown on hover after a beat and on keyboard focus
+   at once; Esc, blur, leaving or clicking hides it. */
+.tip {
+  display: none;
+  position: fixed;
+  z-index: 2147483001;
+  max-width: min(360px, calc(100vw - 16px));
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #25292e;
+  color: #ffffff;
+  font: 400 12px/1.4 var(--stp-font);
+  text-align: left;
+  pointer-events: none;
+  -webkit-font-smoothing: antialiased;
+}
+@media (prefers-color-scheme: dark) { .tip { background: #3d444d; color: #f0f6fc; } }
+.tip[data-open] { display: flex; flex-direction: column; }
+.tip-line { overflow-wrap: anywhere; }
+.tip-line.sub { color: color-mix(in srgb, currentColor 72%, transparent); }
 
 :host([data-stp-state="sending"]) svg { color: var(--stp-fg-muted); }
 :host([data-stp-state="sending"]) button { cursor: progress; }
@@ -344,11 +468,39 @@ svg { width: 100%; height: 100%; flex: none; color: var(--stp-accent); }
 }
 :host([data-stp-style="github"]) {
   --stp-btn-icon: 16px;
-  --stp-dot-ring: var(--stp-gh-bg);
-  --stp-dot-warn: var(--bgColor-attention-emphasis, #9a6700);
   --stp-dot-bad: var(--bgColor-danger-emphasis, #cf222e);
   --stp-ok-icon: var(--fgColor-success, #1a7f37);
+  /* Primer's own foreground tones, so a custom or pinned theme carries over;
+     the fallbacks are the :host defaults above (light, or dark by media). */
+  --stp-t-attention: var(--fgColor-attention, #9a6700);
+  --stp-t-danger: var(--fgColor-danger, #d1242f);
+  --stp-t-success: var(--fgColor-success, #1a7f37);
+  --stp-t-accent: var(--fgColor-accent, #0969da);
+  --stp-t-muted: var(--fgColor-muted, #59636e);
 }
+@media (prefers-color-scheme: dark) {
+  :host([data-stp-style="github"]) {
+    --stp-t-attention: var(--fgColor-attention, #d29922);
+    --stp-t-danger: var(--fgColor-danger, #f85149);
+    --stp-t-success: var(--fgColor-success, #3fb950);
+    --stp-t-accent: var(--fgColor-accent, #4493f8);
+    --stp-t-muted: var(--fgColor-muted, #9198a1);
+    --stp-dot-bad: var(--bgColor-danger-emphasis, #da3633);
+  }
+}
+:host-context(html[data-color-mode="dark"]) {
+  --stp-chip-mix: 16%;
+  --stp-dot-bad: var(--bgColor-danger-emphasis, #da3633);
+  --stp-c-attention: #e3b341; --stp-c-danger: #ff7b72; --stp-c-success: #56d364; --stp-c-accent: #79c0ff; --stp-c-muted: #b7bdc8;
+}
+:host-context(html[data-color-mode="light"]) {
+  --stp-chip-mix: 10%;
+  --stp-c-attention: #7d4e00; --stp-c-danger: #a40e26; --stp-c-success: #116329; --stp-c-accent: #0550ae; --stp-c-muted: #424a53;
+}
+:host([data-stp-style="github"]) .chip { font: 600 12px/20px var(--stp-gh-font); }
+:host([data-stp-style="github"]) .tip { font-family: var(--stp-gh-font); }
+:host-context(html[data-color-mode="dark"]) .tip { background: #3d444d; color: #f0f6fc; }
+:host-context(html[data-color-mode="light"]) .tip { background: #25292e; color: #ffffff; }
 `;
 
 /** The composer popover. Lives in its own shadow root attached to <body>. */

@@ -18,7 +18,11 @@ export function registeredAgent(agents: readonly ListedAgent[], owner: PrOwner |
 const text = (max: number) => z.string().max(max);
 const workspacesReply = z.object({
   tracked: z.boolean(), more: z.number().int().nonnegative().max(10_000),
-  workspaces: z.array(z.object({ workspaceId: text(200).min(1), agentId: text(200).min(1), title: text(200), agentStatus: text(40), group: text(20), state: text(200) })).max(3),
+  workspaces: z.array(z.object({
+    workspaceId: text(200).min(1), agentId: text(200).min(1), title: text(200), agentStatus: text(40), group: text(20), state: text(200),
+    // Additive: an unknown tone is dropped, never a reason to drop the row or the view.
+    tone: z.enum(["attention", "danger", "success", "accent", "muted"]).optional().catch(undefined),
+  })).max(3),
 });
 export type PrWorkspaces = Omit<z.infer<typeof workspacesReply>, "tracked">;
 /** Follow-up could not be asked in time (not connected, budget spent, socket gone). Not "none". */

@@ -382,10 +382,15 @@ export interface FollowUpWorkspace {
   title: string;
   /** Paseo lifecycle status of the main agent (`running`, `idle`, `error`, ...) or `permission`. */
   agentStatus: string;
-  /** Follow-up's Home group: needs | fixing | running | waiting | later | quiet. */
+  /** Follow-up's Home group: needs | sending | running | waiting | later | quiet ("fixing" before Follow-up 2.0). */
   group: string;
   /** Follow-up's one line, e.g. "Needs you · Merge ready". */
   state: string;
+  /**
+   * Additive (Follow-up 2.3.1+): the colour Follow-up paints `state` with, so the browser never parses
+   * the English. Absent from an older Follow-up, and dropped (not failed) when it is not one of these.
+   */
+  tone?: "attention" | "danger" | "success" | "accent" | "muted";
   /** Opens the main agent in the Paseo desktop app. */
   deepLink: string;
   /** Opens the same agent in the Paseo web app. */

@@ -155,7 +155,7 @@ survives reloads as long as you don't move the folder.
    | red **Update required** | Plugin and extension speak different contract versions. Sends are blocked until you update one of them. |
    | amber **Paseo isn't responding** | The bridge is up but its Paseo daemon didn't answer. Start the Paseo app. |
 
-   Until pairing is done, the **Send to Paseo** button on a PR carries a small amber dot, and
+   Until pairing is done, the **Send to Paseo** button on a PR carries a small ×, and
    the popover shows a two-step **Connect to Paseo** card instead of an error.
 
    These are distinguishable because `GET /v1/ping` takes *optional* auth: without a token
@@ -493,8 +493,10 @@ intent; prewarming does not weaken the contract gate.
 | No button on a Graphite PR page | Check the URL is `app.graphite.com/github/pr/...` (or `.dev`). Then `chrome://extensions` → **Errors**, and the page console for `[send-to-paseo]` warnings. |
 | No button on a GitHub PR page | Check the URL is `github.com/{owner}/{repo}/pull/{n}` — if GitHub redirected you to `/issues/{n}` it is an issue, not a PR, and there is deliberately no button. Otherwise same checks as above. |
 | Button appears bottom-right instead of in the header | Every anchor rung is missing — usually a site redesign. The extension still works; open an issue with the new header markup. |
-| Popover says **Connect to Paseo** or **Paste a new token** (amber dot on the button) | No token, or Paseo no longer accepts the saved one. **Open setup** → paste the token from Paseo → **Test connection**. Coming back to the PR tab re-checks by itself. |
+| Popover says **Connect to Paseo** or **Paste a new token** (× on the button) | No token, or Paseo no longer accepts the saved one. **Open setup** → paste the token from Paseo → **Test connection**. Coming back to the PR tab re-checks by itself. |
 | Red dot on the button | The last send failed. Open the popover to see why; opening it clears the dot. |
+| × on the button, tooltip **Couldn't reach Paseo** | The bridge didn't answer. Check that Paseo and the plugin are running; coming back to the tab re-checks. |
+| A word beside the label (**Merge ready**, **Asks you**, **Conflict**, **Agent closed**, **2 need you**) | Follow-up says the PR's workspace needs you. Hover for its full line, the workspace and the machine; click to open the composer with **Open** for that workspace first. Needs Follow Up browser access on. |
 | Popover says "Can't reach the Paseo bridge" | The plugin isn't running (`paseo plugin ls` should show `send-to-paseo` as `running`), or the port differs from the Bridge URL. Check `paseo plugin logs send-to-paseo`. |
 | "Remote bridges require HTTPS" | Advanced direct mode only: plain HTTP is accepted only for loopback. On the Additional machine, enable private access and use its `.ts.net` address. |
 | "Bridge rejected the request host" | Save the HTTPS origin as **Private bridge address** under **Share this Paseo machine**. The allowlist is exact. |

@@ -167,8 +167,11 @@ export interface FollowUpWorkspace {
   agentId: string;
   title: string;
   agentStatus: string;
+  /** Follow-up's Home group: needs | sending | running | waiting | later | quiet ("fixing" before Follow-up 2.0). */
   group: string;
   state: string;
+  /** Additive (Follow-up 2.3.1+): attention | danger | success | accent | muted. Absent from an older Follow-up. */
+  tone?: string;
   /** `paseo://h/<serverId>/agent/<agentId>`: opens the main agent in the desktop app. */
   deepLink: string;
   /** `https://app.paseo.sh/h/<serverId>/agent/<agentId>`: the same agent in the web app. */
