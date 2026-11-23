@@ -106,7 +106,7 @@ test("PR workspaces lookup: owner found, several owners, none, repository not gr
   assert.deepEqual([several.workspaces.map(w => w.workspaceId), several.more], [["a", "b", "c"], 2]);
   assert.deepEqual(await (await workspacesModule({ tracked: true, more: 0, workspaces: [] })).lookupPrWorkspaces("example", "app", 7), { workspaces: [], more: 0 }, "tracked repository, no owner: say so");
   assert.equal(await (await workspacesModule({ tracked: false, more: 0, workspaces: [] })).lookupPrWorkspaces("example", "app", 7), null, "outside Follow-up's advertised scope: nothing");
-  for (const reply of [new Error("Plugin follow-through is not installed"), new Error("Unknown RPC follow.pr-workspaces"), null, {}, { tracked: true, more: 0, workspaces: [view("a"), view("b"), view("c"), view("d")] }, { tracked: true, more: 0, workspaces: [{ workspaceId: "w" }] }])
+  for (const reply of [new Error("Plugin follow-up is not installed"), new Error("Unknown RPC follow.pr-workspaces"), null, {}, { tracked: true, more: 0, workspaces: [view("a"), view("b"), view("c"), view("d")] }, { tracked: true, more: 0, workspaces: [{ workspaceId: "w" }] }])
     assert.equal(await (await workspacesModule(reply)).lookupPrWorkspaces("example", "app", 7), null, `fails closed for ${JSON.stringify(reply) ?? reply}`);
 });
 
@@ -183,63 +183,46 @@ test("an Additional machine receives the Follow-up opt-in with the resolve it is
   } finally { globalThis.fetch = original; }
 });
 
-test("Follow-up's id: tries follow-up, then follow-through only when follow-up isn't installed", async () => {
-  const fresh = async () => (await load("server/follow-up-id.ts", {})).invokeFollowUp; // module state is per load
-  const { FOLLOW_UP_PLUGIN_IDS } = await load("server/follow-up-id.ts", {});
-  assert.deepEqual([...FOLLOW_UP_PLUGIN_IDS], ["follow-up", "follow-through"]);
+test("Follow-up's id: calls only follow-up and preserves the method and input", async () => {
+  const fresh = async () => (await load("server/follow-up-id.ts", {})).invokeFollowUp;
   const calls = [];
-  const host = installed => async (id, method, input) => { calls.push(id); if (id !== installed) throw new Error(`Request failed: Plugin is not available: ${id} requestType=plugin.rpc.invoke.request`); return { id, method, input }; };
-  assert.deepEqual(await (await fresh())(host("follow-up"), "follow.pr-owner", { n: 1 }), { id: "follow-up", method: "follow.pr-owner", input: { n: 1 } });
-  assert.deepEqual(calls, ["follow-up"], "2.0: one call");
+  const invoke = async (id, method, input) => { calls.push(id); return { id, method, input }; };
+  assert.deepEqual(await (await fresh())(invoke, "follow.pr-owner", { n: 1 }), { id: "follow-up", method: "follow.pr-owner", input: { n: 1 } });
+  assert.deepEqual(calls, ["follow-up"]);
   calls.length = 0;
-  assert.equal((await (await fresh())(host("follow-through"), "follow.pr-owner", {})).id, "follow-through");
-  assert.deepEqual(calls, ["follow-up", "follow-through"], "1.x: falls back");
-  await assert.rejects((await fresh())(host("none"), "follow.pr-owner", {}), /not available: follow-through/, "neither installed: the last absence");
-  calls.length = 0;
-  await assert.rejects((await fresh())(async id => { calls.push(id); throw new Error("Unknown RPC follow.pr-workspaces"); }, "follow.pr-workspaces", {}), /Unknown RPC/);
-  assert.deepEqual(calls, ["follow-up"], "a real error from follow-up is the answer, no second try");
+  await assert.rejects((await fresh())(async id => { calls.push(id); throw new Error(`Plugin is not available: ${id}`); }, "m", {}), /not available: follow-up/);
+  assert.deepEqual(calls, ["follow-up"], "an absent plugin is probed only once");
 });
 
-test("Follow-up's id: the id that answered is remembered, so an absent id is probed at most once", async () => {
+test("Follow-up's id: repeated successful calls keep using follow-up", async () => {
   const { invokeFollowUp } = await load("server/follow-up-id.ts", {});
   const calls = [];
-  const host = installed => async id => { calls.push(id); if (id !== installed.current) throw new Error(`Plugin is not available: ${id}`); return id; };
-  const only = { current: "follow-through" };
-  for (let n = 0; n < 20; n++) assert.equal(await invokeFollowUp(host(only), "follow.browser-exchange", {}), "follow-through");
-  assert.equal(calls.filter(id => id === "follow-up").length, 1, "20 polls against a 1.x host probe follow-up once");
-  assert.equal(calls.length, 21);
-  // 2.0 finishes moving to its new id mid-process: the remembered id goes absent, the other one answers.
-  calls.length = 0; only.current = "follow-up";
-  assert.equal(await invokeFollowUp(host(only), "follow.browser-exchange", {}), "follow-up");
-  assert.deepEqual(calls, ["follow-through", "follow-up"]);
-  calls.length = 0;
-  for (let n = 0; n < 5; n++) await invokeFollowUp(host(only), "follow.browser-exchange", {});
-  assert.deepEqual(calls, Array(5).fill("follow-up"), "and is remembered again");
-  // Rollback.
-  calls.length = 0; only.current = "follow-through";
-  assert.equal(await invokeFollowUp(host(only), "follow.browser-exchange", {}), "follow-through");
-  assert.deepEqual(calls, ["follow-up", "follow-through"]);
+  for (let n = 0; n < 20; n++) assert.equal(await invokeFollowUp(async id => { calls.push(id); return id; }, "m", {}), "follow-up");
+  assert.deepEqual(calls, Array(20).fill("follow-up"));
 });
 
-test("Follow-up's id: a real error from the remembered id is not treated as absence", async () => {
+test("Follow-up's id: real errors are propagated and never cached as absence", async () => {
   const { invokeFollowUp } = await load("server/follow-up-id.ts", {});
-  const calls = [];
-  let broken = false;
-  const invoke = async id => { calls.push(id); if (id === "follow-up") throw new Error("Plugin is not available: follow-up"); if (broken) throw new Error("Unknown RPC"); return "ok"; };
-  await invokeFollowUp(invoke, "m", {});
-  calls.length = 0; broken = true;
-  await assert.rejects(invokeFollowUp(invoke, "m", {}), /Unknown RPC/);
-  assert.deepEqual(calls, ["follow-through"], "no re-probe of follow-up on a non-absence failure");
+  for (const error of [new Error("Unknown RPC"), new Error("Timed out")]) {
+    const calls = [];
+    for (let n = 0; n < 2; n++)
+      await assert.rejects(invokeFollowUp(async id => { calls.push(id); throw error; }, "m", {}), error);
+    assert.deepEqual(calls, ["follow-up", "follow-up"]);
+  }
 });
 
-test("Follow-up's id: with neither installed, absence is cached briefly instead of probed on every poll", async () => {
+test("Follow-up's id: absence is cached briefly and recovers after the cache expires", async () => {
   let clock = 1_000;
   const { invokeFollowUp } = await load("server/follow-up-id.ts", {});
   const calls = [];
-  const invoke = async id => { calls.push(id); throw new Error(`Plugin is not available: ${id}`); };
+  let installed = false;
+  const invoke = async id => { calls.push(id); if (!installed) throw new Error(`Plugin is not available: ${id}`); return id; };
   for (let n = 0; n < 10; n++) await assert.rejects(invokeFollowUp(invoke, "m", {}, () => clock), /not available/);
-  assert.equal(calls.length, 2, "one probe of each id");
-  clock += 60_000;
+  assert.deepEqual(calls, ["follow-up"]);
+  clock += 30_000;
   await assert.rejects(invokeFollowUp(invoke, "m", {}, () => clock), /not available/);
-  assert.equal(calls.length, 4, "re-probed after the cache expires");
+  assert.equal(calls.length, 2, "re-probed when the cache expires");
+  installed = true; clock += 30_000;
+  assert.equal(await invokeFollowUp(invoke, "m", {}, () => clock), "follow-up");
+  assert.equal(calls.length, 3);
 });

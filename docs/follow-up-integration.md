@@ -1,8 +1,8 @@
 # Follow Up integration
 
-Automatic browser connection requires Send to Paseo plugin/extension 2.2+ and Follow Up 0.3.4+. PR routing remains compatible with 2.1+/0.3+. All components also work
+Automatic browser connection requires Send to Paseo plugin/extension 2.2+ and Follow Up 2.0+. All components also work
 independently. Neither plugin installs or enables the other. Send calls Follow Up under its 2.0 plugin id,
-`follow-up`, and falls back to `follow-through` (Follow Up 1.x) only when `follow-up` isn't installed
+`follow-up` only
 (`plugin/server/follow-up-id.ts`).
 
 ## PR destination
