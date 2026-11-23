@@ -15,6 +15,7 @@ class FakeClient {
   set(status) { this.state = { status }; for (const l of this.listeners) l(this.state); }
   getConnectionState() { return this.state; }
   subscribeConnectionStatus(l) { this.listeners.add(l); return () => this.listeners.delete(l); }
+  async sendMessage(agentId, text, options) { assert.equal(this.state.status, "connected"); return { deliveryStatus: "queued", guidance: "After this turn", agentId, text, options }; }
   async invokePluginRpc() { return { owner: null }; }
 }
 const api = () => ({ workspaces: { list: async () => ({ entries: [] }) }, dispose: async () => { counts.disposed++; } });
@@ -177,4 +178,17 @@ test("kept warm: opens at start, reconnects in the background after a drop or fa
   made[3].set("disconnected");
   await tick(5);
   assert.equal(made.length, 4, "nothing reopens after teardown");
+});
+
+
+test("the held daemon sender preserves a receipt that the high-level SDK drops", async () => {
+  const m = await load("server/daemon.ts", {
+    "./settings": { settings: { read: async () => ({}) } },
+    "./daemon-password": { resolveDaemonPassword: async () => undefined },
+  });
+  try {
+    const reply = await m.withPaseo(async (_paseo, sendMessage) => sendMessage("agent", "Follow up", { activeTurnBehavior: "steer" }));
+    assert.equal(reply.deliveryStatus, "queued");
+    assert.equal(reply.guidance, "After this turn");
+  } finally { await m.closeDaemon(); }
 });

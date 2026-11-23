@@ -133,7 +133,7 @@ function inject(): void {
         if (mounted?.handle !== handle) return;
         handle.setState(state);
         // A send changes what the workspace is doing: ask again (rate-limited).
-        if (state === "sent") refreshWorkspace();
+        if (state === "sent" || state === "queued") refreshWorkspace();
       },
     });
   }, () => {

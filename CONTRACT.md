@@ -749,3 +749,8 @@ performs full resolution and validation but creates or sends nothing, returning 
 shape with `"dryRun": true`. Creation paths use synthetic ids; reuse paths identify the real
 selected agent without messaging it. This lets the extension's end-to-end test drive a real
 bridge without spawning or changing agents.
+
+The successful send reply may include `deliveryStatus: "queued"` and a plain-text `guidance` string from the daemon.
+These optional fields are additive and do not change the contract version. A queued receipt means the instruction
+waits until after the current turn; the extension labels it Queued rather than Sent. Missing fields retain legacy
+success behavior. Dry runs never claim queued delivery.
