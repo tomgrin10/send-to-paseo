@@ -609,3 +609,5 @@ This repository is public, and so is everything built from it: npm packages, rel
 ## Settings version labels
 
 The extension header reads its version from `chrome.runtime.getManifest().version`; the Paseo settings footer reads `PLUGIN_VERSION`. Both are selectable text. Per-host plugin versions stay visible, and differences name the extension version without prescribing an update: beta plugins can intentionally differ from the stable Chrome extension.
+
+- Display settings use the kit subscription feed, with a one-minute read only while unavailable. Release the feed on unload. Vendored settings-feed modules must match the pinned kit; edit the kit first.

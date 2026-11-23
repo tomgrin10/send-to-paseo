@@ -1,5 +1,6 @@
+import { registerSettingsFeed } from "./server/settings-feed/index";
 import { contributeAgentTools } from "./server/native-tools";
-import { displayPreferences } from "./shared/display";
+import { displayFeed, displayPreferences } from "./shared/display";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import {
   addAdditionalMachine,
@@ -37,7 +38,7 @@ import { requireServerTarget } from "./server/target";
 
 export default function contribute(server: PluginServerContext) {
   const removeTools = contributeAgentTools(server);
-  server.registerSettings(displayPreferences);
+  const stopDisplayFeed = registerSettingsFeed(server, displayFeed, server.registerSettings(displayPreferences));
   server.handle(getStatus, async ({ serverId }, { paseo }) => {
     await requireServerTarget(serverId);
     const current = await settings.read();
@@ -182,5 +183,10 @@ export default function contribute(server: PluginServerContext) {
   // Connect now, not on the first popover: the click path never pays for a daemon connect (warm-daemon-connection).
   warmDaemon();
   // The held daemon connection closes after the bridge has stopped serving requests.
-  return async () => { removeTools(); await stopBridge(); await closeDaemon(); };
+  return async () => {
+    stopDisplayFeed();
+    removeTools();
+    await stopBridge();
+    await closeDaemon();
+  };
 }
