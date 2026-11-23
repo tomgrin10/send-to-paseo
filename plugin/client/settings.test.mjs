@@ -36,3 +36,13 @@ test("settings display a selectable plugin version using the host theme in both 
     assert.equal(label.props.style.color, foregroundMuted, "version follows the host theme");
   }
 });
+
+test("settings navigation focuses the destination host only when supported", async () => {
+  const { openSettingsAgent } = await import("./navigation.ts");
+  for (const supportsFocusHost of [true, false, undefined]) {
+    const calls = [];
+    openSettingsAgent({ supportsFocusHost, openAgent: input => calls.push(input) }, "dev-box", "agent");
+    assert.deepEqual(calls, [{ agentId: "agent", serverId: "dev-box", ...(supportsFocusHost === true ? { focusHost: true } : {}) }]);
+  }
+  assert.doesNotThrow(() => openSettingsAgent(undefined, "dev-box", "agent"));
+});
