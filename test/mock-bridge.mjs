@@ -626,6 +626,7 @@ function handleSend(res, origin, body) {
     200,
     {
       ok: true,
+    ...(CONFIG.queued && !CONFIG.dryRun ? { deliveryStatus: "queued", guidance: "Will continue after this turn." } : {}),
       agentId,
       workspaceId,
       workspaceCreated: created,
@@ -668,6 +669,7 @@ async function handleControl(req, res, url, origin) {
     const body = (await readBody(req, res, null)) ?? {};
     if (body.contract !== undefined) CONFIG.contract = Number(body.contract);
     if (body.dryRun !== undefined) CONFIG.dryRun = Boolean(body.dryRun);
+    if (body.queued !== undefined) CONFIG.queued = Boolean(body.queued);
     if (body.daemonDown !== undefined) CONFIG.daemonDown = Boolean(body.daemonDown);
     if (body.noGh !== undefined) CONFIG.noGh = Boolean(body.noGh);
     if (body.mergedStack !== undefined) CONFIG.mergedStack = Boolean(body.mergedStack);
@@ -708,6 +710,7 @@ async function handleControl(req, res, url, origin) {
     state.agentSeq = 0;
     CONFIG.contract = 1;
     CONFIG.dryRun = false;
+    CONFIG.queued = false;
     CONFIG.daemonDown = false;
     CONFIG.noGh = false;
     CONFIG.mergedStack = false;

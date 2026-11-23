@@ -423,6 +423,9 @@ export interface ResolveResponse extends LocalResolveResponse {
 
 export interface SendResponse {
   ok: true;
+  /** Additive daemon receipt; absent on older hosts. */
+  deliveryStatus?: "queued";
+  guidance?: string;
   agentId: string;
   workspaceId: string;
   workspaceCreated: boolean;

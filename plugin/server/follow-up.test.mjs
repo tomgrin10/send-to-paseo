@@ -21,11 +21,12 @@ test("optional owner lookup fails closed for absent, old, broken or malformed co
 });
 test("send steers the registering agent ahead of a newer main agent, and explicit new-agent sends still work", async () => {
   let owner = { workspaceId: "owned-workspace", agentId: "registered" };
+  let receipt = { deliveryStatus: "queued", guidance: "Queued for after the current turn." };
   let agents = [agent("registered"), agent("newest-main", { title: "Main" })]; const sent = []; const created = [];
   const workspace = { id: "owned-workspace", name: "Owned", workspaceDirectory: "/fixture", gitRuntime: { currentBranch: "feature" } };
   const paseo = { agents: { ref: a => ({ send: async (prompt, options) => sent.push({ id: a.id, prompt, options }) }) }, workspaces: { list: async () => ({ entries: [workspace] }), ref: () => ({ agents: { create: async input => { created.push(input); return { id: "new-agent" }; } } }) } };
   const m = await load("server/send.ts", {
-    "./daemon": { withPaseo: f => f(paseo), requireServerId: async () => "server" },
+    "./daemon": { withPaseo: f => f(paseo, async (id, prompt, options) => { sent.push({ id, prompt, options }); return receipt; }), requireServerId: async () => "server" },
     "./follow-up": { lookupPrOwner: async () => owner, registeredAgent: (all, o, w) => all.find(a => o && a.id === o.agentId && o.workspaceId === w && a.workspaceId === w && a.archivedAt == null) ?? null },
     "./gh": { lookupPr: async () => ({ pr: { number: 1, title: "Fixture", headBranch: "feature", baseBranch: "main", state: "OPEN", url: "https://github.com/example/app/pull/1" }, outage: null }) },
     "./settings": { settings: { read: async () => ({ agentDispatch: "new" }), recordSend: async () => {} } },
@@ -34,9 +35,13 @@ test("send steers the registering agent ahead of a newer main agent, and explici
   });
   const request = { forge: "github", owner: "example", repo: "app", number: 1, prompt: "Fix conflicts", target: { kind: "existing", workspaceId: workspace.id } };
   const sentOwner = await m.handleSend({ ...request, agentDispatch: "main", followUpAgentId: "registered" }); assert.equal(sentOwner.agentId, "registered"); assert.equal(sent[0].options.activeTurnBehavior, "steer"); assert.equal(created.length, 0);
+  assert.equal(sentOwner.deliveryStatus, "queued"); assert.equal(sentOwner.guidance, receipt.guidance);
+  receipt = undefined;
+  const old = await m.handleSend({ ...request, agentDispatch: "main" });
+  assert.equal("deliveryStatus" in old, false); assert.equal("guidance" in old, false);
   assert.equal((await m.handleSend({ ...request, agentDispatch: "new" })).agentId, "new-agent"); assert.equal(created.length, 1);
   owner = null;
-  await assert.rejects(m.handleSend({ ...request, agentDispatch: "main", followUpAgentId: "registered" }), /registration changed/); assert.equal(sent.length, 1);
+  await assert.rejects(m.handleSend({ ...request, agentDispatch: "main", followUpAgentId: "registered" }), /registration changed/); assert.equal(sent.length, 2);
   assert.equal((await m.handleSend(request)).agentId, "new-agent", "standalone default still creates a new agent");
   assert.equal((await m.handleSend({ ...request, agentDispatch: "main" })).agentId, "newest-main");
 });

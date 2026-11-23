@@ -45,6 +45,7 @@ type PaseoApi = PluginHandlerContext["paseo"];
 
 /** The subset of Paseo's DaemonClient this plugin uses. */
 interface DaemonClient {
+  sendMessage?: AgentMessageSender;
   connect(): Promise<void>;
   close(): Promise<void>;
   invokePluginRpc(plugin: string, method: string, input: unknown): Promise<unknown>;
@@ -252,13 +253,16 @@ export async function callFollowUp(method: "follow.pr-owner" | "follow.pr-worksp
   } finally { if (timer) clearTimeout(timer); }
 }
 
-/** Runs `work` against a scoped SDK view of the held connection, released before returning. */
-export async function withPaseo<T>(work: (paseo: PaseoApi) => Promise<T>): Promise<T> {
+/** The low-level client preserves receipts that the high-level SDK currently discards. */
+export type AgentMessageSender = (agentId: string, text: string, options: { activeTurnBehavior: "steer" }) => Promise<unknown>;
+
+/** Runs work in a scoped SDK view, preserving access to the held connection's receipt. */
+export async function withPaseo<T>(work: (paseo: PaseoApi, sendMessage?: AgentMessageSender) => Promise<T>): Promise<T> {
   const { createPaseoApi } = loadClientModule();
   return shared.run(async (client) => {
     const paseo = createPaseoApi(client);
     try {
-      return await work(paseo);
+      return await work(paseo, typeof client.sendMessage === "function" ? client.sendMessage.bind(client) : undefined);
     } finally {
       // Releases this request's handles and listeners, never the socket.
       await paseo.dispose().catch(() => undefined);

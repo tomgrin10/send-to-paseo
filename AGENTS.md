@@ -386,7 +386,7 @@ the mock bridge.
 
 ```sh
 cd plugin
-npm run verify                           # typecheck + 74 server checks + 34 node tests (host-client, settings, main-agent, follow-up, daemon-connection) + 10 agent-tools/chat + 1 native-tools; never touches ~/.config/gh
+npm run verify                           # typecheck + 74 server checks + node tests (host-client, settings, main-agent, follow-up, daemon-connection) + 10 agent-tools/chat + 1 native-tools; never touches ~/.config/gh
 paseo plugin reload send-to-paseo && paseo plugin ls   # needs PASEO_PASSWORD on an authed daemon
 paseo plugin logs send-to-paseo          # expect the three dependency self-check lines, no stack traces
 time paseo plugin reload send-to-paseo   # must finish in seconds, twice — proves no reload hang

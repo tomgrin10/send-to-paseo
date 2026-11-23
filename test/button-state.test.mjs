@@ -102,3 +102,11 @@ test("owners from two machines merge: the needs row wins wherever it lives, and 
   ]));
   assert.deepEqual([s.chip, s.tip[1]], ["Merge ready", "b on dev-box"]);
 });
+
+
+test("queued receipts remain distinct from sent and from dry runs", async () => {
+  const { queuedDelivery } = await import("../extension/src/shared/send-delivery.ts");
+  assert.equal(queuedDelivery({ deliveryStatus: "queued", dryRun: false }), true);
+  assert.equal(queuedDelivery({ dryRun: false }), false);
+  assert.equal(queuedDelivery({ deliveryStatus: "queued", dryRun: true }), false);
+});
