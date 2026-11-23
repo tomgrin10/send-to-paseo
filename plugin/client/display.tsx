@@ -1,9 +1,10 @@
+import { watchSettings } from "./settings-feed/index";
 import type { PluginClientContext, PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { useSettings } from "@getpaseo/plugin/client";
 import { SettingsAction, SettingsCard, SettingsSection, SettingsSwitch } from "@getpaseo/plugin/client/ui";
 import { useEffect } from "react";
 import { ActivityIndicator, ScrollView, Text, View } from "react-native";
-import { displayPreferences, displayRpc } from "../shared/display";
+import { displayFeed, displayPreferences, displayRpc } from "../shared/display";
 import { sidebarVisibility } from "./sidebar-visibility";
 
 const listeners = new Set<(visible: boolean) => void>();
@@ -45,7 +46,7 @@ function DisplaySettings({ theme }: PluginSurfaceProps) {
   );
 }
 
-/** Settings notifications reach mounted screens; poll for changes made on other clients. */
+/** Push settings across clients; older hosts fall back to one read a minute. */
 export function contributeDisplay(client: PluginClientContext, item: { title: string; register: () => (() => void) | void }) {
   const sidebar = sidebarVisibility(item.register);
   // Paseo 0.10.1 memoizes sidebar route resolution when an installation mounts.
@@ -64,29 +65,23 @@ export function contributeDisplay(client: PluginClientContext, item: { title: st
     onSelect({ openSettings }) { openSettings("display"); },
   });
   let disposed = false;
-  let pending = false;
   let generation = 0;
   const update = (visible: boolean) => { generation += 1; sidebar.set(visible); };
   listeners.add(update);
-  const refresh = async () => {
-    if (disposed || pending) return;
-    pending = true;
-    const currentGeneration = generation;
-    try {
-      const result = await client.rpc(displayRpc.read, {});
-      if (!disposed && generation === currentGeneration && result.status === "ready") {
+  const feed = watchSettings({
+    client, contract: displayFeed,
+    revision: () => generation,
+    read: () => client.rpc(displayRpc.read, {}),
+    apply: result => {
+      if (!disposed && result.status === "ready") {
         const parsed = displayPreferences.schema.safeParse(result.values);
         if (parsed.success) sidebar.set(parsed.data.showSidebar);
       }
-    } catch {
-      // Retain the last valid preference through temporary disconnects.
-    } finally { pending = false; }
-  };
-  void refresh();
-  const timer = setInterval(() => void refresh(), 5000);
+    },
+  });
   return () => {
     disposed = true;
-    clearInterval(timer);
+    feed.stop();
     listeners.delete(update);
     sidebar.dispose();
     removeSurface();
