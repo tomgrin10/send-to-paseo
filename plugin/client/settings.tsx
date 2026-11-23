@@ -1,3 +1,4 @@
+import { openSettingsAgent } from "./navigation";
 import type { PluginTheme } from "@getpaseo/plugin";
 import {
   getPaseoClient,
@@ -763,7 +764,7 @@ export function SendToPaseoSettings({ theme, host, layout, navigation }: PluginS
           onCopyToken={() => void onCopy()}
           detailsOpen={showConnectionDetails}
           onToggleDetails={() => setShowConnectionDetails(!showConnectionDetails)}
-          onOpenAgent={navigation === undefined ? null : (agentId) => navigation.openAgent({ agentId, serverId: host.id })}
+          onOpenAgent={navigation === undefined ? null : (agentId) => openSettingsAgent(navigation, host.id, agentId)}
           onClear={() => void clearRecent({ serverId: host.id }).then(invalidate)}
         />
       )}
