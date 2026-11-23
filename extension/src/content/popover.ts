@@ -1,3 +1,4 @@
+import { queuedDelivery, queuedDeliveryText } from "../shared/send-delivery";
 /**
  * The composer popover: shadow-DOM card anchored to the injected button.
  *
@@ -468,7 +469,7 @@ class Popover {
 
     // Before the isConnected check: a popover closed mid-send must still take
     // the page button out of "sending".
-    this.ctx.setButtonState?.(res.ok ? "sent" : isPairingFailure(res) ? "unpaired" : "failed");
+    this.ctx.setButtonState?.(res.ok ? (queuedDelivery(res.data) ? "queued" : "sent") : isPairingFailure(res) ? "unpaired" : "failed");
 
     if (!this.host.isConnected) return;
 
@@ -1217,7 +1218,9 @@ class Popover {
       el("span", { "data-stp-success": "" }, [
         dry
           ? "Dry run — nothing sent"
-          : reused
+          : queuedDelivery(r)
+            ? queuedDeliveryText
+            : reused
             ? followUp
               ? "Message sent to registered agent"
               : "Message sent to main agent"
@@ -1238,6 +1241,7 @@ class Popover {
     }
     route.append(document.createTextNode(routeSentence(r, this.ctx.pr.number, this.selectedCandidate(), dry)));
     box.append(route);
+    if (!dry && r.guidance?.trim()) box.append(el("div", { class: "sdetail", "data-stp-delivery-guidance": "" }, [r.guidance]));
     // Why it landed there. Skipped for a new worktree, where the route line
     // already says exactly that.
     const sent = this.selectedCandidate();
@@ -1349,7 +1353,7 @@ function routeSentence(
   const where = workspace ? ` in ${workspace}` : "";
   if (reused) {
     const agent = r.title || candidate?.mainAgent?.title || "the main agent";
-    return dry ? `Would message ${agent}${where}` : `Messaged ${agent}${where}`;
+    return dry ? `Would message ${agent}${where}` : queuedDelivery(r) ? `Message queued for ${agent}${where}` : `Messaged ${agent}${where}`;
   }
   if (r.workspaceCreated) {
     return dry

@@ -311,7 +311,7 @@ svg { width: 100%; height: 100%; flex: none; color: var(--stp-accent); }
 @keyframes stp-chip-in { from { max-width: 0; opacity: 0; padding-inline: 0; } to { max-width: 112px; opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { :host([data-stp-ws="needs"]) .chip { animation: none; } }
 :host([data-stp-style="graphite"]) .chip { margin-left: 0; }
-:host([data-stp-ws="needs"]:is([data-stp-state="sending"], [data-stp-state="sent"])) .chip { visibility: hidden; }
+:host([data-stp-ws="needs"]:is([data-stp-state="sending"], :is([data-stp-state="sent"], [data-stp-state="queued"]))) .chip { visibility: hidden; }
 /* Failed lasts until the next open, so a held gap would look broken: the chip
    steps out, and the red dot says what happened. */
 :host([data-stp-ws="needs"]:is([data-stp-state="failed"], [data-stp-state="unpaired"])) .chip { display: none; }
@@ -340,15 +340,15 @@ svg { width: 100%; height: 100%; flex: none; color: var(--stp-accent); }
 
 :host([data-stp-state="sending"]) svg { color: var(--stp-fg-muted); }
 :host([data-stp-state="sending"]) button { cursor: progress; }
-:host([data-stp-state="sent"]) svg { color: var(--stp-ok-icon); }
+:host(:is([data-stp-state="sent"], [data-stp-state="queued"])) svg { color: var(--stp-ok-icon); }
 
 .spin { animation: stp-spin 800ms linear infinite; }
 @keyframes stp-spin { to { transform: rotate(360deg); } }
-:host([data-stp-state="sent"]) .glyph { animation: stp-pop 180ms ease-out; }
+:host(:is([data-stp-state="sent"], [data-stp-state="queued"])) .glyph { animation: stp-pop 180ms ease-out; }
 @keyframes stp-pop { from { transform: scale(0.6); opacity: 0; } to { transform: none; opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
   .spin { animation-duration: 2.4s; }
-  :host([data-stp-state="sent"]) .glyph { animation: none; }
+  :host(:is([data-stp-state="sent"], [data-stp-state="queued"])) .glyph { animation: none; }
   button { transition: none; }
 }
 

@@ -2371,6 +2371,16 @@ await test("17b. Agent dropdown overrides the saved destination for each send", 
     });
     assertEq(sent.headline, "Message sent to main agent", "reuse gets a truthful success headline");
     assertEq(sent.linkText, "Open in Paseo", "the existing agent deep link is not synthetic");
+    await page.locator("[data-stp-send-another]").click(); await waitForPhase(page, "ready");
+    await bridgeConfig({ queued: true });
+    await page.locator("[data-stp-prompt]").fill("Continue after this turn");
+    await page.locator("[data-stp-send]").click(); await waitForPhase(page, "sent");
+    assertEq(await page.locator("[data-stp-success]").textContent(), "Queued for after the current turn", "queued delivery never claims sent");
+    assertEq(await page.locator("[data-stp-delivery-guidance]").textContent(), "Will continue after this turn.", "daemon guidance reaches the receipt");
+    const queuedLabel = await page.evaluate(() => document.querySelector("send-to-paseo-button").shadowRoot.querySelector(".text").textContent);
+    assertEq(queuedLabel, "Queued", "the page button also reports the queue");
+    await bridgeConfig({ queued: false });
+
     assertEq(
       (await lastRequest("/v1/send")).body.agentDispatch,
       "main",
@@ -2426,7 +2436,7 @@ await test("17b. Agent dropdown overrides the saved destination for each send", 
       `successes: ${sent.headline}; ${freshSent}`,
     ];
   } finally {
-    await bridgeConfig({ agentDispatch: "new", followUpOwner: false, followUpRouting: true });
+    await bridgeConfig({ agentDispatch: "new", followUpOwner: false, followUpRouting: true, queued: false });
   }
 });
 

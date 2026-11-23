@@ -210,7 +210,7 @@ export async function handleSend(request: SendRequest): Promise<SendResponse> {
   const prompt = normalizePrompt(request.prompt);
   const dryRun = isDryRun();
 
-  return withPaseo(async (paseo) => {
+  return withPaseo(async (paseo, sendMessage) => {
     // All four are read-only and independent. On a cold send, `gh` and the
     // daemon status are the slow inputs; starting them together avoids paying
     // their latency in series after the already-prefetched resolve.
@@ -334,6 +334,7 @@ export async function handleSend(request: SendRequest): Promise<SendResponse> {
     let recordedProvider: string;
     let recordedModeId: string | null;
     let agentCreated = true;
+    let delivery: Pick<SendResponse, "deliveryStatus" | "guidance"> = {};
     let dispatch: "new" | "main" = "new";
 
     if (mainAgent !== null) {
@@ -348,12 +349,21 @@ export async function handleSend(request: SendRequest): Promise<SendResponse> {
           // The public 0.9 SDK forwards this supported daemon option but omits
           // it from PaseoAgentSendOptions. Steering preserves a running main
           // agent's current turn instead of implicitly interrupting it.
-          await paseo.agents.ref(mainAgent).send(
+          const receipt: unknown = sendMessage
+            ? await sendMessage(mainAgent.id, composedPrompt, { activeTurnBehavior: "steer" })
+            : await paseo.agents.ref(mainAgent).send(
             composedPrompt,
             { activeTurnBehavior: "steer" } as Parameters<
               ReturnType<PaseoApi["agents"]["ref"]>["send"]
             >[1] & { activeTurnBehavior: "steer" },
           );
+          if (receipt && typeof receipt === "object") {
+            const value = receipt as { deliveryStatus?: unknown; guidance?: unknown };
+            delivery = {
+              ...(value.deliveryStatus === "queued" ? { deliveryStatus: "queued" as const } : {}),
+              ...(typeof value.guidance === "string" ? { guidance: value.guidance } : {}),
+            };
+          }
         } catch (error) {
           throw new BridgeError(
             "agent_create_failed",
@@ -444,6 +454,7 @@ export async function handleSend(request: SendRequest): Promise<SendResponse> {
       deepLink,
       title: responseTitle,
       agentCreated,
+      ...delivery,
       dispatch,
       dryRun,
     };

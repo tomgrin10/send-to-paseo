@@ -25,6 +25,7 @@ export type ButtonMode = "anchored" | "anchored-fallback" | "floating";
  *              `unauthorized`. An ×, like "couldn't reach Paseo": the next
  *              step belongs to the user, and the tooltip says which.
  * - `sending`  a send is in flight. Spinner in place of the icon, `aria-busy`.
+ * - `queued`   accepted for after the current turn; never labelled Sent.
  * - `sent`     a send succeeded. Check + "Sent" for SENT_MS, then `idle`.
  * - `failed`   the last send failed. Red dot until the popover is next opened.
  *
@@ -38,7 +39,7 @@ export type ButtonMode = "anchored" | "anchored-fallback" | "floating";
  * Exposed as `data-stp-ws` (none | working | needs | cross) and
  * `data-stp-ws-tone`.
  */
-export type ButtonState = "idle" | "unpaired" | "sending" | "sent" | "failed";
+export type ButtonState = "idle" | "unpaired" | "sending" | "sent" | "queued" | "failed";
 
 /** How long the "Sent" confirmation stays up. Same with reduced motion. */
 export const SENT_MS = 4000;
@@ -179,6 +180,7 @@ export function createButton(
     let name: string | null;
     let lines: string[];
     if (state === "sending") { name = null; lines = ["Sending…"]; }
+    else if (state === "queued") { name = null; lines = ["Queued for after the current turn"]; }
     else if (state === "sent") { name = null; lines = [`Sent to Paseo for PR #${prNumber}`]; }
     else if (state === "failed") { name = `${IDLE_LABEL}, last send failed`; lines = ["The last send failed", "Open to see why"]; }
     else if (state === "unpaired") {
@@ -212,15 +214,15 @@ export function createButton(
     }
     state = next;
     host.setAttribute("data-stp-state", next);
-    setGlyph(next === "sending" ? "spinner" : next === "sent" ? "check" : "send");
-    text.textContent = next === "sent" ? "Sent" : IDLE_LABEL;
+    setGlyph(next === "sending" ? "spinner" : (next === "sent" || next === "queued") ? "check" : "send");
+    text.textContent = next === "queued" ? "Queued" : next === "sent" ? "Sent" : IDLE_LABEL;
     if (next === "sending") button.setAttribute("aria-busy", "true");
     else button.removeAttribute("aria-busy");
     describe();
-    if (next === "sent") {
+    if (next === "sent" || next === "queued") {
       sentTimer = setTimeout(() => {
         sentTimer = undefined;
-        if (state === "sent") setState("idle");
+        if (state === "sent" || state === "queued") setState("idle");
       }, SENT_MS) as unknown as number;
     }
   };
